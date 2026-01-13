@@ -46,19 +46,18 @@ export const Sidebar = ({
 
   return (
     <>
-      {/* Toggle button when sidebar is closed - positioned in header area, no animation */}
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onToggle}
-        className={cn(
-          "fixed left-4 top-[18px] z-50 text-muted-foreground hover:text-foreground hover:bg-secondary",
-          isOpen && "opacity-0 pointer-events-none"
-        )}
-        aria-label="Open sidebar"
-      >
-        <PanelLeft className="h-5 w-5" />
-      </Button>
+      {/* Toggle button when sidebar is closed - simple immediate transition */}
+      {!isOpen && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onToggle}
+          className="fixed left-4 top-[18px] z-50 text-muted-foreground hover:text-foreground hover:bg-secondary"
+          aria-label="Open sidebar"
+        >
+          <PanelLeft className="h-5 w-5" />
+        </Button>
+      )}
 
       {/* Sidebar content - uses opacity/visibility for smooth transitions */}
       <aside
@@ -73,10 +72,10 @@ export const Sidebar = ({
             variant="ghost"
             size="icon"
             onClick={onToggle}
-            className="text-muted-foreground hover:text-foreground hover:bg-secondary"
+            className="text-muted-foreground hover:text-foreground hover:bg-secondary transition-none"
             aria-label="Close sidebar"
           >
-            <PanelLeftClose className="h-5 w-5" />
+            <PanelLeftClose className="h-5 w-5 transition-none" />
           </Button>
           <Button
             onClick={onNewChat}

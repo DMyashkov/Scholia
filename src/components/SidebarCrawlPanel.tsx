@@ -28,6 +28,7 @@ export const SidebarCrawlPanel = ({ sources, className }: SidebarCrawlPanelProps
   // Get pages for current view
   const displayPages = displaySources.flatMap(s => s.discoveredPages || []);
   const displayPagesIndexed = displaySources.reduce((sum, s) => sum + s.pagesIndexed, 0);
+  const activeDomain = activeSource?.domain;
 
   if (!hasAnySources) return null;
 
@@ -113,34 +114,43 @@ export const SidebarCrawlPanel = ({ sources, className }: SidebarCrawlPanelProps
         <ForceGraph 
           pages={displayPages}
           pagesIndexed={displayPagesIndexed}
+          domain={activeDomain}
         />
       </div>
       
-      {/* Source list - collapsed when viewing single source */}
-      {!activeSource && (
-        <div className="px-3 pb-3 space-y-1">
-          {sources.map(source => (
-            <button 
-              key={source.id}
-              onClick={() => setActiveSourceId(source.id)}
-              className="w-full flex items-center gap-2 text-[11px] px-2 py-1.5 rounded bg-background/30 hover:bg-background/50 transition-colors text-left"
-            >
-              <span 
-                className={cn(
-                  'w-1.5 h-1.5 rounded-full shrink-0',
-                  source.status === 'ready' && 'bg-green-500',
-                  source.status === 'crawling' && 'bg-primary animate-pulse',
-                  source.status === 'error' && 'bg-destructive',
-                )}
-              />
-              <span className="truncate text-muted-foreground">{source.domain}</span>
-              <span className="ml-auto text-[10px] tabular-nums">
-                {source.pagesIndexed}/{source.totalPages}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Source list - ALWAYS visible, with highlight for active source */}
+      <div className="px-3 pb-3 space-y-1">
+        {sources.map(source => (
+          <button 
+            key={source.id}
+            onClick={() => setActiveSourceId(activeSourceId === source.id ? null : source.id)}
+            className={cn(
+              "w-full flex items-center gap-2 text-[11px] px-2 py-1.5 rounded transition-colors text-left",
+              activeSourceId === source.id 
+                ? "bg-primary/10 border border-primary/20" 
+                : "bg-background/30 hover:bg-background/50"
+            )}
+          >
+            <span 
+              className={cn(
+                'w-1.5 h-1.5 rounded-full shrink-0',
+                source.status === 'ready' && 'bg-green-500',
+                source.status === 'crawling' && 'bg-primary animate-pulse',
+                source.status === 'error' && 'bg-destructive',
+              )}
+            />
+            <span className={cn(
+              "truncate",
+              activeSourceId === source.id ? "text-foreground" : "text-muted-foreground"
+            )}>
+              {source.domain}
+            </span>
+            <span className="ml-auto text-[10px] tabular-nums">
+              {source.pagesIndexed}/{source.totalPages}
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 };

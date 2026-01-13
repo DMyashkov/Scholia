@@ -9,7 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { RefreshCw, Trash2, Check, Loader2, Clock, AlertTriangle, ExternalLink, GripVertical } from 'lucide-react';
+import { RefreshCw, Trash2, Check, Loader2, Clock, AlertTriangle, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ForceGraph } from './graph';
 import { CrawlStats } from './CrawlStats';
@@ -79,7 +79,7 @@ export const SourceDrawer = ({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent 
         side="right" 
-        className="w-full sm:max-w-md bg-card border-l border-border p-0 flex flex-col"
+        className="w-full sm:max-w-md bg-card border-l border-border p-0 flex flex-col h-full"
       >
         {source ? (
           <>
@@ -106,103 +106,110 @@ export const SourceDrawer = ({
               </div>
             </SheetHeader>
 
-            <div className="flex-1 overflow-auto p-6 space-y-6">
-              {/* Crawl Stats */}
-              <CrawlStats
-                pagesDiscovered={source.totalPages}
-                pagesIndexed={source.pagesIndexed}
-                connectionsFound={connectionsFound}
-                isCrawling={source.status === 'crawling'}
-              />
-              
-              {/* Knowledge Graph */}
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium text-foreground">Page Graph</h4>
-                <ForceGraph
-                  pages={source.discoveredPages}
+            {/* Main scrollable content - flex-1 to fill remaining height */}
+            <div className="flex-1 overflow-auto min-h-0">
+              <div className="p-6 space-y-6">
+                {/* Crawl Stats */}
+                <CrawlStats
+                  pagesDiscovered={source.totalPages}
                   pagesIndexed={source.pagesIndexed}
-                  className="h-[200px]"
+                  connectionsFound={connectionsFound}
+                  isCrawling={source.status === 'crawling'}
                 />
-              </div>
+                
+                {/* Knowledge Graph */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-foreground">Page Graph</h4>
+                  <ForceGraph
+                    pages={source.discoveredPages}
+                    pagesIndexed={source.pagesIndexed}
+                    domain={source.domain}
+                    className="h-[200px]"
+                  />
+                </div>
 
-              {/* Settings summary */}
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium text-foreground">Settings</h4>
-                <div className="text-xs text-muted-foreground space-y-1 bg-background/50 rounded-lg p-3 border border-border/50">
-                  <div className="flex justify-between">
-                    <span>Depth:</span>
-                    <span className="text-foreground">{getDepthLabel(source.crawlDepth)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Include subpages:</span>
-                    <span className="text-foreground">{source.includeSubpages ? 'Yes' : 'No'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Include PDFs:</span>
-                    <span className="text-foreground">{source.includePdfs ? 'Yes' : 'No'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Same domain only:</span>
-                    <span className="text-foreground">{source.sameDomainOnly ? 'Yes' : 'No'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Last updated:</span>
-                    <span className="text-foreground">{source.lastUpdated.toLocaleString()}</span>
+                {/* Settings summary */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-foreground">Settings</h4>
+                  <div className="text-xs text-muted-foreground space-y-1 bg-background/50 rounded-lg p-3 border border-border/50">
+                    <div className="flex justify-between">
+                      <span>Depth:</span>
+                      <span className="text-foreground">{getDepthLabel(source.crawlDepth)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Include subpages:</span>
+                      <span className="text-foreground">{source.includeSubpages ? 'Yes' : 'No'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Include PDFs:</span>
+                      <span className="text-foreground">{source.includePdfs ? 'Yes' : 'No'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Same domain only:</span>
+                      <span className="text-foreground">{source.sameDomainOnly ? 'Yes' : 'No'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Last updated:</span>
+                      <span className="text-foreground">{source.lastUpdated.toLocaleString()}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Actions */}
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onRecrawl(source.id)}
-                  disabled={source.status === 'crawling'}
-                  className="flex-1 gap-2"
-                >
-                  <RefreshCw className={cn(
-                    "h-4 w-4",
-                    source.status === 'crawling' && 'animate-spin'
-                  )} />
-                  Recrawl
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    onRemove(source.id);
-                    onOpenChange(false);
-                  }}
-                  className="flex-1 gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Remove
-                </Button>
-              </div>
+                {/* Actions */}
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onRecrawl(source.id)}
+                    disabled={source.status === 'crawling'}
+                    className="flex-1 gap-2"
+                  >
+                    <RefreshCw className={cn(
+                      "h-4 w-4",
+                      source.status === 'crawling' && 'animate-spin'
+                    )} />
+                    Recrawl
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      onRemove(source.id);
+                      onOpenChange(false);
+                    }}
+                    className="flex-1 gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Remove
+                  </Button>
+                </div>
 
-              {/* Discovered pages */}
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium text-foreground">
-                  Discovered Pages ({source.discoveredPages.length})
-                </h4>
-                <ScrollArea className="h-[200px] rounded-lg border border-border/50 bg-background/30">
-                  <div className="p-2 space-y-1">
-                    {source.discoveredPages.map((page) => (
-                      <div
-                        key={page.id}
-                        className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-secondary/50 transition-colors"
-                      >
-                        {getPageStatusIcon(page.status)}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-foreground truncate">{page.title}</p>
-                          <p className="text-[11px] text-muted-foreground truncate">{page.path}</p>
-                        </div>
-                        <ExternalLink className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                {/* Discovered pages - fills remaining space */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-foreground">
+                    Discovered Pages ({source.discoveredPages.length})
+                  </h4>
+                  <div className="rounded-lg border border-border/50 bg-background/30">
+                    <ScrollArea className="h-[calc(100vh-700px)] min-h-[150px]">
+                      <div className="p-2 space-y-1">
+                        {source.discoveredPages.map((page) => (
+                          <div
+                            key={page.id}
+                            className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-secondary/50 transition-colors cursor-pointer"
+                            onClick={() => window.open(`https://${source.domain}${page.path}`, '_blank', 'noopener,noreferrer')}
+                          >
+                            {getPageStatusIcon(page.status)}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-foreground truncate">{page.title}</p>
+                              <p className="text-[11px] text-muted-foreground truncate">{page.path}</p>
+                            </div>
+                            <ExternalLink className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    </ScrollArea>
                   </div>
-                </ScrollArea>
+                </div>
               </div>
             </div>
           </>

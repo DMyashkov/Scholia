@@ -83,6 +83,10 @@ export const useGraphZoom = ({
     return transformRef.current.k;
   }, []);
 
+  const getCurrentTransform = useCallback(() => {
+    return transformRef.current;
+  }, []);
+
   // Cleanup
   useEffect(() => {
     return () => {
@@ -98,6 +102,7 @@ export const useGraphZoom = ({
     zoomOut,
     resetZoom,
     getScale,
+    getCurrentTransform,
     transform: transformRef,
   };
 };

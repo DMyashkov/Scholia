@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ExternalLink, Copy, ChevronLeft, ChevronRight, Check } from 'lucide-react';
+import { ExternalLink, Copy, ChevronLeft, ChevronRight, Check, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface SourcePreviewDrawerProps {
@@ -48,17 +48,43 @@ This is a mock preview of the source page. In a production environment, this wou
 
 The quoted snippet would be highlighted within the full context of the page, allowing you to understand the surrounding information.
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+
+Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
     `;
   };
 
   const content = getPageContent();
   
-  // Highlight the quoted snippet in the content
-  const highlightedContent = quote ? content.replace(
-    quote.snippet,
-    `<mark class="bg-primary/30 text-foreground px-1 py-0.5 rounded">${quote.snippet}</mark>`
-  ) : '';
+  // Split content into paragraphs and highlight the quoted snippet
+  const renderHighlightedContent = () => {
+    if (!quote) return null;
+    
+    const paragraphs = content.split('\n\n').filter(p => p.trim());
+    
+    return paragraphs.map((paragraph, idx) => {
+      if (paragraph.includes(quote.snippet)) {
+        // This paragraph contains the quote - highlight it
+        const parts = paragraph.split(quote.snippet);
+        return (
+          <div key={idx} className="relative pl-3 border-l-2 border-primary/60 bg-primary/5 py-2 -ml-3 pr-2 rounded-r-md">
+            <p className="text-sm text-foreground leading-relaxed">
+              {parts[0]}
+              <mark className="bg-primary/30 text-foreground px-0.5 rounded font-medium">
+                {quote.snippet}
+              </mark>
+              {parts[1]}
+            </p>
+          </div>
+        );
+      }
+      return (
+        <p key={idx} className="text-sm text-muted-foreground leading-relaxed">
+          {paragraph.trim()}
+        </p>
+      );
+    });
+  };
 
   const handleCopy = async () => {
     if (!quote) return;
@@ -79,16 +105,21 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor i
       {quote && (
       <SheetContent 
         side="right" 
-        className="w-full sm:max-w-lg bg-card border-l border-border p-0"
+        className="w-full sm:max-w-lg bg-card border-l border-border p-0 flex flex-col h-full"
       >
-        <SheetHeader className="p-6 pb-4 border-b border-border/50">
-          <div className="flex items-start justify-between gap-3">
+        {/* Header with prominent page info */}
+        <SheetHeader className="p-6 pb-4 border-b border-border/50 shrink-0">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary/10 text-primary shrink-0">
+              <FileText className="h-5 w-5" />
+            </div>
             <div className="flex-1 min-w-0">
-              <SheetTitle className="text-lg font-serif truncate">
+              <SheetTitle className="text-lg font-serif leading-tight">
                 {quote.pageTitle}
               </SheetTitle>
-              <p className="text-xs text-muted-foreground mt-1 truncate">
-                {quote.domain}{quote.pagePath}
+              <p className="text-xs text-muted-foreground mt-1 truncate flex items-center gap-1">
+                <span className="text-primary/80">{quote.domain}</span>
+                <span className="opacity-50">{quote.pagePath}</span>
               </p>
             </div>
           </div>
@@ -123,30 +154,35 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor i
           )}
         </SheetHeader>
 
-        <ScrollArea className="h-[calc(100vh-200px)]">
-          <div className="p-6 space-y-4">
-            {/* Quoted snippet highlight */}
-            <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
-              <p className="text-sm font-serif italic text-foreground leading-relaxed">
-                "{quote.snippet}"
-              </p>
+        {/* Scrollable content area - fills remaining space */}
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="p-6 space-y-5">
+            {/* Original quoted snippet - prominently highlighted */}
+            <div className="space-y-2">
+              <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                Quoted Snippet
+              </h4>
+              <div className="relative pl-4 border-l-3 border-primary bg-primary/10 rounded-r-lg py-3 pr-4">
+                <p className="text-sm font-serif italic text-foreground leading-relaxed">
+                  "{quote.snippet}"
+                </p>
+              </div>
             </div>
 
-            {/* Page content */}
-            <div className="space-y-2">
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            {/* Page content with highlighted quote */}
+            <div className="space-y-3">
+              <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                 Page Context
               </h4>
-              <div 
-                className="prose prose-sm prose-invert max-w-none text-secondary-foreground"
-                dangerouslySetInnerHTML={{ __html: highlightedContent }}
-              />
+              <div className="space-y-3">
+                {renderHighlightedContent()}
+              </div>
             </div>
           </div>
         </ScrollArea>
 
-        {/* Actions footer */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-border/50 bg-card/95 backdrop-blur-sm flex gap-2">
+        {/* Actions footer - fixed at bottom */}
+        <div className="p-4 border-t border-border/50 bg-card shrink-0 flex gap-2">
           <Button
             variant="outline"
             size="sm"

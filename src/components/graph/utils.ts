@@ -39,7 +39,8 @@ export const generateLinks = (nodes: GraphNode[]): GraphLink[] => {
 export const createGraphData = (
   pages: DiscoveredPage[], 
   pagesIndexed: number,
-  dimensions: { width: number; height: number }
+  dimensions: { width: number; height: number },
+  domain?: string
 ): GraphData => {
   const visiblePages = pages.slice(0, pagesIndexed);
   
@@ -47,6 +48,7 @@ export const createGraphData = (
     id: page.id,
     title: page.title,
     status: page.status,
+    url: domain ? `https://${domain}${page.path}` : `https://example.com${page.path}`,
     // Initial positions spread around center
     x: dimensions.width / 2 + (Math.random() - 0.5) * 100,
     y: dimensions.height / 2 + (Math.random() - 0.5) * 100,

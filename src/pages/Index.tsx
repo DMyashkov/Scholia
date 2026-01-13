@@ -165,12 +165,19 @@ const Index = () => {
           />
         </div>
         
-        {/* Resize handle */}
+        {/* Resize handle with drag indicator */}
         {sidebarOpen && (
           <div
-            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 transition-colors z-10"
+            className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-primary/30 transition-colors z-10 group"
             onMouseDown={handleResizeStart}
-          />
+          >
+            {/* Drag indicator dots */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-40 group-hover:opacity-70 transition-opacity">
+              <div className="w-0.5 h-0.5 rounded-full bg-muted-foreground" />
+              <div className="w-0.5 h-0.5 rounded-full bg-muted-foreground" />
+              <div className="w-0.5 h-0.5 rounded-full bg-muted-foreground" />
+            </div>
+          </div>
         )}
       </div>
       

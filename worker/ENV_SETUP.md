@@ -28,8 +28,8 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 
 ```env
 # Supabase Configuration
-SUPABASE_URL=https://joknhyopvvdsljfjertr.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impva25oeW9wdnZkc2xqZmplcnRyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczNjY5MjQwMCwiZXhwIjoyMDUyMjY4NDAwfQ.your_actual_key_here
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 
 # Optional: Crawler Settings (you can omit these to use defaults)
 CRAWL_INTERVAL_MS=5000

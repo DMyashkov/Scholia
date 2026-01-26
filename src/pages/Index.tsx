@@ -2,14 +2,12 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatArea } from '@/components/ChatArea';
-import { useChat } from '@/hooks/useChat';
+import { CrawlDebugPanel } from '@/components/CrawlDebugPanel';
+import { useChatDatabase } from '@/hooks/useChatDatabase';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 import { Source, CrawlDepth } from '@/types/source';
-import { generateMockPages } from '@/data/mockSourceContent';
 import { cn } from '@/lib/utils';
-
-const generateId = () => Math.random().toString(36).substring(2, 15);
 
 const extractDomain = (url: string): string => {
   try {
@@ -17,14 +15,6 @@ const extractDomain = (url: string): string => {
     return parsed.hostname.replace('www.', '');
   } catch {
     return url;
-  }
-};
-
-const getTotalPagesForDepth = (depth: CrawlDepth): number => {
-  switch (depth) {
-    case 'shallow': return 5;
-    case 'medium': return 15;
-    case 'deep': return 35;
   }
 };
 
@@ -54,7 +44,7 @@ const Index = () => {
     addSourceToConversation,
     removeSourceFromConversation,
     recrawlSource,
-  } = useChat();
+  } = useChatDatabase();
 
   // Toggle with animation
   const handleToggleSidebar = useCallback(() => {
@@ -96,29 +86,18 @@ const Index = () => {
     };
   }, [isResizing]);
 
-  const handleAddSource = useCallback((
+  const handleAddSource = useCallback(async (
     url: string,
     depth: CrawlDepth,
     options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }
   ) => {
     const domain = extractDomain(url);
-    const totalPages = getTotalPagesForDepth(depth);
-    const id = generateId();
+    const fullUrl = url.startsWith('http') ? url : `https://${url}`;
 
-    const discoveredPages = generateMockPages(domain, 'crawling');
-    
-    while (discoveredPages.length < totalPages) {
-      discoveredPages.push({
-        id: `${domain}-page-${discoveredPages.length}`,
-        title: `Page ${discoveredPages.length + 1}`,
-        path: `/page-${discoveredPages.length + 1}`,
-        status: 'pending',
-      });
-    }
-
+    // Create source object for database
     const newSource: Source = {
-      id,
-      url: url.startsWith('http') ? url : `https://${url}`,
+      id: '', // Will be set by database
+      url: fullUrl,
       domain,
       status: 'crawling',
       crawlDepth: depth,
@@ -126,12 +105,12 @@ const Index = () => {
       includePdfs: options.includePdfs,
       sameDomainOnly: options.sameDomainOnly,
       pagesIndexed: 0,
-      totalPages,
+      totalPages: 0,
       lastUpdated: new Date(),
-      discoveredPages,
+      discoveredPages: [],
     };
 
-    addSourceToConversation(newSource);
+    await addSourceToConversation(newSource);
   }, [addSourceToConversation]);
 
   if (loading) {
@@ -182,7 +161,13 @@ const Index = () => {
       </div>
       
       {/* Main Content */}
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 relative">
+        {/* Debug panel - only in dev */}
+        {import.meta.env.DEV && (
+          <div className="absolute top-4 right-4 z-50 w-64">
+            <CrawlDebugPanel conversationId={activeConversationId} />
+          </div>
+        )}
         <ChatArea
           conversation={activeConversation}
           sources={currentSources}

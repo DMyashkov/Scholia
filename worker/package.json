@@ -1,0 +1,26 @@
+{
+  "name": "scholia-worker",
+  "version": "1.0.0",
+  "description": "Crawler worker service for Scholia",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "crawl": "tsx src/index.ts",
+    "test:crawl": "tsx test-crawler.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.90.1",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2",
+    "robots-parser": "^2.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.8.0"
+  }
+}

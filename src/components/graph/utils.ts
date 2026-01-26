@@ -1,5 +1,6 @@
 import { GraphNode, GraphLink, GraphData } from './types';
 import { DiscoveredPage } from '@/types/source';
+import type { PageEdge } from '@/lib/db/types';
 
 /**
  * Generate links between nodes to create an organic graph structure
@@ -33,29 +34,88 @@ export const generateLinks = (nodes: GraphNode[]): GraphLink[] => {
 };
 
 /**
- * Convert pages to graph data structure
- * Uses stable link generation based on node IDs for consistency
+ * Convert pages and edges to graph data structure
+ * Uses real edges from database if available, otherwise generates stable links
  */
 export const createGraphData = (
   pages: DiscoveredPage[], 
   pagesIndexed: number,
   dimensions: { width: number; height: number },
-  domain?: string
+  domain?: string,
+  edges?: PageEdge[]
 ): GraphData => {
   const visiblePages = pages.slice(0, pagesIndexed);
   
-  const nodes: GraphNode[] = visiblePages.map((page, i) => ({
-    id: page.id,
-    title: page.title,
-    status: page.status,
-    url: domain ? `https://${domain}${page.path}` : `https://example.com${page.path}`,
-    // Initial positions spread around center
-    x: dimensions.width / 2 + (Math.random() - 0.5) * 100,
-    y: dimensions.height / 2 + (Math.random() - 0.5) * 100,
-  }));
+  // Create maps for edge matching: URL -> page ID and page ID -> page
+  const urlToPageId = new Map<string, string>();
+  const pageIdMap = new Map<string, DiscoveredPage>();
+  
+  visiblePages.forEach(page => {
+    // Try to extract URL from page data
+    // If page has a url field, use it; otherwise construct from domain + path
+    const pageUrl = (page as any).url || (domain ? `https://${domain}${page.path}` : `https://example.com${page.path}`);
+    urlToPageId.set(pageUrl.toLowerCase(), page.id);
+    urlToPageId.set(pageUrl, page.id); // Also add original case
+    pageIdMap.set(page.id, page);
+  });
+  
+  const nodes: GraphNode[] = visiblePages.map((page, i) => {
+    const pageUrl = (page as any).url || (domain ? `https://${domain}${page.path}` : `https://example.com${page.path}`);
+    return {
+      id: page.id,
+      title: page.title,
+      status: page.status,
+      url: pageUrl,
+      // Initial positions spread around center
+      x: dimensions.width / 2 + (Math.random() - 0.5) * 100,
+      y: dimensions.height / 2 + (Math.random() - 0.5) * 100,
+    };
+  });
 
-  // Generate stable links using seeded random based on IDs
-  const links = generateStableLinks(nodes);
+  // Use real edges if available
+  let links: GraphLink[] = [];
+  if (edges && edges.length > 0) {
+    // Filter edges to only include those between visible pages
+    const visiblePageIds = new Set(visiblePages.map(p => p.id));
+    const linkSet = new Set<string>(); // Dedupe links
+    
+    edges.forEach(edge => {
+      // Try to match by URL first, then by page ID
+      let fromPageId: string | undefined = undefined;
+      let toPageId: string | undefined = undefined;
+      
+      if (edge.from_url) {
+        fromPageId = urlToPageId.get(edge.from_url) || urlToPageId.get(edge.from_url.toLowerCase());
+      }
+      if (!fromPageId && edge.from_page_id) {
+        fromPageId = edge.from_page_id;
+      }
+      
+      if (edge.to_url) {
+        toPageId = urlToPageId.get(edge.to_url) || urlToPageId.get(edge.to_url.toLowerCase());
+      }
+      if (!toPageId && edge.to_page_id) {
+        toPageId = edge.to_page_id;
+      }
+      
+      if (fromPageId && toPageId && 
+          visiblePageIds.has(fromPageId) && 
+          visiblePageIds.has(toPageId) &&
+          fromPageId !== toPageId) {
+        const linkKey = `${fromPageId}-${toPageId}`;
+        if (!linkSet.has(linkKey)) {
+          linkSet.add(linkKey);
+          links.push({
+            source: fromPageId,
+            target: toPageId,
+          });
+        }
+      }
+    });
+  } else {
+    // Fallback to generated links if no edges available
+    links = generateStableLinks(nodes);
+  }
 
   return { nodes, links };
 };

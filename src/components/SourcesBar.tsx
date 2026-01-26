@@ -8,6 +8,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useQuery } from '@tanstack/react-query';
+import { crawlJobsApi } from '@/lib/db/crawl-jobs';
+import { useMemo } from 'react';
 
 interface SourcesBarProps {
   sources: Source[];
@@ -150,6 +153,73 @@ export const SourcesBar = ({
   onSignIn,
   className,
 }: SourcesBarProps) => {
+  // Load crawl jobs for all sources to determine real status
+  const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
+  const { data: crawlJobsData = [] } = useQuery({
+    queryKey: ['crawl-jobs-for-sources-bar', sourceIds],
+    queryFn: async () => {
+      const jobs = await Promise.all(
+        sourceIds.map(sourceId => crawlJobsApi.listBySource(sourceId))
+      );
+      return jobs.flat();
+    },
+    enabled: sourceIds.length > 0,
+  });
+  
+  // Create a map of sourceId -> crawlJob
+  const crawlJobMap = useMemo(() => {
+    const map = new Map<string, typeof crawlJobsData[0]>();
+    crawlJobsData.forEach(job => {
+      // Get the most recent job for each source
+      const existing = map.get(job.source_id);
+      if (!existing || new Date(job.created_at) > new Date(existing.created_at)) {
+        map.set(job.source_id, job);
+      }
+    });
+    return map;
+  }, [crawlJobsData]);
+  
+  // Update sources with real status from crawl jobs
+  const sourcesWithStatus = useMemo(() => {
+    return sources.map(source => {
+      const crawlJob = crawlJobMap.get(source.id);
+      
+      // Determine status from crawl job
+      // Default to 'crawling' if no crawl job yet (source was just added)
+      let status: Source['status'] = 'crawling';
+      let pagesIndexed = source.pagesIndexed;
+      let totalPages = source.totalPages;
+      
+      if (crawlJob) {
+        if (crawlJob.status === 'queued' || crawlJob.status === 'running') {
+          status = 'crawling';
+        } else if (crawlJob.status === 'failed') {
+          status = 'error';
+        } else if (crawlJob.status === 'completed') {
+          status = 'ready';
+        }
+        
+        // Use indexed_count if available, fallback to pages_indexed
+        pagesIndexed = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? source.pagesIndexed;
+        // Use max pages from crawl depth as the target (total_pages is usually null)
+        const maxPagesForDepth = source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
+        totalPages = maxPagesForDepth;
+      } else {
+        // No crawl job yet - assume it's being created, show as crawling
+        status = 'crawling';
+        pagesIndexed = 0;
+        totalPages = 0;
+      }
+      
+      return {
+        ...source,
+        status,
+        pagesIndexed,
+        totalPages,
+      };
+    });
+  }, [sources, crawlJobMap]);
+  
   if (sources.length === 0) {
     return (
       <div className={cn("sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border/30 flex items-center justify-between p-4 flex-1", className)}>
@@ -190,7 +260,7 @@ export const SourcesBar = ({
       <div className="flex-1 flex items-center gap-3 overflow-x-auto scrollbar-thin">
         <span className="text-xs text-muted-foreground font-medium shrink-0">Sources:</span>
         
-        {sources.map(source => (
+        {sourcesWithStatus.map(source => (
           <SourceChip
             key={source.id}
             source={source}

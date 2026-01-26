@@ -27,12 +27,12 @@ export const QuoteCard = ({ quote, onClick }: QuoteCardProps) => {
         
         {/* Quote text */}
         <div className="flex-1 min-w-0 space-y-3">
-          <p className="text-sm text-foreground/90 leading-relaxed line-clamp-3 font-serif italic">
+          <p className="text-base text-foreground/90 leading-relaxed line-clamp-3 font-serif italic">
             "{quote.snippet}"
           </p>
           
           {/* Source footer */}
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-semibold bg-primary/20 text-primary">
               {initial}
             </div>

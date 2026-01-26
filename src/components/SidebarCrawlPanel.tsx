@@ -1,34 +1,179 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Source } from '@/types/source';
 import { ForceGraph } from './graph';
 import { cn } from '@/lib/utils';
+import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
+import { useConversationSources } from '@/hooks/useConversationSources';
+import { crawlJobsApi } from '@/lib/db/crawl-jobs';
+import { useQuery } from '@tanstack/react-query';
 
 interface SidebarCrawlPanelProps {
   sources: Source[];
   className?: string;
+  conversationId?: string | null;
 }
 
-export const SidebarCrawlPanel = ({ sources, className }: SidebarCrawlPanelProps) => {
+interface SidebarCrawlPanelProps {
+  sources: Source[];
+  className?: string;
+  conversationId?: string | null;
+}
+
+export const SidebarCrawlPanel = ({ sources, className, conversationId }: SidebarCrawlPanelProps) => {
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
   
-  const crawlingSources = sources.filter(s => s.status === 'crawling');
+  // Load pages and edges from database
+  const { data: pages = [], isLoading: pagesLoading, error: pagesError } = useConversationPages(conversationId);
+  const { data: edges = [], isLoading: edgesLoading, error: edgesError } = useConversationPageEdges(conversationId);
+  
+  // Load conversation sources
+  const { data: conversationSources = [] } = useConversationSources(conversationId);
+  
+  // Load crawl jobs for all sources
+  const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
+  const { data: crawlJobsData = [] } = useQuery({
+    queryKey: ['crawl-jobs-for-sources', sourceIds],
+    queryFn: async () => {
+      const jobs = await Promise.all(
+        sourceIds.map(sourceId => crawlJobsApi.listBySource(sourceId))
+      );
+      return jobs.flat();
+    },
+    enabled: sourceIds.length > 0,
+  });
+  
+  // Create a map of sourceId -> crawlJob
+  const crawlJobMap = useMemo(() => {
+    const map = new Map<string, typeof crawlJobsData[0]>();
+    crawlJobsData.forEach(job => {
+      // Get the most recent job for each source
+      const existing = map.get(job.source_id);
+      if (!existing || new Date(job.created_at) > new Date(existing.created_at)) {
+        map.set(job.source_id, job);
+      }
+    });
+    return map;
+  }, [crawlJobsData]);
+  
+  // Determine status and stats from crawl jobs and pages
+  const sourcesWithStatus = useMemo(() => {
+    return sources.map(source => {
+      const sourcePages = pages.filter(p => p.source_id === source.id);
+      const crawlJob = crawlJobMap.get(source.id);
+      
+      // Determine status from crawl job
+      // Default to 'crawling' if no crawl job yet (source was just added)
+      let status: Source['status'] = 'crawling';
+      let pagesIndexed = sourcePages.length;
+      let totalPages = sourcePages.length;
+      
+      if (crawlJob) {
+        if (crawlJob.status === 'queued' || crawlJob.status === 'running') {
+          status = 'crawling';
+        } else if (crawlJob.status === 'failed') {
+          status = 'error';
+        } else if (crawlJob.status === 'completed') {
+          status = 'ready';
+        }
+        
+        // Use indexed_count if available, fallback to pages_indexed
+        pagesIndexed = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? sourcePages.length;
+        // Use max pages from crawl depth as the target (total_pages is usually null)
+        const maxPagesForDepth = source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
+        // Always use maxPagesForDepth as the target, not total_pages (which is usually null)
+        totalPages = maxPagesForDepth;
+      } else {
+        // No crawl job yet - assume it's being created, show as crawling
+        status = 'crawling';
+        pagesIndexed = 0;
+        totalPages = 0;
+      }
+      
+      return {
+        ...source,
+        status,
+        pagesIndexed,
+        totalPages,
+        discoveredPages: sourcePages.map(p => ({
+          id: p.id,
+          title: p.title || 'Untitled',
+          path: p.path,
+          url: p.url,
+          status: (p.status || 'indexed') as 'indexed' | 'discovered' | 'failed',
+        })),
+      };
+    });
+  }, [sources, crawlJobMap, pages]);
+  
+  const crawlingSources = sourcesWithStatus.filter(s => s.status === 'crawling');
   
   // Get active source or show all
-  const activeSource = activeSourceId ? sources.find(s => s.id === activeSourceId) : null;
-  const displaySources = activeSource ? [activeSource] : sources;
+  const activeSource = activeSourceId ? sourcesWithStatus.find(s => s.id === activeSourceId) : null;
+  const displaySources = activeSource ? [activeSource] : sourcesWithStatus;
   
-  // Aggregate stats
-  const totalDiscovered = displaySources.reduce((sum, s) => sum + (s.discoveredPages?.length || s.totalPages), 0);
+  // Aggregate stats - use discovered_count from crawl jobs
+  const totalDiscovered = displaySources.reduce((sum, s) => {
+    const crawlJob = crawlJobMap.get(s.id);
+    const discoveredCount = crawlJob ? ((crawlJob as any).discovered_count ?? 0) : 0;
+    return sum + discoveredCount;
+  }, 0);
   const totalIndexed = displaySources.reduce((sum, s) => sum + s.pagesIndexed, 0);
-  const totalConnections = Math.floor(totalIndexed * 1.3);
+  const totalConnections = edges.length;
   
   const isCrawling = crawlingSources.length > 0;
   const hasAnySources = sources.length > 0;
 
-  // Get pages for current view
-  const displayPages = displaySources.flatMap(s => s.discoveredPages || []);
-  const displayPagesIndexed = displaySources.reduce((sum, s) => sum + s.pagesIndexed, 0);
+  // Get pages for current view - use pages directly from database (already filtered by conversation and status='indexed')
+  // Filter by active source if one is selected, then convert to DiscoveredPage format
+  const displayPages = (activeSourceId 
+    ? pages.filter(p => p.source_id === activeSourceId)
+    : pages
+  ).map(p => ({
+    id: p.id,
+    title: p.title || 'Untitled',
+    path: p.path,
+    status: (p.status || 'indexed') as 'indexed' | 'crawling' | 'pending' | 'error',
+    url: p.url, // Include url for edge matching
+  }));
+  
+  // Use actual page count from database, but fallback to crawl job indexed_count if pages haven't loaded yet
+  // This prevents showing "discovering pages" forever when crawl is complete but pages query is slow
+  const displayPagesIndexed = Math.max(
+    displayPages.length,
+    displaySources.reduce((sum, s) => {
+      const crawlJob = crawlJobMap.get(s.id);
+      const jobIndexedCount = crawlJob ? ((crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? 0) : 0;
+      return sum + jobIndexedCount;
+    }, 0)
+  );
   const activeDomain = activeSource?.domain;
+  
+  // Debug logging (after all variables are defined)
+  if (import.meta.env.DEV) {
+    const debugInfo = {
+      conversationId,
+      sourcesCount: sources.length,
+      sourcesWithStatusCount: sourcesWithStatus.length,
+      pagesCount: pages.length,
+      pagesLoading,
+      pagesError: pagesError?.message || null,
+      edgesCount: edges.length,
+      edgesLoading,
+      edgesError: edgesError?.message || null,
+      totalDiscovered,
+      totalIndexed,
+      displayPagesCount: displayPages.length,
+      displayPagesIndexed,
+      crawlJobsCount: crawlJobsData.length,
+      crawlJobIndexedCounts: displaySources.map(s => {
+        const job = crawlJobMap.get(s.id);
+        return { sourceId: s.id, indexed: (job as any)?.indexed_count ?? job?.pages_indexed ?? 0 };
+      }),
+      firstPage: pages[0] ? { id: pages[0].id, url: pages[0].url, status: pages[0].status, conversation_id: pages[0].conversation_id } : null,
+    };
+    console.log('📊 SidebarCrawlPanel Debug:', JSON.stringify(debugInfo, null, 2));
+    console.log('📊 SidebarCrawlPanel Debug (expanded):', debugInfo);
+  }
 
   if (!hasAnySources) return null;
 
@@ -54,10 +199,10 @@ export const SidebarCrawlPanel = ({ sources, className }: SidebarCrawlPanelProps
             <button
               onClick={() => setActiveSourceId(null)}
               className={cn(
-                'px-2 py-0.5 text-[9px] rounded-full transition-colors',
+                'px-2 py-1 text-[10px] rounded-full box-border h-6',
                 !activeSourceId 
-                  ? 'bg-primary text-primary-foreground' 
-                  : 'bg-secondary/50 text-muted-foreground hover:text-foreground'
+                  ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-inset' 
+                  : 'bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary/70'
               )}
             >
               All
@@ -67,10 +212,10 @@ export const SidebarCrawlPanel = ({ sources, className }: SidebarCrawlPanelProps
                 key={source.id}
                 onClick={() => setActiveSourceId(source.id)}
                 className={cn(
-                  'px-2 py-0.5 text-[9px] rounded-full transition-colors truncate max-w-[80px]',
+                  'px-2 py-1 text-[10px] rounded-full truncate max-w-[80px] box-border h-6',
                   activeSourceId === source.id 
-                    ? 'bg-primary text-primary-foreground' 
-                    : 'bg-secondary/50 text-muted-foreground hover:text-foreground'
+                    ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-inset' 
+                    : 'bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary/70'
                 )}
               >
                 {source.domain}
@@ -115,19 +260,20 @@ export const SidebarCrawlPanel = ({ sources, className }: SidebarCrawlPanelProps
           pages={displayPages}
           pagesIndexed={displayPagesIndexed}
           domain={activeDomain}
+          edges={edges}
         />
       </div>
       
       {/* Source list - ALWAYS visible, with highlight for active source */}
       <div className="px-3 pb-3 space-y-1">
-        {sources.map(source => (
+        {sourcesWithStatus.map(source => (
           <button 
             key={source.id}
             onClick={() => setActiveSourceId(activeSourceId === source.id ? null : source.id)}
             className={cn(
-              "w-full flex items-center gap-2 text-[11px] px-2 py-1.5 rounded transition-colors text-left",
+              "w-full flex items-center gap-2 text-[11px] px-2 py-1.5 rounded text-left box-border h-8",
               activeSourceId === source.id 
-                ? "bg-primary/10 border border-primary/20" 
+                ? "bg-primary/10 ring-1 ring-inset ring-primary/30" 
                 : "bg-background/30 hover:bg-background/50"
             )}
           >

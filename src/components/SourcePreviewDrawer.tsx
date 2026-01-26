@@ -56,30 +56,35 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 
   const content = getPageContent();
   
-  // Split content into paragraphs and highlight the quoted snippet
+  // Split content into paragraphs and highlight the quoted snippet within context
   const renderHighlightedContent = () => {
     if (!quote) return null;
     
     const paragraphs = content.split('\n\n').filter(p => p.trim());
     
     return paragraphs.map((paragraph, idx) => {
-      if (paragraph.includes(quote.snippet)) {
-        // This paragraph contains the quote - highlight it
-        const parts = paragraph.split(quote.snippet);
+      // Check if this paragraph contains the quote snippet
+      const snippetIndex = paragraph.indexOf(quote.snippet);
+      
+      if (snippetIndex !== -1) {
+        // This paragraph contains the quote - highlight the exact words
+        const before = paragraph.slice(0, snippetIndex);
+        const after = paragraph.slice(snippetIndex + quote.snippet.length);
+        
         return (
-          <div key={idx} className="relative pl-3 border-l-2 border-primary/60 bg-primary/5 py-2 -ml-3 pr-2 rounded-r-md">
-            <p className="text-sm text-foreground leading-relaxed">
-              {parts[0]}
-              <mark className="bg-primary/30 text-foreground px-0.5 rounded font-medium">
+          <div key={idx} className="relative pl-4 border-l-4 border-primary bg-primary/5 py-3 pr-3 -ml-2 rounded-r-lg">
+            <p className="text-base text-foreground leading-relaxed">
+              <span className="text-foreground/70">{before}</span>
+              <mark className="bg-yellow-400/40 dark:bg-yellow-500/30 text-foreground px-1 py-0.5 rounded font-medium border-b-2 border-yellow-500/60">
                 {quote.snippet}
               </mark>
-              {parts[1]}
+              <span className="text-foreground/70">{after}</span>
             </p>
           </div>
         );
       }
       return (
-        <p key={idx} className="text-sm text-muted-foreground leading-relaxed">
+        <p key={idx} className="text-base text-muted-foreground/80 leading-relaxed">
           {paragraph.trim()}
         </p>
       );
@@ -105,7 +110,7 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
       {quote && (
       <SheetContent 
         side="right" 
-        className="w-full sm:max-w-lg bg-card border-l border-border p-0 flex flex-col h-full"
+        className="w-full sm:max-w-lg bg-card border-l border-border p-0 flex flex-col h-[100dvh] max-h-[100dvh] overflow-hidden"
       >
         {/* Header with prominent page info */}
         <SheetHeader className="p-6 pb-4 border-b border-border/50 shrink-0">
@@ -159,11 +164,11 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
           <div className="p-6 space-y-5">
             {/* Original quoted snippet - prominently highlighted */}
             <div className="space-y-2">
-              <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Quoted Snippet
               </h4>
-              <div className="relative pl-4 border-l-3 border-primary bg-primary/10 rounded-r-lg py-3 pr-4">
-                <p className="text-sm font-serif italic text-foreground leading-relaxed">
+              <div className="relative pl-4 border-l-4 border-primary bg-primary/10 rounded-r-lg py-3 pr-4">
+                <p className="text-base font-serif italic text-foreground leading-relaxed">
                   "{quote.snippet}"
                 </p>
               </div>
@@ -171,10 +176,10 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 
             {/* Page content with highlighted quote */}
             <div className="space-y-3">
-              <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Page Context
               </h4>
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {renderHighlightedContent()}
               </div>
             </div>

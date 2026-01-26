@@ -5,6 +5,17 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { UserMenu } from '@/components/UserMenu';
 import { SidebarCrawlPanel } from '@/components/SidebarCrawlPanel';
 import { cn } from '@/lib/utils';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { useState } from 'react';
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -147,7 +158,7 @@ export const Sidebar = ({
         </ScrollArea>
 
         {/* Crawl Panel - shows when there are sources */}
-        <SidebarCrawlPanel sources={currentSources} />
+        <SidebarCrawlPanel sources={currentSources} conversationId={activeConversationId} />
 
         {/* Footer with User Menu */}
         <UserMenu />
@@ -169,59 +180,95 @@ const ConversationItem = ({
   onSelect,
   onDelete,
 }: ConversationItemProps) => {
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowDeleteDialog(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    try {
+      await onDelete();
+      setShowDeleteDialog(false);
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+      // Keep dialog open on error so user can try again
+    }
+  };
+
   return (
-    <div
-      className={cn(
-        'group flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors',
-        isActive
-          ? 'bg-secondary text-foreground'
-          : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-      )}
-      onClick={onSelect}
-    >
-      <MessageSquare className="h-4 w-4 shrink-0" />
-      <span className="flex-1 truncate text-sm">{conversation.title}</span>
-      {/* Source favicons - stacked with overflow */}
-      {conversation.sources && conversation.sources.length > 0 && (
-        <div className="flex items-center -space-x-1.5 shrink-0">
-          {conversation.sources.slice(0, 3).map((source, i) => (
-            <div 
-              key={source.id}
-              className="w-4 h-4 rounded-full bg-secondary border border-background flex items-center justify-center overflow-hidden"
-              style={{ zIndex: 3 - i }}
-            >
-              {source.favicon ? (
-                <img src={source.favicon} alt="" className="w-3 h-3" />
-              ) : (
-                <span className="text-[8px] font-medium text-muted-foreground uppercase">
-                  {source.domain.charAt(0)}
-                </span>
-              )}
-            </div>
-          ))}
-          {conversation.sources.length > 3 && (
-            <div 
-              className="w-4 h-4 rounded-full bg-muted border border-background flex items-center justify-center"
-              style={{ zIndex: 0 }}
-            >
-              <span className="text-[7px] font-medium text-muted-foreground">
-                +{conversation.sources.length - 3}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
+    <>
+      <div
+        className={cn(
+          'group flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors',
+          isActive
+            ? 'bg-secondary text-foreground'
+            : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+        )}
+        onClick={onSelect}
       >
-        <Trash2 className="h-3.5 w-3.5" />
-      </Button>
-    </div>
+        <MessageSquare className="h-4 w-4 shrink-0" />
+        <span className="flex-1 truncate text-sm">{conversation.title}</span>
+        {/* Source favicons - stacked with overflow */}
+        {conversation.sources && conversation.sources.length > 0 && (
+          <div className="flex items-center -space-x-1.5 shrink-0">
+            {conversation.sources.slice(0, 3).map((source, i) => (
+              <div 
+                key={source.id}
+                className="w-4 h-4 rounded-full bg-secondary border border-background flex items-center justify-center overflow-hidden"
+                style={{ zIndex: 3 - i }}
+              >
+                {source.favicon ? (
+                  <img src={source.favicon} alt="" className="w-3 h-3" />
+                ) : (
+                  <span className="text-[8px] font-medium text-muted-foreground uppercase">
+                    {source.domain.charAt(0)}
+                  </span>
+                )}
+              </div>
+            ))}
+            {conversation.sources.length > 3 && (
+              <div 
+                className="w-4 h-4 rounded-full bg-muted border border-background flex items-center justify-center"
+                style={{ zIndex: 0 }}
+              >
+                <span className="text-[7px] font-medium text-muted-foreground">
+                  +{conversation.sources.length - 3}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+          onClick={handleDeleteClick}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete conversation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{conversation.title}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 };

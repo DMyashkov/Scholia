@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "worker:crawl": "cd worker && npm run crawl",
-    "dev:all": "concurrently \"npm run dev\" \"npm run worker:crawl\""
+    "dev:all": "concurrently -n \"SPA,WORKER\" -c \"blue,green\" \"npm run dev\" \"npm run worker:crawl\""
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

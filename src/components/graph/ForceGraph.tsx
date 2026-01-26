@@ -392,23 +392,12 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
         </button>
       </div>
       
-      {/* Empty state with wave gradient animation - covers full graph area */}
-      {/* Only show "discovering pages" if pagesIndexed is 0 AND we have pages to show (meaning crawl is in progress) */}
-      {/* If pagesIndexed > 0 but pages.length === 0, it means pages are loading, so don't show this */}
-      {pagesIndexed === 0 && pages.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground overflow-hidden pointer-events-none">
-          {/* Full-area wave gradient background */}
-          <div 
-            className="absolute inset-0 animate-shimmer opacity-20"
-            style={{
-              background: 'linear-gradient(90deg, transparent 0%, hsl(var(--primary) / 0.15) 25%, hsl(var(--primary) / 0.25) 50%, hsl(var(--primary) / 0.15) 75%, transparent 100%)',
-              backgroundSize: '200% 100%',
-            }}
-          />
-          {/* Loading text overlay */}
-          <div className="relative z-10 flex items-center gap-1.5 bg-background/80 px-3 py-1.5 rounded-full border border-border/50 backdrop-blur-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            <span>Discovering pages...</span>
+      {/* Empty state - show message when no pages */}
+      {pages.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+          <div className="text-center px-4">
+            <p className="text-sm">No sources added yet</p>
+            <p className="text-xs mt-1 opacity-70">Add a source to view the graph</p>
           </div>
         </div>
       )}

@@ -34,6 +34,7 @@ export interface Source {
 export interface Page {
   id: string;
   source_id: string;
+  conversation_id: string; // Added - required for isolated graphs
   url: string;
   title: string | null;
   path: string;
@@ -47,8 +48,11 @@ export interface Page {
 export interface PageEdge {
   id: string;
   source_id: string;
-  from_page_id: string;
-  to_page_id: string;
+  conversation_id: string; // Added - required for isolated graphs
+  from_url: string; // Changed from from_page_id
+  to_url: string; // Changed from to_page_id
+  from_page_id?: string | null; // Optional now
+  to_page_id?: string | null; // Optional now
   created_at: string;
   owner_id: string | null;
 }

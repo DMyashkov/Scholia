@@ -78,7 +78,8 @@ export const conversationSourcesApi = {
       );
 
       if (!activeJob) {
-        await crawlJobsApi.create({
+        console.log(`📋 Creating crawl job with conversation_id: ${conversationId.substring(0, 8)}... for source: ${sourceId.substring(0, 8)}...`);
+        const newJob = await crawlJobsApi.create({
           source_id: sourceId,
           conversation_id: conversationId, // Store conversation_id in crawl_job
           status: 'queued',
@@ -92,6 +93,7 @@ export const conversationSourcesApi = {
           completed_at: null,
           last_activity_at: null,
         });
+        console.log(`✅ Created crawl job ${newJob.id.substring(0, 8)}... with conversation_id: ${newJob.conversation_id?.substring(0, 8) || 'NULL'}...`);
       }
     }
 

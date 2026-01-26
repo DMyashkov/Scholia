@@ -10,6 +10,7 @@ console.log(`⚙️  Max concurrent jobs: ${MAX_CONCURRENT_JOBS}`);
 let activeJobs = new Set<string>();
 
 async function main() {
+  let pollCount = 0;
   while (true) {
     try {
       // Only claim new jobs if we have capacity
@@ -17,19 +18,24 @@ async function main() {
         const job = await claimJob();
         
         if (!job) {
+          // Log occasionally when no jobs found
+          if (pollCount % 10 === 0) {
+            console.log(`🔍 No queued jobs found (poll #${pollCount})`);
+          }
           break; // No jobs available
         }
 
         // Process job asynchronously
         activeJobs.add(job.id);
+        console.log(`🚀 Starting job ${job.id.substring(0, 8)}... (conversation: ${job.conversation_id?.substring(0, 8) || 'NULL'}...)`);
         processCrawlJob(job.id)
           .then(() => {
             activeJobs.delete(job.id);
-            console.log(`✅ Job ${job.id} completed, active jobs: ${activeJobs.size}`);
+            console.log(`✅ Job ${job.id.substring(0, 8)}... completed, active jobs: ${activeJobs.size}`);
           })
           .catch((error) => {
             activeJobs.delete(job.id);
-            console.error(`❌ Job ${job.id} failed:`, error);
+            console.error(`❌ Job ${job.id.substring(0, 8)}... failed:`, error);
           });
       }
 
@@ -37,6 +43,7 @@ async function main() {
         console.log(`🔄 ${activeJobs.size} job(s) in progress...`);
       }
 
+      pollCount++;
       // Wait before next poll
       await new Promise(resolve => setTimeout(resolve, CRAWL_INTERVAL_MS));
     } catch (error) {

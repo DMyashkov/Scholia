@@ -26,6 +26,19 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
   const { data: pages = [], isLoading: pagesLoading, error: pagesError } = useConversationPages(conversationId);
   const { data: edges = [], isLoading: edgesLoading, error: edgesError } = useConversationPageEdges(conversationId);
   
+  // Debug: Log edges being fetched
+  if (import.meta.env.DEV && conversationId) {
+    console.log(`🔗 SidebarCrawlPanel: Fetched ${edges.length} edges for conversation ${conversationId.substring(0, 8)}...`, {
+      edgesLoading,
+      edgesError: edgesError?.message,
+      sampleEdges: edges.slice(0, 3).map(e => ({
+        from: e.from_url?.substring(0, 40),
+        to: e.to_url?.substring(0, 40),
+        conversation_id: e.conversation_id?.substring(0, 8),
+      })),
+    });
+  }
+  
   // Load conversation sources
   const { data: conversationSources = [] } = useConversationSources(conversationId);
   
@@ -125,7 +138,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
 
   // Get pages for current view - use pages directly from database (already filtered by conversation and status='indexed')
   // Filter by active source if one is selected, then convert to DiscoveredPage format
-  const displayPages = (activeSourceId 
+  let displayPages = (activeSourceId 
     ? pages.filter(p => p.source_id === activeSourceId)
     : pages
   ).map(p => ({
@@ -135,6 +148,56 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
     status: (p.status || 'indexed') as 'indexed' | 'crawling' | 'pending' | 'error',
     url: p.url, // Include url for edge matching
   }));
+  
+  // Sort pages: starting page (source URL) first, then by created_at
+  if (displaySources.length > 0) {
+    const startingSource = displaySources[0];
+    const startingUrl = startingSource.url;
+    // Normalize URLs for comparison
+    const normalizeForSort = (url: string) => {
+      try {
+        const u = new URL(url);
+        u.hash = '';
+        u.search = '';
+        if (u.pathname !== '/' && u.pathname.endsWith('/')) {
+          u.pathname = u.pathname.slice(0, -1);
+        }
+        return u.toString().toLowerCase();
+      } catch {
+        return url.toLowerCase();
+      }
+    };
+    const normalizedStartingUrl = normalizeForSort(startingUrl);
+    
+    displayPages.sort((a, b) => {
+      const aUrl = normalizeForSort(a.url || '');
+      const bUrl = normalizeForSort(b.url || '');
+      const aIsStart = aUrl === normalizedStartingUrl;
+      const bIsStart = bUrl === normalizedStartingUrl;
+      if (aIsStart && !bIsStart) return -1;
+      if (!aIsStart && bIsStart) return 1;
+      return 0; // Keep original order for others
+    });
+  }
+  
+  // If crawling but no pages yet, show the starting page immediately as a placeholder
+  if (isCrawling && displayPages.length === 0 && displaySources.length > 0) {
+    const startingSource = displaySources[0];
+    const sourceUrl = startingSource.url;
+    try {
+      const urlObj = new URL(sourceUrl);
+      const path = urlObj.pathname || '/';
+      displayPages = [{
+        id: `placeholder-${startingSource.id}`,
+        title: startingSource.domain || urlObj.hostname,
+        path: path,
+        status: 'crawling' as const,
+        url: sourceUrl,
+      }];
+    } catch (e) {
+      // Invalid URL, skip placeholder
+    }
+  }
   
   // Use actual page count from database, but fallback to crawl job indexed_count if pages haven't loaded yet
   // This prevents showing "discovering pages" forever when crawl is complete but pages query is slow
@@ -148,31 +211,66 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
   );
   const activeDomain = activeSource?.domain;
   
-  // Debug logging (after all variables are defined)
+  // Debug logging (after all variables are defined) - only log when something changes or there's an issue
   if (import.meta.env.DEV) {
-    const debugInfo = {
-      conversationId,
-      sourcesCount: sources.length,
-      sourcesWithStatusCount: sourcesWithStatus.length,
-      pagesCount: pages.length,
-      pagesLoading,
-      pagesError: pagesError?.message || null,
-      edgesCount: edges.length,
-      edgesLoading,
-      edgesError: edgesError?.message || null,
-      totalDiscovered,
-      totalIndexed,
-      displayPagesCount: displayPages.length,
-      displayPagesIndexed,
-      crawlJobsCount: crawlJobsData.length,
-      crawlJobIndexedCounts: displaySources.map(s => {
-        const job = crawlJobMap.get(s.id);
-        return { sourceId: s.id, indexed: (job as any)?.indexed_count ?? job?.pages_indexed ?? 0 };
-      }),
-      firstPage: pages[0] ? { id: pages[0].id, url: pages[0].url, status: pages[0].status, conversation_id: pages[0].conversation_id } : null,
-    };
-    console.log('📊 SidebarCrawlPanel Debug:', JSON.stringify(debugInfo, null, 2));
-    console.log('📊 SidebarCrawlPanel Debug (expanded):', debugInfo);
+    const hasIssues = 
+      pagesError || 
+      edgesError || 
+      (conversationId && sources.length === 0 && !pagesLoading) ||
+      (conversationId && isCrawling && totalIndexed === 0 && totalDiscovered > 0);
+    
+    // Only log if there are issues or significant state changes
+    if (hasIssues || Math.random() < 0.1) { // Log 10% of the time to reduce spam
+      const debugInfo = {
+        '🔍 State': {
+          conversationId: conversationId?.substring(0, 8) + '...' || 'null',
+          hasActiveConversation: !!conversationId,
+        },
+        '📊 Sources': {
+          total: sources.length,
+          withStatus: sourcesWithStatus.length,
+          crawling: crawlingSources.length,
+          activeSourceId: activeSourceId?.substring(0, 8) + '...' || null,
+        },
+        '📄 Pages': {
+          inDB: pages.length,
+          display: displayPages.length,
+          indexed: displayPagesIndexed,
+          loading: pagesLoading,
+          error: pagesError?.message || null,
+        },
+        '🔗 Edges': {
+          count: edges.length,
+          loading: edgesLoading,
+          error: edgesError?.message || null,
+        },
+        '📈 Progress': {
+          discovered: totalDiscovered,
+          indexed: totalIndexed,
+          connections: edges.length,
+        },
+        '⚙️ Crawl Jobs': {
+          total: crawlJobsData.length,
+          bySource: displaySources.map(s => {
+            const job = crawlJobMap.get(s.id);
+            const indexed = (job as any)?.indexed_count ?? job?.pages_indexed ?? 0;
+            const status = job?.status || 'unknown';
+            return { 
+              source: s.id.substring(0, 8) + '...', 
+              indexed, 
+              status,
+              discovered: (job as any)?.discovered_count ?? 0,
+            };
+          }),
+        },
+      };
+      
+      if (hasIssues) {
+        console.warn('⚠️ SidebarCrawlPanel Issues:', debugInfo);
+      } else {
+        console.log('📊 SidebarCrawlPanel:', debugInfo);
+      }
+    }
   }
 
   if (!hasAnySources) return null;
@@ -242,12 +340,12 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
           />
         </div>
         
-        {/* Progress bar */}
-        {isCrawling && totalDiscovered > 0 && !activeSource && (
+        {/* Progress bar - use totalPages (target) instead of totalDiscovered */}
+        {isCrawling && !activeSource && (
           <div className="relative h-0.5 bg-border/30 rounded-full overflow-hidden">
             <div 
               className="absolute inset-y-0 left-0 bg-primary/60 rounded-full transition-all duration-300"
-              style={{ width: `${(totalIndexed / totalDiscovered) * 100}%` }}
+              style={{ width: `${Math.min(100, (totalIndexed / (displaySources.reduce((sum, s) => sum + s.totalPages, 0) || 1)) * 100)}%` }}
             />
             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent animate-shimmer" />
           </div>
@@ -260,7 +358,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
           pages={displayPages}
           pagesIndexed={displayPagesIndexed}
           domain={activeDomain}
-          edges={edges}
+          edges={edges || []} // Ensure edges is always an array, never undefined
         />
       </div>
       

@@ -27,20 +27,31 @@ export const pagesApi = {
       throw error;
     }
     
-    // Debug: Also check all pages (any status) for this conversation
-    if (import.meta.env.DEV) {
+    // Debug: Only log if there's an issue (no pages when expected)
+    if (import.meta.env.DEV && data?.length === 0) {
       const { data: allPages } = await supabase
         .from('pages')
-        .select('id, status, conversation_id')
-        .eq('conversation_id', conversationId);
-      console.log(`📄 Fetched ${data?.length || 0} indexed pages for conversation ${conversationId}`);
-      console.log(`📄 Total pages (any status) for conversation ${conversationId}: ${allPages?.length || 0}`);
+        .select('id, status, conversation_id, owner_id, source_id')
+        .eq('conversation_id', conversationId)
+        .limit(5);
+      
       if (allPages && allPages.length > 0) {
-        const statusCounts = allPages.reduce((acc: Record<string, number>, p: any) => {
-          acc[p.status] = (acc[p.status] || 0) + 1;
-          return acc;
-        }, {});
-        console.log(`📄 Status breakdown:`, statusCounts);
+        console.warn(`⚠️ Found ${allPages.length} pages for conversation but none with status='indexed':`, {
+          conversationId: conversationId.substring(0, 8) + '...',
+          pages: allPages.map(p => ({ status: p.status, source: p.source_id?.substring(0, 8) })),
+        });
+      } else {
+        // Check if pages exist at all
+        const { data: anyPages } = await supabase
+          .from('pages')
+          .select('conversation_id, source_id')
+          .limit(3);
+        console.warn(`⚠️ No pages found for conversation ${conversationId.substring(0, 8)}...`, {
+          totalPagesInDB: anyPages?.length || 0,
+          sampleConversationIds: anyPages?.map(p => p.conversation_id?.substring(0, 8) + '...') || [],
+          fullConversationId: conversationId,
+          sampleFullIds: anyPages?.map(p => p.conversation_id) || [],
+        });
       }
     }
     
@@ -77,8 +88,31 @@ export const pageEdgesApi = {
       .select('*')
       .eq('conversation_id', conversationId);
 
-    if (error) throw error;
-    return data as PageEdge[];
+    if (error) {
+      console.error('❌ Error fetching edges by conversation:', error);
+      throw error;
+    }
+    
+    // Debug: Log if no edges found
+    if (import.meta.env.DEV && data?.length === 0) {
+      // Check if edges exist at all for this conversation
+      const { data: anyEdges } = await supabase
+        .from('page_edges')
+        .select('conversation_id, source_id, from_url, to_url')
+        .limit(5);
+      console.warn(`⚠️ No edges found for conversation ${conversationId.substring(0, 8)}...`, {
+        totalEdgesInDB: anyEdges?.length || 0,
+        sampleConversationIds: anyEdges?.map(e => e.conversation_id?.substring(0, 8) + '...') || [],
+        fullConversationId: conversationId,
+        sampleEdges: anyEdges?.slice(0, 2).map(e => ({
+          conversation_id: e.conversation_id?.substring(0, 8),
+          from: e.from_url?.substring(0, 40),
+          to: e.to_url?.substring(0, 40),
+        })) || [],
+      });
+    }
+    
+    return (data || []) as PageEdge[];
   },
 };
 

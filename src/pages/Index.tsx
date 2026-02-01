@@ -2,7 +2,6 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatArea } from '@/components/ChatArea';
-import { CrawlDebugPanel } from '@/components/CrawlDebugPanel';
 import { useChatDatabase } from '@/hooks/useChatDatabase';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
@@ -162,12 +161,6 @@ const Index = () => {
       
       {/* Main Content */}
       <div className="flex-1 min-w-0 relative">
-        {/* Debug panel - only in dev */}
-        {import.meta.env.DEV && (
-          <div className="absolute top-4 right-4 z-50 w-64">
-            <CrawlDebugPanel conversationId={activeConversationId} />
-          </div>
-        )}
         <ChatArea
           conversation={activeConversation}
           sources={currentSources}

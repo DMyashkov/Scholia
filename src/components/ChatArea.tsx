@@ -170,6 +170,7 @@ export const ChatArea = ({
 
       <SourceDrawer
         source={selectedSource}
+        conversationId={conversation?.id || null}
         open={sourceDrawerOpen}
         onOpenChange={setSourceDrawerOpen}
         onRecrawl={onRecrawlSource}

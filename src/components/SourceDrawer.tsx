@@ -14,9 +14,14 @@ import { cn } from '@/lib/utils';
 import { ForceGraph } from './graph';
 import { CrawlStats } from './CrawlStats';
 import { useMemo } from 'react';
+import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
+import { crawlJobsApi } from '@/lib/db/crawl-jobs';
+import { useQuery } from '@tanstack/react-query';
+// MAX_PAGES defined inline
 
 interface SourceDrawerProps {
   source: Source | null;
+  conversationId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onRecrawl: (sourceId: string) => void;
@@ -62,6 +67,7 @@ const getDepthLabel = (depth: string) => {
 
 export const SourceDrawer = ({
   source,
+  conversationId,
   open,
   onOpenChange,
   onRecrawl,
@@ -69,11 +75,81 @@ export const SourceDrawer = ({
 }: SourceDrawerProps) => {
   const initial = source?.domain.charAt(0).toUpperCase() || '';
   
-  // Calculate connection count (mock based on indexed pages)
-  const connectionsFound = useMemo(() => {
+  // Fetch real pages and edges for this conversation
+  const { data: allPages = [], isLoading: pagesLoading } = useConversationPages(conversationId);
+  const { data: allEdges = [], isLoading: edgesLoading } = useConversationPageEdges(conversationId);
+  
+  // Filter pages and edges for this specific source
+  const sourcePages = useMemo(() => {
+    if (!source) return [];
+    return allPages.filter(p => p.source_id === source.id && p.status === 'indexed');
+  }, [allPages, source?.id]);
+  
+  const sourceEdges = useMemo(() => {
+    if (!source) return [];
+    return allEdges.filter(e => e.source_id === source.id);
+  }, [allEdges, source?.id]);
+  
+  // Fetch crawl job for this source
+  const { data: crawlJobsData = [] } = useQuery({
+    queryKey: ['crawl-jobs-for-source-drawer', source?.id],
+    queryFn: async () => {
+      if (!source?.id) return [];
+      return crawlJobsApi.listBySource(source.id);
+    },
+    enabled: !!source?.id,
+  });
+  
+  // Get most recent crawl job
+  const crawlJob = useMemo(() => {
+    if (!crawlJobsData.length) return null;
+    return crawlJobsData.sort((a, b) => 
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )[0];
+  }, [crawlJobsData]);
+  
+  // Determine real status and stats
+  const realStatus: Source['status'] = useMemo(() => {
+    if (!source) return 'crawling';
+    if (crawlJob) {
+      if (crawlJob.status === 'queued' || crawlJob.status === 'running') return 'crawling';
+      if (crawlJob.status === 'failed') return 'error';
+      if (crawlJob.status === 'completed') return 'ready';
+    }
+    return source.status || 'crawling';
+  }, [source, crawlJob]);
+  
+  const pagesIndexed = useMemo(() => {
+    if (crawlJob) {
+      return (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? sourcePages.length;
+    }
+    return sourcePages.length;
+  }, [crawlJob, sourcePages.length]);
+  
+  const pagesDiscovered = useMemo(() => {
+    if (crawlJob) {
+      return (crawlJob as any).discovered_count ?? 0;
+    }
+    return sourcePages.length;
+  }, [crawlJob, sourcePages.length]);
+  
+  const maxPagesForDepth = useMemo(() => {
     if (!source) return 0;
-    return Math.floor(source.pagesIndexed * 1.5);
-  }, [source?.pagesIndexed]);
+    return source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
+  }, [source?.crawlDepth]);
+  
+  const connectionsFound = sourceEdges.length;
+  
+  // Convert pages to DiscoveredPage format for ForceGraph
+  const displayPages = useMemo(() => {
+    return sourcePages.map(p => ({
+      id: p.id,
+      title: p.title || 'Untitled',
+      path: p.path,
+      status: (p.status || 'indexed') as 'indexed' | 'crawling' | 'pending' | 'error',
+      url: p.url,
+    }));
+  }, [sourcePages]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -99,9 +175,9 @@ export const SourceDrawer = ({
               </div>
               
               <div className="flex items-center gap-2 mt-4">
-                {getStatusBadge(source.status)}
+                {getStatusBadge(realStatus)}
                 <span className="text-xs text-muted-foreground">
-                  {source.pagesIndexed}/{source.totalPages} pages
+                  {pagesIndexed}/{maxPagesForDepth} pages
                 </span>
               </div>
             </SheetHeader>
@@ -110,21 +186,29 @@ export const SourceDrawer = ({
             <div className="p-6 space-y-6 shrink-0">
               {/* Crawl Stats */}
               <CrawlStats
-                pagesDiscovered={source.totalPages}
-                pagesIndexed={source.pagesIndexed}
+                pagesDiscovered={pagesDiscovered}
+                pagesIndexed={pagesIndexed}
                 connectionsFound={connectionsFound}
-                isCrawling={source.status === 'crawling'}
+                isCrawling={realStatus === 'crawling'}
               />
               
               {/* Knowledge Graph */}
               <div className="space-y-2">
                 <h4 className="text-sm font-medium text-foreground">Page Graph</h4>
-                <ForceGraph
-                  pages={source.discoveredPages}
-                  pagesIndexed={source.pagesIndexed}
-                  domain={source.domain}
-                  className="h-[200px]"
-                />
+                {pagesLoading || edgesLoading ? (
+                  <div className="h-[200px] flex items-center justify-center text-xs text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Loading graph...
+                  </div>
+                ) : (
+                  <ForceGraph
+                    pages={displayPages}
+                    pagesIndexed={pagesIndexed}
+                    domain={source.domain}
+                    edges={sourceEdges}
+                    className="h-[200px]"
+                  />
+                )}
               </div>
 
               {/* Settings summary */}
@@ -160,12 +244,12 @@ export const SourceDrawer = ({
                   variant="outline"
                   size="sm"
                   onClick={() => onRecrawl(source.id)}
-                  disabled={source.status === 'crawling'}
+                  disabled={realStatus === 'crawling'}
                   className="flex-1 gap-2"
                 >
                   <RefreshCw className={cn(
                     "h-4 w-4",
-                    source.status === 'crawling' && 'animate-spin'
+                    realStatus === 'crawling' && 'animate-spin'
                   )} />
                   Recrawl
                 </Button>
@@ -187,25 +271,39 @@ export const SourceDrawer = ({
             {/* Discovered pages - scrollable section that fills remaining height */}
             <div className="flex-1 min-h-0 flex flex-col px-6 pb-6">
               <h4 className="text-sm font-medium text-foreground mb-2 shrink-0">
-                Discovered Pages ({source.discoveredPages.length})
+                Discovered Pages ({displayPages.length})
               </h4>
               <div className="flex-1 min-h-0 rounded-lg border border-border/50 bg-background/30 overflow-hidden">
                 <ScrollArea className="h-full">
                   <div className="p-2 space-y-1">
-                    {source.discoveredPages.map((page) => (
-                      <div
-                        key={page.id}
-                        className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-secondary/50 transition-colors cursor-pointer"
-                        onClick={() => window.open(`https://${source.domain}${page.path}`, '_blank', 'noopener,noreferrer')}
-                      >
-                        {getPageStatusIcon(page.status)}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-foreground truncate">{page.title}</p>
-                          <p className="text-[11px] text-muted-foreground truncate">{page.path}</p>
-                        </div>
-                        <ExternalLink className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                    {pagesLoading ? (
+                      <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Loading pages...
                       </div>
-                    ))}
+                    ) : displayPages.length === 0 ? (
+                      <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+                        No pages discovered yet
+                      </div>
+                    ) : (
+                      displayPages.map((page) => (
+                        <div
+                          key={page.id}
+                          className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-secondary/50 transition-colors cursor-pointer"
+                          onClick={() => {
+                            const url = page.url || `https://${source.domain}${page.path}`;
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                          }}
+                        >
+                          {getPageStatusIcon(page.status)}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-foreground truncate">{page.title}</p>
+                            <p className="text-[11px] text-muted-foreground truncate">{page.path}</p>
+                          </div>
+                          <ExternalLink className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                        </div>
+                      ))
+                    )}
                   </div>
                 </ScrollArea>
               </div>

@@ -20,7 +20,7 @@ function normalizeUrlForMatching(url: string): string {
   }
 }
 
-// Removed generateLinks - using real edges from database or generateStableLinks as fallback
+// Use real edges from database only; when edges are empty we show nodes with no links (no fake topology)
 
 /**
  * Convert pages and edges to graph data structure
@@ -45,10 +45,23 @@ export const createGraphData = (
     const pageUrl = (page as any).url || (domain ? `https://${domain}${page.path}` : `https://example.com${page.path}`);
     // Normalize URL for matching (remove trailing slash, fragment, query params)
     const normalizedUrl = normalizeUrlForMatching(pageUrl);
+    
+    // Add multiple variations for matching (case-insensitive, with/without trailing slash, etc.)
     urlToPageId.set(normalizedUrl.toLowerCase(), page.id);
     urlToPageId.set(normalizedUrl, page.id); // Also add original case
     urlToPageId.set(pageUrl.toLowerCase(), page.id); // Also match original URL
     urlToPageId.set(pageUrl, page.id);
+    
+    // Also try without protocol for matching
+    try {
+      const urlObj = new URL(normalizedUrl);
+      const withoutProtocol = `${urlObj.hostname}${urlObj.pathname}`;
+      urlToPageId.set(withoutProtocol.toLowerCase(), page.id);
+      urlToPageId.set(withoutProtocol, page.id);
+    } catch (e) {
+      // Ignore URL parsing errors
+    }
+    
     pageIdMap.set(page.id, page);
   });
   
@@ -75,7 +88,22 @@ export const createGraphData = (
   let links: GraphLink[] = [];
   // Ensure edges is an array (handle undefined/null)
   const edgesArray = edges || [];
+  
+  // Debug: Log URL mapping for troubleshooting (after edgesArray is declared)
+  if (import.meta.env.DEV && visiblePages.length > 0 && edgesArray.length > 0) {
+    console.log(`🔗 URL Mapping: ${urlToPageId.size} URL variations mapped to ${visiblePages.length} pages`, {
+      sampleMappings: Array.from(urlToPageId.entries()).slice(0, 5).map(([url, id]) => ({
+        url: url.substring(0, 60),
+        pageId: id.substring(0, 8),
+      })),
+    });
+  }
+  
   if (edgesArray.length > 0) {
+    // Debug: Log edge status when edges are available
+    if (import.meta.env.DEV) {
+      console.log(`🔗 createGraphData: edges provided=${!!edges}, edgesArray.length=${edgesArray.length}, visiblePages.length=${visiblePages.length}`);
+    }
     // Filter edges to only include those between visible pages
     const visiblePageIds = new Set(visiblePages.map(p => p.id));
     const linkSet = new Set<string>(); // Dedupe links
@@ -107,10 +135,22 @@ export const createGraphData = (
       if (edge.from_url) {
         // Normalize the edge URL for matching
         const normalizedFromUrl = normalizeUrlForMatching(edge.from_url);
+        // Try multiple matching strategies
         fromPageId = urlToPageId.get(normalizedFromUrl) 
           || urlToPageId.get(normalizedFromUrl.toLowerCase())
           || urlToPageId.get(edge.from_url)
           || urlToPageId.get(edge.from_url.toLowerCase());
+        
+        // Also try without protocol
+        if (!fromPageId) {
+          try {
+            const urlObj = new URL(normalizedFromUrl);
+            const withoutProtocol = `${urlObj.hostname}${urlObj.pathname}`;
+            fromPageId = urlToPageId.get(withoutProtocol) || urlToPageId.get(withoutProtocol.toLowerCase());
+          } catch (e) {
+            // Ignore URL parsing errors
+          }
+        }
       }
       if (!fromPageId && edge.from_page_id) {
         fromPageId = edge.from_page_id;
@@ -119,10 +159,22 @@ export const createGraphData = (
       if (edge.to_url) {
         // Normalize the edge URL for matching
         const normalizedToUrl = normalizeUrlForMatching(edge.to_url);
+        // Try multiple matching strategies
         toPageId = urlToPageId.get(normalizedToUrl)
           || urlToPageId.get(normalizedToUrl.toLowerCase())
           || urlToPageId.get(edge.to_url)
           || urlToPageId.get(edge.to_url.toLowerCase());
+        
+        // Also try without protocol
+        if (!toPageId) {
+          try {
+            const urlObj = new URL(normalizedToUrl);
+            const withoutProtocol = `${urlObj.hostname}${urlObj.pathname}`;
+            toPageId = urlToPageId.get(withoutProtocol) || urlToPageId.get(withoutProtocol.toLowerCase());
+          } catch (e) {
+            // Ignore URL parsing errors
+          }
+        }
       }
       if (!toPageId && edge.to_page_id) {
         toPageId = edge.to_page_id;
@@ -191,11 +243,15 @@ export const createGraphData = (
       });
     }
   } else {
-    // Fallback to generated links if no edges available
-    if (import.meta.env.DEV) {
-      console.warn('⚠️ No edges provided, using generated links');
+    // No edges from API: show nodes only, no links. Do NOT use generateStableLinks here:
+    // during a crawl, pages often refetch before edges; fake links would show wrong topology
+    // until edges load. When edges arrive, we regenerate with real links.
+    if (import.meta.env.DEV && nodes.length > 0) {
+      console.log('🔗 No edges yet; showing nodes only (links will appear when edges load)', {
+        nodesCount: nodes.length,
+      });
     }
-    links = generateStableLinks(nodes);
+    links = [];
   }
 
   if (import.meta.env.DEV && nodes.length > 0) {

@@ -101,11 +101,18 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
           console.log('🔗 New edge:', payload.new);
           const edge = payload.new as PageEdge;
           
-          // Invalidate ALL edges queries to trigger refetch
+          // Invalidate and immediately refetch edges queries to trigger UI update
           queryClient.invalidateQueries({ predicate: (query) => {
             const key = query.queryKey;
             return (
               (Array.isArray(key) && key[0] === 'page-edges' && key[1] === edge.source_id) ||
+              (Array.isArray(key) && key[0] === 'conversation-page-edges' && key[1] === conversationId)
+            );
+          }});
+          // Also refetch immediately (not just invalidate) to get edges faster
+          queryClient.refetchQueries({ predicate: (query) => {
+            const key = query.queryKey;
+            return (
               (Array.isArray(key) && key[0] === 'conversation-page-edges' && key[1] === conversationId)
             );
           }});

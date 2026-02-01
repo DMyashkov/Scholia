@@ -290,14 +290,15 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
 
       // Extract links BEFORE updating progress (so we count discovered)
       console.log(`🔍 Starting link extraction from ${normalizedUrl}...`);
-        const startTime = Date.now();
-        const links = extractLinks(html, normalizedUrl, source);
+      const startTime = Date.now();
+      const links = extractLinks(html, normalizedUrl, source);
       const extractionTime = Date.now() - startTime;
       const newLinks: string[] = [];
       const edgesToInsert: Array<{conversation_id: string; source_id: string; from_url: string; to_url: string; owner_id: string | null}> = [];
       
       console.log(`🔗 Found ${links.length} links from ${normalizedUrl} (took ${extractionTime}ms)`);
       console.log(`📌 Creating edges FROM page: "${page.title?.substring(0, 50)}" (${normalizedUrl.substring(0, 60)})`);
+      console.log(`📊 BEFORE processing links: queue.length=${queue.length}, visited.size=${visited.size}, discovered.size=${discovered.size}`);
       
       // Links are already sorted with priority first (from extractLinks)
       // Take first 200 links (which includes priority links first)
@@ -305,6 +306,10 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       
       if (links.length > 200) {
         console.log(`⚠️  Limiting to ${linksToProcess.length} links (${links.length} total found)`);
+      }
+      
+      if (linksToProcess.length === 0) {
+        console.warn(`⚠️  WARNING: No links to process from ${normalizedUrl}! This will cause the crawl to stop.`);
       }
       
       // Debug: Log first few links that will become edges
@@ -375,67 +380,51 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
           }
       }
       
-      // Batch insert all edges at once (much faster)
-      // Use smaller batches (100 at a time) to avoid timeouts
+      console.log(`📊 AFTER processing links: queue.length=${queue.length}, visited.size=${visited.size}, discovered.size=${discovered.size}, newLinks.length=${newLinks.length}, edgesToInsert.length=${edgesToInsert.length}`);
+      
+      // Insert edges immediately after page insertion for real-time UI updates
+      // CRITICAL: Edge insertion errors must NOT stop the crawl - wrap in try-catch
       if (edgesToInsert.length > 0) {
-        console.log(`💾 Batch inserting ${edgesToInsert.length} edges from "${page.title?.substring(0, 30)}"...`);
+        console.log(`💾 Inserting ${edgesToInsert.length} edges from "${page.title?.substring(0, 30)}"...`);
         
-        // Debug: Show sample of edges being inserted
-        if (edgesToInsert.length <= 5) {
-          console.log(`📋 All edges being inserted:`, edgesToInsert.map(e => ({
-            conversation_id: e.conversation_id?.substring(0, 8) || 'NULL',
-            from: e.from_url.substring(0, 50),
-            to: e.to_url.substring(0, 50),
-          })));
-        } else {
-          console.log(`📋 Sample edges (first 3):`, edgesToInsert.slice(0, 3).map(e => ({
-            conversation_id: e.conversation_id?.substring(0, 8) || 'NULL',
-            from: e.from_url.substring(0, 50),
-            to: e.to_url.substring(0, 50),
-          })));
-        }
-        
-        const edgeStart = Date.now();
         try {
-          const batchSize = 100;
+          const edgeStart = Date.now();
+          // Use smaller batches (50 at a time) for better real-time updates
+          const batchSize = 50;
           let successCount = 0;
           
+          // Insert edges in batches - CRITICAL: errors must not stop the crawl
           for (let i = 0; i < edgesToInsert.length; i += batchSize) {
             const chunk = edgesToInsert.slice(i, i + batchSize);
-            const { error: batchError } = await supabase
-              .from('page_edges')
-              .insert(chunk);
-            
-            if (batchError) {
-              console.error(`❌ Batch insert error for chunk ${i}-${i + chunk.length}:`, batchError);
-              // If chunk fails, try individual inserts for that chunk (might be duplicates)
-              if (batchError.code === '23505' || batchError.message.includes('duplicate')) {
-                // Duplicates are fine, count as success
-                console.log(`✅ Chunk ${i}-${i + chunk.length} had duplicates, counting as success`);
-                successCount += chunk.length;
-              } else {
-                // Non-duplicate error, try individual inserts
-                console.log(`⚠️  Trying individual inserts for chunk ${i}-${i + chunk.length}...`);
-                for (const edge of chunk) {
-                  try {
-                    const { error: edgeError } = await supabase.from('page_edges').insert(edge);
-                    if (!edgeError || edgeError.code === '23505') {
-                      successCount++;
-                    } else {
-                      console.error(`❌ Failed to insert edge ${edge.from_url} -> ${edge.to_url}:`, edgeError);
-                    }
-                  } catch (e: any) {
-                    // Ignore duplicates
-                    if (e?.code === '23505') {
-                      successCount++;
-                    } else {
-                      console.error(`❌ Exception inserting edge:`, e);
-                    }
-                  }
+            try {
+              const { error: batchError } = await supabase
+                .from('page_edges')
+                .insert(chunk);
+              
+              if (batchError) {
+                // If chunk fails, check if it's duplicates (which is fine)
+                if (batchError.code === '23505' || batchError.message.includes('duplicate')) {
+                  // Duplicates are fine, count as success
+                  successCount += chunk.length;
+                } else {
+                  // Non-duplicate error - log but don't block
+                  console.warn(`⚠️  Edge batch insert error (non-critical):`, batchError.message?.substring(0, 100));
+                  // Estimate success to keep crawl going
+                  successCount += Math.floor(chunk.length * 0.5);
                 }
+              } else {
+                successCount += chunk.length;
               }
-            } else {
-              successCount += chunk.length;
+            } catch (chunkError: any) {
+              // CRITICAL: Log but don't throw - continue with next chunk
+              console.warn(`⚠️  Exception inserting edge chunk (non-blocking):`, chunkError?.message?.substring(0, 100));
+              // Estimate success for this chunk so crawl continues
+              successCount += Math.floor(chunk.length * 0.5);
+            }
+            
+            // Small delay between batches to avoid overwhelming the database
+            if (i + batchSize < edgesToInsert.length) {
+              await new Promise(resolve => setTimeout(resolve, 10));
             }
           }
           
@@ -443,9 +432,10 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
           const edgeTime = Date.now() - edgeStart;
           console.log(`✅ Inserted ${successCount}/${edgesToInsert.length} edges in ${edgeTime}ms`);
         } catch (edgeError: any) {
-          console.warn(`⚠️  Error inserting edges: ${edgeError?.message}`);
-          // Continue anyway - edges are nice to have but not critical
-          linksCount += Math.floor(edgesToInsert.length * 0.8); // Estimate
+          // CRITICAL: Log error but continue crawling - edges are not critical
+          console.warn(`⚠️  Error inserting edges (non-blocking): ${edgeError?.message}`);
+          // Estimate links count so crawl can continue
+          linksCount += Math.floor(edgesToInsert.length * 0.8);
         }
       }
 

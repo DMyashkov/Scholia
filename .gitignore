@@ -38,4 +38,6 @@ worker/.env.local
 *.tsbuildinfo
 next-env.d.ts
 
+# md files
+*.md
 

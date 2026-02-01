@@ -18,7 +18,7 @@ interface ChatAreaProps {
   isLoading: boolean;
   streamingMessage: string;
   onSendMessage: (message: string) => void;
-  onAddSource: (url: string, depth: CrawlDepth, options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }) => void;
+  onAddSource: (url: string, depth: CrawlDepth, options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }) => Promise<Source | null>;
   onRemoveSource: (sourceId: string) => void;
   onRecrawlSource: (sourceId: string) => void;
   sidebarOpen: boolean;
@@ -85,9 +85,13 @@ export const ChatArea = ({
     }
   };
 
-  const handleAddSource = (url: string, depth: CrawlDepth, options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }) => {
-    onAddSource(url, depth, options);
+  const handleAddSource = async (url: string, depth: CrawlDepth, options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }) => {
     setAddSourceOpen(false);
+    const added = await onAddSource(url, depth, options);
+    if (added) {
+      setSelectedSourceId(added.id);
+      setSourceDrawerOpen(true);
+    }
   };
 
   const handleRemoveSource = (sourceId: string) => {

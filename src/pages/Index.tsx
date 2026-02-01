@@ -89,13 +89,12 @@ const Index = () => {
     url: string,
     depth: CrawlDepth,
     options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }
-  ) => {
+  ): Promise<Source | null> => {
     const domain = extractDomain(url);
     const fullUrl = url.startsWith('http') ? url : `https://${url}`;
 
-    // Create source object for database
     const newSource: Source = {
-      id: '', // Will be set by database
+      id: '',
       url: fullUrl,
       domain,
       status: 'crawling',
@@ -109,7 +108,7 @@ const Index = () => {
       discoveredPages: [],
     };
 
-    await addSourceToConversation(newSource);
+    return addSourceToConversation(newSource);
   }, [addSourceToConversation]);
 
   if (loading) {

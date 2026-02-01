@@ -12,7 +12,15 @@ export const usePages = (sourceId: string | null) => {
   });
 };
 
-export const useConversationPages = (conversationId: string | null) => {
+export type UseConversationPagesOptions = {
+  /** When set, refetch on this interval (ms). Use while crawling so graph updates without relying on realtime. */
+  refetchInterval?: number | false;
+};
+
+export const useConversationPages = (
+  conversationId: string | null,
+  options?: UseConversationPagesOptions
+) => {
   return useQuery({
     queryKey: ['conversation-pages', conversationId],
     queryFn: () => {
@@ -20,6 +28,7 @@ export const useConversationPages = (conversationId: string | null) => {
       return pagesApi.listByConversation(conversationId);
     },
     enabled: !!conversationId,
+    refetchInterval: options?.refetchInterval,
   });
 };
 
@@ -34,7 +43,15 @@ export const usePageEdges = (sourceId: string | null) => {
   });
 };
 
-export const useConversationPageEdges = (conversationId: string | null) => {
+export type UseConversationPageEdgesOptions = {
+  /** When set, refetch on this interval (ms). Use while crawling so graph updates without relying on realtime. */
+  refetchInterval?: number | false;
+};
+
+export const useConversationPageEdges = (
+  conversationId: string | null,
+  options?: UseConversationPageEdgesOptions
+) => {
   return useQuery({
     queryKey: ['conversation-page-edges', conversationId],
     queryFn: () => {
@@ -42,6 +59,7 @@ export const useConversationPageEdges = (conversationId: string | null) => {
       return pageEdgesApi.listByConversation(conversationId);
     },
     enabled: !!conversationId,
+    refetchInterval: options?.refetchInterval,
   });
 };
 

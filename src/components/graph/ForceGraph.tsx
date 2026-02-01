@@ -36,33 +36,19 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
 
   // Create/update graph data when pages, pagesIndexed, or edges change
   const graphData = useMemo(() => {
-    // Always regenerate when pages array changes (new pages added) or pagesIndexed increases
-    // OR when edges array changes (edges added/removed)
     const currentEdgesLength = edges?.length || 0;
     const prevEdgesLength = graphDataRef.current.links.length;
     const edgesChanged = currentEdgesLength !== prevEdgesLength;
-    
-    const shouldRegenerate = 
+    const edgesJustArrived = (edges?.length ?? 0) > 0 && prevEdgesLength === 0;
+
+    const shouldRegenerate =
       pages.length !== graphDataRef.current.nodes.length ||
       pagesIndexed > prevPagesIndexedRef.current ||
       pagesIndexed === 0 ||
       edgesChanged ||
-      (edges && edges.length > 0 && prevEdgesLength === 0); // Force regenerate when edges first arrive
-    
+      edgesJustArrived;
+
     if (shouldRegenerate) {
-      if (import.meta.env.DEV) {
-        console.log(`🔄 ForceGraph regenerating:`, {
-          pagesLength: pages.length,
-          pagesIndexed,
-          edgesLength: currentEdgesLength,
-          prevEdgesLength,
-          edgesChanged,
-          reason: edgesChanged ? 'edges changed' : 
-                  pages.length !== graphDataRef.current.nodes.length ? 'pages changed' :
-                  pagesIndexed > prevPagesIndexedRef.current ? 'pagesIndexed increased' : 'other'
-        });
-      }
-      
       prevPagesIndexedRef.current = pagesIndexed;
       const data = createGraphData(pages, pagesIndexed, dimensions, domain, edges);
       

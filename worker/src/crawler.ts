@@ -294,7 +294,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       const links = extractLinks(html, normalizedUrl, source);
       const extractionTime = Date.now() - startTime;
       const newLinks: string[] = [];
-      const edgesToInsert: Array<{conversation_id: string; source_id: string; from_url: string; to_url: string; owner_id: string | null}> = [];
+      const edgesToInsert: Array<{conversation_id: string; source_id: string; from_page_id: string; from_url: string; to_url: string; owner_id: string | null}> = [];
       
       console.log(`🔗 Found ${links.length} links from ${normalizedUrl} (took ${extractionTime}ms)`);
       console.log(`📌 Creating edges FROM page: "${page.title?.substring(0, 50)}" (${normalizedUrl.substring(0, 60)})`);
@@ -338,12 +338,13 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
           const normalizedLink = linkUrlObj.toString();
           
           // Add edge to batch (isolated per conversation)
-          // IMPORTANT: from_url = page we're currently crawling, to_url = link found on that page
+          // from_page_id lets the frontend match "from" by ID; to_url matched by URL when page is indexed
           edgesToInsert.push({
             conversation_id: conversationId,
             source_id: source.id,
-            from_url: normalizedUrl, // Current page (where link was found)
-            to_url: normalizedLink,   // Linked page (destination)
+            from_page_id: page.id,
+            from_url: normalizedUrl,
+            to_url: normalizedLink,
             owner_id: source.owner_id,
           });
           
@@ -909,7 +910,6 @@ export async function claimJob(): Promise<CrawlJob | null> {
 
   // Atomically claim a queued job
   // Get oldest queued job
-  console.log(`🔍 Looking for queued jobs...`);
   const { data: jobs, error: fetchError } = await supabase
     .from('crawl_jobs')
     .select('*')
@@ -930,20 +930,11 @@ export async function claimJob(): Promise<CrawlJob | null> {
       .select('id, status, conversation_id, created_at')
       .order('created_at', { ascending: false })
       .limit(5);
-    console.log(`🔍 No queued jobs found. Recent jobs:`, allJobs?.map(j => ({
-      id: j.id.substring(0, 8),
-      status: j.status,
-      conversation_id: j.conversation_id?.substring(0, 8) || 'NULL',
-      created_at: j.created_at,
-    })) || []);
     return null;
   }
-  
-  console.log(`✅ Found ${jobs.length} queued job(s)`);
-  
+    
   // Log job details for debugging
   const jobToClaim = jobs[0];
-  console.log(`🔍 Found queued job: ${jobToClaim.id.substring(0, 8)}... (source: ${jobToClaim.source_id?.substring(0, 8)}..., conversation: ${jobToClaim.conversation_id?.substring(0, 8) || 'NULL'}...)`);
   
   // Atomically update: only if still queued
   const now = new Date().toISOString();
@@ -964,6 +955,5 @@ export async function claimJob(): Promise<CrawlJob | null> {
     return null;
   }
 
-  console.log(`✅ Claimed job: ${updated.id} for source: ${updated.source_id}`);
   return updated as CrawlJob;
 }

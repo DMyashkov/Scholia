@@ -74,23 +74,8 @@ export const SourceDrawer = ({
   onRemove,
 }: SourceDrawerProps) => {
   const initial = source?.domain.charAt(0).toUpperCase() || '';
-  
-  // Fetch real pages and edges for this conversation
-  const { data: allPages = [], isLoading: pagesLoading } = useConversationPages(conversationId);
-  const { data: allEdges = [], isLoading: edgesLoading } = useConversationPageEdges(conversationId);
-  
-  // Filter pages and edges for this specific source
-  const sourcePages = useMemo(() => {
-    if (!source) return [];
-    return allPages.filter(p => p.source_id === source.id && p.status === 'indexed');
-  }, [allPages, source?.id]);
-  
-  const sourceEdges = useMemo(() => {
-    if (!source) return [];
-    return allEdges.filter(e => e.source_id === source.id);
-  }, [allEdges, source?.id]);
-  
-  // Fetch crawl job for this source
+
+  // Crawl job and status first so we can pass refetchInterval when crawling
   const { data: crawlJobsData = [] } = useQuery({
     queryKey: ['crawl-jobs-for-source-drawer', source?.id],
     queryFn: async () => {
@@ -99,16 +84,14 @@ export const SourceDrawer = ({
     },
     enabled: !!source?.id,
   });
-  
-  // Get most recent crawl job
+
   const crawlJob = useMemo(() => {
     if (!crawlJobsData.length) return null;
-    return crawlJobsData.sort((a, b) => 
+    return crawlJobsData.sort((a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     )[0];
   }, [crawlJobsData]);
-  
-  // Determine real status and stats
+
   const realStatus: Source['status'] = useMemo(() => {
     if (!source) return 'crawling';
     if (crawlJob) {
@@ -118,10 +101,35 @@ export const SourceDrawer = ({
     }
     return source.status || 'crawling';
   }, [source, crawlJob]);
-  
+
+  // Use the conversation that ran the crawl so we get the right pages/edges (can differ from active conversation)
+  const graphConversationId = crawlJob?.conversation_id ?? conversationId;
+
+  // Poll pages and edges while crawling so the graph updates even if realtime doesn't deliver
+  const pollInterval = realStatus === 'crawling' ? 2000 : false;
+  const { data: allPages = [], isLoading: pagesLoading } = useConversationPages(graphConversationId, {
+    refetchInterval: pollInterval,
+  });
+  const { data: allEdges = [], isLoading: edgesLoading } = useConversationPageEdges(graphConversationId, {
+    refetchInterval: pollInterval,
+  });
+
+  // Filter pages and edges for the selected source only (no inference fallback)
+  const sourcePages = useMemo(() => {
+    if (!source) return [];
+    return allPages.filter(p => p.source_id === source.id && p.status === 'indexed');
+  }, [allPages, source?.id]);
+
+  const sourceEdges = useMemo(() => {
+    if (!source) return [];
+    return allEdges.filter(e => e.source_id === source.id);
+  }, [allEdges, source?.id]);
+
   const pagesIndexed = useMemo(() => {
     if (crawlJob) {
-      return (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? sourcePages.length;
+      const fromJob = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? sourcePages.length;
+      // Job can report 0 before first update; never show fewer nodes than pages we have
+      return Math.max(fromJob, sourcePages.length);
     }
     return sourcePages.length;
   }, [crawlJob, sourcePages.length]);
@@ -137,9 +145,36 @@ export const SourceDrawer = ({
     if (!source) return 0;
     return source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
   }, [source?.crawlDepth]);
-  
+
   const connectionsFound = sourceEdges.length;
-  
+
+  // Diagnostic: why edges might be 0 at graph (DEV only)
+  if (import.meta.env.DEV && source && sourcePages.length > 0) {
+    console.log('[SourceDrawer] edges pipeline', {
+      allEdgesCount: allEdges.length,
+      sourceEdgesCount: sourceEdges.length,
+      sourceId: source.id.slice(0, 8),
+      firstEdgeSourceId: allEdges[0]?.source_id?.slice(0, 8),
+    });
+  }
+
+  // Diagnostic: what we pass to the graph (DEV only, when drawer has source and we have edges)
+  if (import.meta.env.DEV && source && sourcePages.length > 0 && sourceEdges.length > 0) {
+    const firstPage = sourcePages[0];
+    const firstEdge = sourceEdges[0];
+    console.log('[SourceDrawer] graph inputs', {
+      sourceId: source.id.slice(0, 8),
+      displayPagesCount: sourcePages.length,
+      pagesIndexed,
+      sourceEdgesCount: sourceEdges.length,
+      firstPageUrl: firstPage?.url?.slice(0, 60),
+      firstEdgeFromUrl: firstEdge?.from_url?.slice(0, 60),
+      firstEdgeToUrl: firstEdge?.to_url?.slice(0, 60),
+      firstEdgeFromPageId: firstEdge?.from_page_id?.slice(0, 8),
+      firstEdgeToPageId: firstEdge?.to_page_id?.slice(0, 8),
+    });
+  }
+
   // Convert pages to DiscoveredPage format for ForceGraph
   const displayPages = useMemo(() => {
     return sourcePages.map(p => ({
@@ -173,7 +208,7 @@ export const SourceDrawer = ({
                   </SheetDescription>
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-2 mt-4">
                 {getStatusBadge(realStatus)}
                 <span className="text-xs text-muted-foreground">
@@ -182,17 +217,14 @@ export const SourceDrawer = ({
               </div>
             </SheetHeader>
 
-            {/* Fixed content section */}
             <div className="p-6 space-y-6 shrink-0">
-              {/* Crawl Stats */}
               <CrawlStats
                 pagesDiscovered={pagesDiscovered}
                 pagesIndexed={pagesIndexed}
                 connectionsFound={connectionsFound}
                 isCrawling={realStatus === 'crawling'}
               />
-              
-              {/* Knowledge Graph */}
+
               <div className="space-y-2">
                 <h4 className="text-sm font-medium text-foreground">Page Graph</h4>
                 {pagesLoading || edgesLoading ? (

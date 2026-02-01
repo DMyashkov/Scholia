@@ -141,8 +141,7 @@ export const useChatDatabase = () => {
       setActiveConversationId(newConv.id);
     }
 
-    // Add source to conversation (always creates new crawl, no sharing)
-    await addSourceMutation.mutateAsync({
+    const dbSource = await addSourceMutation.mutateAsync({
       conversationId: finalConvId,
       sourceData: {
         url: source.url,
@@ -154,6 +153,23 @@ export const useChatDatabase = () => {
         same_domain_only: source.sameDomainOnly,
       },
     });
+
+    // Map db source to UI Source for the caller (e.g. to select and open drawer).
+    return {
+      id: dbSource.id,
+      url: dbSource.url,
+      domain: dbSource.domain,
+      favicon: dbSource.favicon ?? undefined,
+      status: 'crawling' as const,
+      crawlDepth: dbSource.crawl_depth,
+      includeSubpages: dbSource.include_subpages,
+      includePdfs: dbSource.include_pdfs,
+      sameDomainOnly: dbSource.same_domain_only,
+      pagesIndexed: 0,
+      totalPages: 0,
+      lastUpdated: new Date(dbSource.updated_at),
+      discoveredPages: [],
+    };
   }, [activeConversationId, createConversationMutation, addSourceMutation]);
 
   const removeSourceFromConversation = useCallback(async (sourceId: string) => {

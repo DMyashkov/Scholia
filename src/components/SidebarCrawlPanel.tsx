@@ -25,20 +25,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
   // Load pages and edges from database
   const { data: pages = [], isLoading: pagesLoading, error: pagesError } = useConversationPages(conversationId);
   const { data: edges = [], isLoading: edgesLoading, error: edgesError } = useConversationPageEdges(conversationId);
-  
-  // Debug: Log edges being fetched
-  if (import.meta.env.DEV && conversationId) {
-    console.log(`🔗 SidebarCrawlPanel: Fetched ${edges.length} edges for conversation ${conversationId.substring(0, 8)}...`, {
-      edgesLoading,
-      edgesError: edgesError?.message,
-      sampleEdges: edges.slice(0, 3).map(e => ({
-        from: e.from_url?.substring(0, 40),
-        to: e.to_url?.substring(0, 40),
-        conversation_id: e.conversation_id?.substring(0, 8),
-      })),
-    });
-  }
-  
+
   // Load conversation sources
   const { data: conversationSources = [] } = useConversationSources(conversationId);
   
@@ -210,68 +197,6 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
     }, 0)
   );
   const activeDomain = activeSource?.domain;
-  
-  // Debug logging (after all variables are defined) - only log when something changes or there's an issue
-  if (import.meta.env.DEV) {
-    const hasIssues = 
-      pagesError || 
-      edgesError || 
-      (conversationId && sources.length === 0 && !pagesLoading) ||
-      (conversationId && isCrawling && totalIndexed === 0 && totalDiscovered > 0);
-    
-    // Only log if there are issues or significant state changes
-    if (hasIssues || Math.random() < 0.1) { // Log 10% of the time to reduce spam
-      const debugInfo = {
-        '🔍 State': {
-          conversationId: conversationId?.substring(0, 8) + '...' || 'null',
-          hasActiveConversation: !!conversationId,
-        },
-        '📊 Sources': {
-          total: sources.length,
-          withStatus: sourcesWithStatus.length,
-          crawling: crawlingSources.length,
-          activeSourceId: activeSourceId?.substring(0, 8) + '...' || null,
-        },
-        '📄 Pages': {
-          inDB: pages.length,
-          display: displayPages.length,
-          indexed: displayPagesIndexed,
-          loading: pagesLoading,
-          error: pagesError?.message || null,
-        },
-        '🔗 Edges': {
-          count: edges.length,
-          loading: edgesLoading,
-          error: edgesError?.message || null,
-        },
-        '📈 Progress': {
-          discovered: totalDiscovered,
-          indexed: totalIndexed,
-          connections: edges.length,
-        },
-        '⚙️ Crawl Jobs': {
-          total: crawlJobsData.length,
-          bySource: displaySources.map(s => {
-            const job = crawlJobMap.get(s.id);
-            const indexed = (job as any)?.indexed_count ?? job?.pages_indexed ?? 0;
-            const status = job?.status || 'unknown';
-            return { 
-              source: s.id.substring(0, 8) + '...', 
-              indexed, 
-              status,
-              discovered: (job as any)?.discovered_count ?? 0,
-            };
-          }),
-        },
-      };
-      
-      if (hasIssues) {
-        console.warn('⚠️ SidebarCrawlPanel Issues:', debugInfo);
-      } else {
-        console.log('📊 SidebarCrawlPanel:', debugInfo);
-      }
-    }
-  }
 
   if (!hasAnySources) return null;
 

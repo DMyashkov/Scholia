@@ -54,21 +54,36 @@ export const useAddSourceToConversation = () => {
       sourceData: SourceInsert;
       inheritFromConversationId?: string;
     }) => {
-      // First, check if source with this URL exists for this user
       const userId = user?.id || null;
       const existingSources = await sourcesApi.list(userId);
       let source = existingSources.find(s => s.url === sourceData.url);
 
       if (!source) {
-        // Create new source
         source = await sourcesApi.create(sourceData);
       }
 
-      // Always create a new crawl job (no sharing between conversations)
       await conversationSourcesApi.add(conversationId, source.id, false);
       return source;
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (newSource, variables) => {
+      // Optimistically add the new source to the conversation-sources cache so the list
+      // includes it immediately (avoids source=null in SourceDrawer until refetch completes).
+      queryClient.setQueryData(
+        ['conversation-sources', variables.conversationId],
+        (prev: Array<{ conversation_id: string; source_id: string; created_at: string; source: typeof newSource }> | undefined) => {
+          const list = prev ?? [];
+          if (list.some(cs => cs.source_id === newSource.id)) return list;
+          return [
+            ...list,
+            {
+              conversation_id: variables.conversationId,
+              source_id: newSource.id,
+              created_at: new Date().toISOString(),
+              source: newSource,
+            },
+          ];
+        }
+      );
       queryClient.invalidateQueries({ queryKey: ['conversation-sources', variables.conversationId] });
       queryClient.invalidateQueries({ queryKey: ['crawl-jobs'] });
     },

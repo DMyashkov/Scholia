@@ -6,6 +6,18 @@ export interface Conversation {
   updated_at: string;
 }
 
+export interface MessageQuote {
+  id: string;
+  sourceId: string;
+  pageId: string;
+  snippet: string;
+  pageTitle: string;
+  pagePath: string;
+  domain: string;
+  contextBefore?: string;
+  contextAfter?: string;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -13,6 +25,7 @@ export interface Message {
   content: string;
   created_at: string;
   owner_id: string | null;
+  quotes?: MessageQuote[] | null;
 }
 
 export interface Source {
@@ -20,6 +33,7 @@ export interface Source {
   owner_id: string | null;
   url: string;
   domain: string;
+  source_label?: string | null; // Human-readable label from first page (e.g. "Joe Biden"). domain = hostname.
   favicon: string | null;
   crawl_depth: 'shallow' | 'medium' | 'deep';
   include_subpages: boolean;

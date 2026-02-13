@@ -223,7 +223,7 @@ const ConversationItem = ({
                   <img src={source.favicon} alt="" className="w-3 h-3" />
                 ) : (
                   <span className="text-[8px] font-medium text-muted-foreground uppercase">
-                    {source.domain.charAt(0)}
+                    {(source.source_label ?? source.domain).charAt(0)}
                   </span>
                 )}
               </div>

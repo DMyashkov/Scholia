@@ -62,9 +62,6 @@ export const pageEdgesApi = {
       console.error('[page_edges] listByConversation error:', error.message);
       throw error;
     }
-    if (import.meta.env.DEV && (data?.length ?? 0) > 0) {
-      console.log('[page_edges] listByConversation ok', { count: data?.length, conversationId: conversationId.slice(0, 8) });
-    }
     return (data || []) as PageEdge[];
   },
 };

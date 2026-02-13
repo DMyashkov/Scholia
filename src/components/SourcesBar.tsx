@@ -53,7 +53,8 @@ const SourceChip = ({
   onClick: () => void;
   isRecentlyUsed: boolean;
 }) => {
-  const initial = source.domain.charAt(0).toUpperCase();
+  const displayName = source.source_label ?? source.domain;
+  const initial = displayName.charAt(0).toUpperCase();
   const progressPercent = (source.pagesIndexed / source.totalPages) * 100;
   
   return (
@@ -106,9 +107,9 @@ const SourceChip = ({
               )}
             </div>
             
-            {/* Domain */}
+            {/* Display name (source_label or domain) */}
             <span className="text-xs text-foreground/80 group-hover:text-foreground max-w-[100px] truncate">
-              {source.domain}
+              {displayName}
             </span>
             
             {/* Status icon (only for non-crawling states) */}

@@ -1,10 +1,12 @@
 import { useState, useCallback, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useConversations, useCreateConversation, useDeleteConversation, useUpdateConversation } from './useConversations';
 import { useMessages, useCreateMessage } from './useMessages';
 import { useConversationSources, useAddSourceToConversation, useRemoveSourceFromConversation, useCheckExistingSource } from './useConversationSources';
 import { useSourceWithData } from './useSourceWithData';
 import { useRealtimeCrawlUpdates } from './useRealtimeCrawlUpdates';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import type { Conversation as DBConversation, Message as DBMessage } from '@/lib/db/types';
 import type { Conversation, Message } from '@/types/chat';
 import type { Source } from '@/types/source';
@@ -21,21 +23,29 @@ const dbConversationToUI = (db: DBConversation, messages: DBMessage[], sources: 
   updatedAt: new Date(db.updated_at),
 });
 
-const dbMessageToUI = (db: DBMessage): Message => ({
-  id: db.id,
-  role: db.role,
-  content: db.content,
-  timestamp: new Date(db.created_at),
-  // Quotes and sourcesUsed will be added when we implement citations
-  quotes: [],
-  sourcesUsed: [],
-});
+const dbMessageToUI = (db: DBMessage): Message => {
+  const quotes = (db as DBMessage & { quotes?: { id: string; sourceId: string; pageId: string; snippet: string; pageTitle: string; pagePath: string; domain: string; contextBefore?: string; contextAfter?: string }[] }).quotes ?? [];
+  return {
+    id: db.id,
+    role: db.role,
+    content: db.content,
+    timestamp: new Date(db.created_at),
+    quotes: quotes as Message['quotes'],
+    sourcesUsed: [...new Set(quotes.map((q) => q.sourceId))],
+  };
+};
 
 // Helper component to load sources with data
 // We'll use this in the component tree instead
 
+const getFunctionsUrl = () => {
+  const url = import.meta.env.SUPABASE_URL || '';
+  return url ? `${url.replace(/\/$/, '')}/functions/v1` : '';
+};
+
 export const useChatDatabase = () => {
   const { user } = useAuthContext();
+  const queryClient = useQueryClient();
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<string>('');
@@ -206,7 +216,7 @@ export const useChatDatabase = () => {
     }
 
     // Create user message
-    const userMessage = await createMessageMutation.mutateAsync({
+    await createMessageMutation.mutateAsync({
       conversation_id: conversationId,
       role: 'user',
       content: content.trim(),
@@ -215,18 +225,59 @@ export const useChatDatabase = () => {
     setIsLoading(true);
     setStreamingMessage('');
 
-    // Get ready sources for quote generation
     const readySources = conversationSources.filter(s => s.status === 'ready');
     const crawlingSources = conversationSources.filter(s => s.status === 'crawling');
+    const hasSources = conversationSources.length > 0;
+    const functionsUrl = getFunctionsUrl();
 
-    // Generate response (still using mock for now - will replace with real AI later)
-    const fullResponse = generateSourcedResponse(
-      content,
-      readySources.length > 0,
-      crawlingSources.length > 0
-    );
+    let ragFailed = false;
+    let ragError: string | null = null;
+    if (hasSources && functionsUrl) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch(`${functionsUrl}/chat-with-rag`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          },
+          body: JSON.stringify({
+            conversationId,
+            userMessage: content.trim(),
+          }),
+        });
+        if (res.ok) {
+          queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+          setStreamingMessage('');
+          setIsLoading(false);
+          return;
+        }
+        ragFailed = true;
+        try {
+          const body = await res.json();
+          ragError = body?.error ?? body?.message ?? `HTTP ${res.status}`;
+        } catch {
+          ragError = `HTTP ${res.status}`;
+        }
+        console.error('[chat-with-rag]', res.status, ragError);
+      } catch (e) {
+        ragFailed = true;
+        ragError = e instanceof Error ? e.message : 'Network or request failed';
+        console.error('[chat-with-rag]', ragError);
+      }
+    }
 
-    // Generate quotes if we have ready sources
+    // Fallback: mock response (or clear error when RAG was tried but failed)
+    const fullResponse = ragFailed && hasSources
+      ? (ragError
+          ? `The assistant couldn't answer: **${ragError}** — Check that the crawl finished, chunks are indexed, and the Edge Function has the \`OPENAI_API_KEY\` secret set.`
+          : "The assistant couldn't answer right now. Make sure the crawl has finished and chunks are indexed (check the source drawer), then try again.")
+      : generateSourcedResponse(
+          content,
+          readySources.length > 0,
+          crawlingSources.length > 0
+        );
+
     const quotes = readySources.length > 0
       ? generateQuotesForMessage(
           content,
@@ -238,25 +289,22 @@ export const useChatDatabase = () => {
         )
       : [];
 
-    const sourcesUsed = [...new Set(quotes.map(q => q.sourceId))];
-
-    // Simulate streaming
     const words = fullResponse.split(' ');
     for (let i = 0; i < words.length; i++) {
       await new Promise(resolve => setTimeout(resolve, 30 + Math.random() * 20));
       setStreamingMessage(prev => prev + (i === 0 ? '' : ' ') + words[i]);
     }
 
-    // Create assistant message
     await createMessageMutation.mutateAsync({
       conversation_id: conversationId,
       role: 'assistant',
       content: fullResponse,
+      ...(quotes.length > 0 ? { quotes } : {}),
     });
 
     setStreamingMessage('');
     setIsLoading(false);
-  }, [activeConversationId, isLoading, currentSources, createConversationMutation, createMessageMutation]);
+  }, [activeConversationId, isLoading, currentSources, createConversationMutation, createMessageMutation, queryClient]);
 
   return {
     conversations,

@@ -13,6 +13,7 @@ export interface Source {
   id: string;
   url: string;
   domain: string;
+  source_label?: string | null; // Human-readable label (e.g. "Joe Biden"). domain = hostname.
   favicon?: string;
   status: SourceStatus;
   crawlDepth: CrawlDepth;
@@ -33,6 +34,9 @@ export interface Quote {
   pageTitle: string;
   pagePath: string;
   domain: string;
+  pageUrl?: string; // Full canonical URL - prefer over constructing from domain+path
+  contextBefore?: string;
+  contextAfter?: string;
 }
 
 export interface SourcedMessage {

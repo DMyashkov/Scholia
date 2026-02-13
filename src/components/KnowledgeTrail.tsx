@@ -49,16 +49,16 @@ export const KnowledgeTrail = ({ sources, onSourceClick }: KnowledgeTrailProps) 
                     'hover:text-foreground'
                   )}>
                     <span className="text-primary/80 font-semibold">
-                      {source.domain.charAt(0).toUpperCase()}
+                      {(source.source_label ?? source.domain).charAt(0).toUpperCase()}
                     </span>
                     <span className="max-w-[60px] truncate">
-                      {source.domain.split('.')[0]}
+                      {(source.source_label ?? source.domain).split('.')[0]}
                     </span>
                   </div>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top" className="text-xs">
-                <p className="font-medium">{source.domain}</p>
+                <p className="font-medium">{source.source_label ?? source.domain}</p>
                 <p className="text-muted-foreground">Click to view source</p>
               </TooltipContent>
             </Tooltip>

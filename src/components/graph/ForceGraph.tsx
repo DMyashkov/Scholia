@@ -231,7 +231,13 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
     return getConnectedNodeIds(hoveredNode, links);
   }, [hoveredNode, links]);
 
-  const showLabels = zoomLevel > 0.6;
+  const showLabels = zoomLevel > 0.5;
+  // Scale font with zoom: smaller when zoomed in (less overlap), larger when zoomed out. Zoom range is 0.2–5.
+  const labelFontSize = Math.max(4, Math.min(22, 10 / zoomLevel));
+  // More chars when zoomed in (more room between nodes)
+  const maxLabelChars = Math.round(22 + zoomLevel * 8);
+  // Tooltip scales with zoom so it's proportionate to the graph (smaller when zoomed in)
+  const tooltipScale = Math.max(0.65, Math.min(1.1, 1 / zoomLevel));
 
   return (
     <div 
@@ -291,8 +297,18 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
             const isConnected = connectedNodes.has(node.id);
             const isFaded = hoveredNode && !isConnected;
             
-            // Truncate long titles
-            const displayTitle = node.title.length > 24 ? node.title.slice(0, 22) + '…' : node.title;
+            // Truncate long titles - allow more chars when zoomed in (more room)
+            const displayTitle = node.title.length > maxLabelChars ? node.title.slice(0, maxLabelChars - 2) + '…' : node.title;
+
+            // Label layout: offset from node scales with font (smaller font = tighter to node)
+            // Padding scales with font so rect doesn't dwarf text at max zoom
+            const charWidthApprox = labelFontSize * 0.55;
+            const hPad = Math.max(2, labelFontSize * 0.5);
+            const vPad = Math.max(1, labelFontSize * 0.35);
+            const labelWidth = displayTitle.length * charWidthApprox + hPad * 2;
+            const labelHeight = labelFontSize + vPad * 2;
+            const gapFromNode = 5 + labelFontSize * 0.3;
+            const labelBaseline = -5 - gapFromNode - labelFontSize;
 
             return (
               <g
@@ -327,28 +343,27 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
                   strokeWidth={1.5}
                   style={{ transition: 'r 200ms ease' }}
                 />
-                {/* Label - with background for readability */}
+                {/* Label - rect centered under text, both positioned together */}
                 {(showLabels || isHovered || isConnected) && (
                   <>
                     <rect
-                      x={-displayTitle.length * 2.8 - 4}
-                      y={-24}
-                      width={displayTitle.length * 5.6 + 8}
-                      height={16}
+                      x={-labelWidth / 2}
+                      y={labelBaseline - vPad}
+                      width={labelWidth}
+                      height={labelHeight}
                       rx={4}
                       fill="hsl(var(--background) / 0.9)"
                       className="pointer-events-none"
-                      style={{ transition: 'opacity 200ms ease' }}
                     />
                     <text
-                      dy={-12}
+                      x={0}
+                      dy={labelBaseline + labelFontSize}
                       textAnchor="middle"
                       fill="hsl(var(--foreground))"
-                      fontSize="10px"
+                      fontSize={`${labelFontSize}px`}
                       fontWeight={isHovered ? 500 : 400}
                       opacity={isHovered ? 1 : 0.85}
                       className="pointer-events-none select-none"
-                      style={{ transition: 'opacity 200ms ease' }}
                     >
                       {displayTitle}
                     </text>
@@ -360,19 +375,33 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
         </g>
       </svg>
       
-      {/* Tooltip - follows cursor/node position */}
+      {/* Tooltip - follows cursor/node position, kept within bounds */}
       {tooltipData && (
         <div 
-          className="absolute z-20 px-2 py-1 text-xs bg-popover text-popover-foreground rounded-md shadow-lg border border-border pointer-events-none max-w-[180px]"
+          className="absolute z-20 px-3 py-2 text-sm bg-popover text-popover-foreground rounded-lg shadow-lg border border-border pointer-events-none max-w-[260px]"
           style={{
-            left: Math.min(tooltipData.x + 12, dimensions.width - 100),
-            top: Math.max(tooltipData.y - 30, 8),
+            left: (() => {
+              const pad = 12;
+              const tipW = 260;
+              const x = tooltipData.x + pad;
+              if (x + tipW > dimensions.width - pad) return dimensions.width - tipW - pad;
+              if (x < pad) return pad;
+              return x;
+            })(),
+            top: (() => {
+              const pad = 8;
+              const tipH = 48;
+              const y = tooltipData.y - tipH - 8;
+              if (y < pad) return tooltipData.y + pad;
+              if (y + tipH > dimensions.height - pad) return Math.max(pad, dimensions.height - tipH - pad);
+              return y;
+            })(),
             transition: 'opacity 150ms ease',
           }}
         >
-          <div className="font-medium truncate">{tooltipData.node.title}</div>
+          <div className="font-medium break-words line-clamp-3">{tooltipData.node.title}</div>
           {tooltipData.node.url && (
-            <div className="text-[10px] text-muted-foreground truncate opacity-75">
+            <div className="text-[11px] text-muted-foreground truncate opacity-75 mt-0.5">
               Click to open
             </div>
           )}

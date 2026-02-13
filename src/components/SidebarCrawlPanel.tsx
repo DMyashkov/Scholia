@@ -176,7 +176,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
       const path = urlObj.pathname || '/';
       displayPages = [{
         id: `placeholder-${startingSource.id}`,
-        title: startingSource.domain || urlObj.hostname,
+        title: (startingSource.source_label ?? startingSource.domain) || urlObj.hostname,
         path: path,
         status: 'crawling' as const,
         url: sourceUrl,
@@ -196,7 +196,8 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
       return sum + jobIndexedCount;
     }, 0)
   );
-  const activeDomain = activeSource?.domain;
+  const activeDisplayName = activeSource ? (activeSource.source_label ?? activeSource.domain) : null;
+  const activeDomain = activeSource?.domain; // Hostname for URL construction (ForceGraph)
 
   if (!hasAnySources) return null;
 
@@ -206,7 +207,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
       <div className="p-3 space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            {activeSource ? activeSource.domain : 'All Sources'}
+            {activeDisplayName ?? 'All Sources'}
           </span>
           {isCrawling && (
             <span className="text-[10px] text-primary flex items-center gap-1">
@@ -241,7 +242,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
                     : 'bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary/70'
                 )}
               >
-                {source.domain}
+                {source.source_label ?? source.domain}
               </button>
             ))}
           </div>
@@ -312,7 +313,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
               "truncate",
               activeSourceId === source.id ? "text-foreground" : "text-muted-foreground"
             )}>
-              {source.domain}
+              {source.source_label ?? source.domain}
             </span>
             <span className="ml-auto text-[10px] tabular-nums">
               {source.pagesIndexed}/{source.totalPages}

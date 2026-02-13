@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Quote } from '@/types/source';
-import { mockPageContents } from '@/data/mockSourceContent';
 import {
   Sheet,
   SheetContent,
@@ -10,7 +9,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ExternalLink, Copy, ChevronLeft, ChevronRight, Check, FileText } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 interface SourcePreviewDrawerProps {
   quote: Quote | null;
@@ -34,62 +32,13 @@ export const SourcePreviewDrawer = ({
   const hasPrevious = currentIndex > 0;
   const hasNext = currentIndex < allQuotes.length - 1;
 
-  // Get mock content for this page
-  const getPageContent = () => {
-    if (!quote) return '';
-    const contentKey = Object.keys(mockPageContents).find(key => 
-      key.includes(quote.domain.split('.')[0]) || 
-      quote.pagePath.toLowerCase().includes(key.split('-')[1] || '')
-    );
-    return contentKey ? mockPageContents[contentKey] : `
-Page content for ${quote.pageTitle}
-
-This is a mock preview of the source page. In a production environment, this would show the actual crawled content from the website.
-
-The quoted snippet would be highlighted within the full context of the page, allowing you to understand the surrounding information.
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
-
-Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-    `;
-  };
-
-  const content = getPageContent();
-  
-  // Split content into paragraphs and highlight the quoted snippet within context
-  const renderHighlightedContent = () => {
-    if (!quote) return null;
-    
-    const paragraphs = content.split('\n\n').filter(p => p.trim());
-    
-    return paragraphs.map((paragraph, idx) => {
-      // Check if this paragraph contains the quote snippet
-      const snippetIndex = paragraph.indexOf(quote.snippet);
-      
-      if (snippetIndex !== -1) {
-        // This paragraph contains the quote - highlight the exact words
-        const before = paragraph.slice(0, snippetIndex);
-        const after = paragraph.slice(snippetIndex + quote.snippet.length);
-        
-        return (
-          <div key={idx} className="relative pl-4 border-l-4 border-primary bg-primary/5 py-3 pr-3 -ml-2 rounded-r-lg">
-            <p className="text-base text-foreground leading-relaxed">
-              <span className="text-foreground/70">{before}</span>
-              <mark className="bg-yellow-400/40 dark:bg-yellow-500/30 text-foreground px-1 py-0.5 rounded font-medium border-b-2 border-yellow-500/60">
-                {quote.snippet}
-              </mark>
-              <span className="text-foreground/70">{after}</span>
-            </p>
-          </div>
-        );
-      }
-      return (
-        <p key={idx} className="text-base text-muted-foreground/80 leading-relaxed">
-          {paragraph.trim()}
-        </p>
-      );
-    });
-  };
+  // Use canonical pageUrl from backend when available (avoids domain+path bugs e.g. wrong domain)
+  const baseUrl = quote?.pageUrl ?? (quote ? `https://${quote.domain}${quote.pagePath}` : '');
+  const baseNoHash = baseUrl ? baseUrl.split('#')[0] : '';
+  // Scroll to Text Fragment: highlight and scroll to the quoted snippet on the source page (supported in Chrome, Edge, Safari 16.4+)
+  const openPageUrl = quote && quote.snippet && baseNoHash
+    ? `${baseNoHash}#:~:text=${encodeURIComponent(quote.snippet.slice(0, 100).trim())}`
+    : baseUrl;
 
   const handleCopy = async () => {
     if (!quote) return;
@@ -99,9 +48,8 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
   };
 
   const handleOpenPage = () => {
-    if (!quote) return;
-    // In production, this would open the actual URL
-    window.open(`https://${quote.domain}${quote.pagePath}`, '_blank', 'noopener,noreferrer');
+    if (!openPageUrl) return;
+    window.open(openPageUrl, '_blank', 'noopener,noreferrer');
   };
 
   // Always render Sheet for smooth animations
@@ -162,26 +110,43 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
         {/* Scrollable content area - fills remaining space */}
         <ScrollArea className="flex-1 min-h-0">
           <div className="p-6 space-y-5">
-            {/* Original quoted snippet - prominently highlighted */}
+            {/* Snippet with surrounding context from the source */}
             <div className="space-y-2">
               <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Quoted Snippet
+                In context
               </h4>
-              <div className="relative pl-4 border-l-4 border-primary bg-primary/10 rounded-r-lg py-3 pr-4">
+              <div className="relative pl-4 border-l-4 border-primary bg-primary/10 rounded-r-lg py-3 pr-4 space-y-1">
+                {quote.contextBefore && (
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {quote.contextBefore}
+                  </p>
+                )}
                 <p className="text-base font-serif italic text-foreground leading-relaxed">
                   "{quote.snippet}"
                 </p>
+                {quote.contextAfter && (
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {quote.contextAfter}
+                  </p>
+                )}
               </div>
             </div>
 
-            {/* Page content with highlighted quote */}
-            <div className="space-y-3">
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Page Context
-              </h4>
-              <div className="space-y-4">
-                {renderHighlightedContent()}
-              </div>
+            {/* Link to open source page (with Scroll to Text Fragment so the snippet is highlighted) */}
+            <div className="pt-2">
+              <a
+                href={openPageUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleOpenPage();
+                }}
+              >
+                <ExternalLink className="h-4 w-4" />
+                Open source page
+              </a>
             </div>
           </div>
         </ScrollArea>

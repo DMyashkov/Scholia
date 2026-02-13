@@ -18,7 +18,7 @@ const extractDomain = (url: string): string => {
 };
 
 const MIN_SIDEBAR_WIDTH = 200;
-const MAX_SIDEBAR_WIDTH = 400;
+const MAX_SIDEBAR_WIDTH = 600; // Up to ~45% of typical 1440px screen
 const DEFAULT_SIDEBAR_WIDTH = 280;
 
 const Index = () => {

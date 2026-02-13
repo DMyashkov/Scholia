@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
 import RobotsParser from 'robots-parser';
 import { supabase } from './db';
+import { indexConversationForRag } from './indexer';
 import type { CrawlJob, Source, Page, PageEdge } from './types';
 
 const MAX_PAGES: Record<Source['crawl_depth'], number> = {
@@ -11,8 +12,6 @@ const MAX_PAGES: Record<Source['crawl_depth'], number> = {
 };
 
 export async function processCrawlJob(jobId: string) {
-  console.log(`\n🎯 ========== PROCESSING JOB ${jobId.substring(0, 8)}... ==========`);
-  console.log(`🎯 Timestamp: ${new Date().toISOString()}`);
 
   try {
     // Get the crawl job
@@ -26,17 +25,9 @@ export async function processCrawlJob(jobId: string) {
       console.error(`❌ Failed to fetch job ${jobId}:`, jobError);
       return;
     }
-    
-    console.log(`📋 Job details:`, {
-      id: job.id.substring(0, 8),
-      source_id: job.source_id?.substring(0, 8),
-      conversation_id: job.conversation_id?.substring(0, 8) || 'NULL',
-      status: job.status,
-    });
 
     // Check if job is still queued or running (might have been claimed)
     if (job.status !== 'queued' && job.status !== 'running') {
-      console.log(`⏭️  Job ${jobId} is ${job.status}, skipping`);
       return;
     }
 
@@ -53,15 +44,6 @@ export async function processCrawlJob(jobId: string) {
       return;
     }
 
-    console.log(`🎯 Processing job ${jobId} for source: ${source.url}`);
-  console.log(`📋 Job conversation_id: ${job.conversation_id || 'NULL/MISSING'} (job id: ${jobId.substring(0, 8)}...)`);
-  console.log(`📋 Full job data:`, {
-    id: job.id.substring(0, 8),
-    source_id: job.source_id?.substring(0, 8),
-    conversation_id: job.conversation_id || 'NULL',
-    status: job.status,
-  });
-  
   if (!job.conversation_id) {
     console.error(`❌ WARNING: Job ${jobId} has no conversation_id! This will cause pages to be created with wrong conversation_id.`);
   }
@@ -72,15 +54,10 @@ export async function processCrawlJob(jobId: string) {
     }
 
     // Start crawling
-    console.log(`🕷️  About to call crawlSource for job ${jobId.substring(0, 8)}...`);
     await crawlSource(job, source);
-    console.log(`✅ crawlSource completed for job ${jobId.substring(0, 8)}...`);
 
     // Mark as completed
-    console.log(`📝 Marking job ${jobId.substring(0, 8)}... as completed`);
     await updateJobStatus(jobId, 'completed', null, null, new Date().toISOString());
-    console.log(`✅ Job ${jobId.substring(0, 8)}... marked as completed`);
-    console.log(`🎯 ========== JOB ${jobId.substring(0, 8)}... COMPLETE ==========\n`);
 
   } catch (error) {
     console.error(`\n❌ ========== FATAL ERROR PROCESSING JOB ${jobId.substring(0, 8)}... ==========`);
@@ -120,7 +97,6 @@ async function crawlSource(job: CrawlJob, source: Source) {
       throw new Error(`conversation_id is null for source ${source.id}`);
     }
     
-    console.log(`📋 Using fallback conversation_id: ${fallbackConversationId}`);
     conversationId = fallbackConversationId;
   }
   
@@ -142,7 +118,6 @@ async function crawlSource(job: CrawlJob, source: Source) {
     
     if (convSources && convSources.length > 0) {
       const correctConversationId = convSources[0].conversation_id;
-      console.log(`📋 Found correct conversation_id from conversation_sources: ${correctConversationId}`);
       
       // Update the crawl job with the correct conversation_id
       await supabase
@@ -156,12 +131,9 @@ async function crawlSource(job: CrawlJob, source: Source) {
     }
   }
   
-  console.log(`📋 Crawling for conversation: ${conversationId}`);
-  console.log(`📋 VERIFY: conversationId=${conversationId}, job.conversation_id=${job.conversation_id}, source.id=${source.id}`);
   
   // Double-check: verify the conversation_id matches what's in the job
   if (job.conversation_id && job.conversation_id !== conversationId) {
-    console.warn(`⚠️ MISMATCH: job.conversation_id (${job.conversation_id}) != resolved conversationId (${conversationId})`);
   }
   
   return crawlSourceWithConversationId(job, source, conversationId);
@@ -180,9 +152,6 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
   discovered.add(source.url);
   let linksCount = 0;
 
-  console.log(`🕷️  Starting crawl for source ${source.id}: ${source.url} (max: ${maxPages} pages)`);
-  console.log(`🕷️  VERIFY: conversationId=${conversationId?.substring(0, 8) || 'NULL'}..., job.conversation_id=${job.conversation_id?.substring(0, 8) || 'NULL'}...`);
-  console.log(`🕷️  Queue initialized with starting URL: ${source.url}`);
 
   // Update source title from first page crawled
   let sourceTitleUpdated = false;
@@ -195,14 +164,10 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
     if (robotsResponse.ok) {
       const robotsText = await robotsResponse.text();
       robotsParser = RobotsParser(robotsUrl, robotsText);
-      console.log(`✅ Loaded robots.txt for ${source.domain}`);
     }
   } catch (error) {
-    console.warn(`⚠️  Failed to fetch robots.txt for ${source.url}:`, error);
   }
 
-  console.log(`🔄 Starting crawl loop: queue.length=${queue.length}, visited.size=${visited.size}, maxPages=${maxPages}`);
-  console.log(`🔄 VERIFY: Queue has ${queue.length} item(s), first item: ${queue[0]?.url || 'NONE'}`);
   
   if (queue.length === 0) {
     console.error(`❌ CRITICAL: Queue is empty before starting crawl! This should never happen.`);
@@ -213,12 +178,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
   let loopIterations = 0;
   while (queue.length > 0 && visited.size < maxPages) {
     loopIterations++;
-    if (loopIterations === 1) {
-      console.log(`🔄 First iteration of crawl loop - queue.length=${queue.length}, visited.size=${visited.size}`);
-    } else if (loopIterations % 5 === 0) {
-      console.log(`🔄 Loop iteration ${loopIterations}: visited=${visited.size}, queue=${queue.length}`);
-    }
-    
+
     if (loopIterations === 1 && queue.length === 0) {
       console.error(`❌ CRITICAL: Queue became empty on first iteration!`);
       break;
@@ -244,14 +204,11 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
 
     // Check robots.txt
     if (robotsParser && !robotsParser.isAllowed(normalizedUrl, 'ScholiaCrawler')) {
-      console.log(`🚫 Blocked by robots.txt: ${normalizedUrl}`);
       continue;
     }
 
     try {
       const linkType = priority === 0 ? '🎯 STARTING PAGE' : priority === 1 ? '⭐ DIRECT LINK' : `🔗 Depth ${depth} link`;
-      console.log(`📄 Fetching [${visited.size + 1}/${maxPages}]: ${normalizedUrl} (${linkType})`);
-      console.log(`🔗 About to call crawlPage with conversationId: ${conversationId} (exists: ${!!conversationId})`);
       if (!conversationId) {
         throw new Error(`conversationId is null before calling crawlPage!`);
       }
@@ -267,63 +224,38 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       
       const { page, html } = result;
       visited.add(normalizedUrl);
-      console.log(`✅ Successfully crawled and indexed: ${normalizedUrl}`);
-      console.log(`✅ VERIFIED: Page inserted with id: ${page.id.substring(0, 8)}..., conversation_id: ${(page as any).conversation_id?.substring(0, 8) || 'NULL'}...`);
       
-      // Update source title from first page (use page title instead of domain)
+      // Update source_label from first page (human-readable label for UI). domain stays as hostname.
       if (!sourceTitleUpdated && page.title) {
-          const pageTitle = page.title.replace(/\s*-\s*Wikipedia.*$/i, '').trim(); // Remove " - Wikipedia" suffix
-          if (pageTitle && pageTitle !== source.domain && pageTitle.length > 0) {
+          const pageTitle = page.title.replace(/\s*-\s*Wikipedia.*$/i, '').trim();
+          if (pageTitle && pageTitle.length > 0) {
             try {
-              await supabase
+              const { error } = await supabase
                 .from('sources')
-                .update({ domain: pageTitle.substring(0, 100) }) // Limit length
+                .update({ source_label: pageTitle.substring(0, 100) })
                 .eq('id', source.id);
-              source.domain = pageTitle.substring(0, 100);
-              console.log(`📝 Updated source title to: ${pageTitle}`);
+              if (!error) {
+                (source as { source_label?: string }).source_label = pageTitle.substring(0, 100);
+              }
               sourceTitleUpdated = true;
-            } catch (err) {
-              console.warn(`⚠️  Failed to update source title:`, err);
+            } catch (_err) {
+              // Non-blocking
             }
           }
       }
 
       // Extract links BEFORE updating progress (so we count discovered)
-      console.log(`🔍 Starting link extraction from ${normalizedUrl}...`);
       const startTime = Date.now();
       const links = extractLinks(html, normalizedUrl, source);
       const extractionTime = Date.now() - startTime;
       const newLinks: string[] = [];
       const edgesToInsert: Array<{conversation_id: string; source_id: string; from_page_id: string; from_url: string; to_url: string; owner_id: string | null}> = [];
       
-      console.log(`🔗 Found ${links.length} links from ${normalizedUrl} (took ${extractionTime}ms)`);
-      console.log(`📌 Creating edges FROM page: "${page.title?.substring(0, 50)}" (${normalizedUrl.substring(0, 60)})`);
-      console.log(`📊 BEFORE processing links: queue.length=${queue.length}, visited.size=${visited.size}, discovered.size=${discovered.size}`);
       
       // Links are already sorted with priority first (from extractLinks)
       // Take first 200 links (which includes priority links first)
       const linksToProcess = links.slice(0, 200);
-      
-      if (links.length > 200) {
-        console.log(`⚠️  Limiting to ${linksToProcess.length} links (${links.length} total found)`);
-      }
-      
-      if (linksToProcess.length === 0) {
-        console.warn(`⚠️  WARNING: No links to process from ${normalizedUrl}! This will cause the crawl to stop.`);
-      }
-      
-      // Debug: Log first few links that will become edges
-      if (linksToProcess.length > 0) {
-        console.log(`🔗 First 5 links from "${page.title?.substring(0, 30)}":`, linksToProcess.slice(0, 5).map(l => {
-          try {
-            const u = new URL(l);
-            return u.pathname.substring(0, 40);
-          } catch {
-            return l.substring(0, 40);
-          }
-        }));
-      }
-      
+
       for (const link of linksToProcess) {
           // Links are already normalized by extractLinks, but double-check normalization
           const linkUrlObj = new URL(link);
@@ -347,17 +279,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
             to_url: normalizedLink,
             owner_id: source.owner_id,
           });
-          
-          // Debug: Log first edge to verify conversation_id
-          if (edgesToInsert.length === 1) {
-            console.log(`🔗 VERIFY EDGE: conversation_id=${conversationId?.substring(0, 8) || 'NULL'}..., from=${normalizedUrl.substring(0, 40)}, to=${normalizedLink.substring(0, 40)}`);
-          }
-          
-          // Debug: Log first 3 edges to verify they're correct
-          if (edgesToInsert.length <= 3) {
-            console.log(`  ✅ Edge ${edgesToInsert.length}: "${page.title?.substring(0, 25)}" -> ${normalizedLink.substring(0, 50)}`);
-          }
-          
+
           if (!discovered.has(normalizedLink)) {
             discovered.add(normalizedLink);
             newLinks.push(normalizedLink);
@@ -373,20 +295,14 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
             if (visited.size + queue.length < maxPages && depth < 2) {
               const linkPriority = priority === 0 ? 1 : priority + 1; // Direct links from start get priority 1
               queue.push({ url: normalizedLink, depth: depth + 1, priority: linkPriority });
-              // Only log every 10th queued link to avoid spam
-              if (newLinks.length % 10 === 0) {
-                console.log(`➕ Queued ${newLinks.length} links so far (queue: ${queue.length}, visited: ${visited.size}, direct links from start: ${directLinksFromStart.length})`);
-              }
             }
           }
       }
       
-      console.log(`📊 AFTER processing links: queue.length=${queue.length}, visited.size=${visited.size}, discovered.size=${discovered.size}, newLinks.length=${newLinks.length}, edgesToInsert.length=${edgesToInsert.length}`);
       
       // Insert edges immediately after page insertion for real-time UI updates
       // CRITICAL: Edge insertion errors must NOT stop the crawl - wrap in try-catch
       if (edgesToInsert.length > 0) {
-        console.log(`💾 Inserting ${edgesToInsert.length} edges from "${page.title?.substring(0, 30)}"...`);
         
         try {
           const edgeStart = Date.now();
@@ -409,7 +325,6 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
                   successCount += chunk.length;
                 } else {
                   // Non-duplicate error - log but don't block
-                  console.warn(`⚠️  Edge batch insert error (non-critical):`, batchError.message?.substring(0, 100));
                   // Estimate success to keep crawl going
                   successCount += Math.floor(chunk.length * 0.5);
                 }
@@ -418,7 +333,6 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
               }
             } catch (chunkError: any) {
               // CRITICAL: Log but don't throw - continue with next chunk
-              console.warn(`⚠️  Exception inserting edge chunk (non-blocking):`, chunkError?.message?.substring(0, 100));
               // Estimate success for this chunk so crawl continues
               successCount += Math.floor(chunk.length * 0.5);
             }
@@ -431,10 +345,8 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
           
           linksCount += successCount;
           const edgeTime = Date.now() - edgeStart;
-          console.log(`✅ Inserted ${successCount}/${edgesToInsert.length} edges in ${edgeTime}ms`);
         } catch (edgeError: any) {
           // CRITICAL: Log error but continue crawling - edges are not critical
-          console.warn(`⚠️  Error inserting edges (non-blocking): ${edgeError?.message}`);
           // Estimate links count so crawl can continue
           linksCount += Math.floor(edgesToInsert.length * 0.8);
         }
@@ -452,7 +364,6 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
         })
         .eq('id', job.id);
 
-      console.log(`✅ Indexed [${visited.size}/${maxPages}]: ${page.title || 'Untitled'} (${linksToProcess.length} links processed, ${newLinks.length} new, queue: ${queue.length}, discovered: ${discovered.size})`);
 
       // Small delay to be respectful
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -476,14 +387,13 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
     })
     .eq('id', job.id);
 
-  console.log(`\n🎉 ========== CRAWL COMPLETE ==========`);
-  console.log(`🎉 Pages indexed: ${visited.size}`);
-  console.log(`🎉 Pages discovered: ${discovered.size}`);
-  console.log(`🎉 Edges created: ${linksCount}`);
-  console.log(`🎉 Loop iterations: ${loopIterations}`);
-  console.log(`🎉 Queue remaining: ${queue.length}`);
-  console.log(`🎉 VERIFY: If pages/edges are missing, check if crawlPage returned null (insertion failed)`);
-  
+
+  try {
+    await indexConversationForRag(conversationId);
+  } catch (_indexErr) {
+    // Non-blocking; encoding logs are in indexer
+  }
+
   if (loopIterations === 0) {
     console.error(`❌ CRITICAL: Crawl loop never ran! Loop iterations = 0`);
     console.error(`❌ This means the while condition was false from the start.`);
@@ -506,14 +416,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
   if (verifyError) {
     console.error(`❌ Error verifying pages:`, verifyError);
   } else {
-    console.log(`✅ VERIFICATION: Found ${insertedPages?.length || 0} pages in DB for conversation ${conversationId.substring(0, 8)}...`);
-    if (insertedPages && insertedPages.length > 0) {
-      console.log(`✅ Sample pages:`, insertedPages.map(p => ({
-        id: p.id.substring(0, 8),
-        conversation_id: p.conversation_id?.substring(0, 8),
-        url: p.url?.substring(0, 50),
-      })));
-    } else {
+    if (!insertedPages || insertedPages.length === 0) {
       console.error(`❌ CRITICAL: No pages found in DB even though visited.size=${visited.size}!`);
       console.error(`❌ This means all page insertions failed. Check error logs above.`);
     }
@@ -522,14 +425,12 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
 
 async function crawlPage(url: string, source: Source, job: CrawlJob, conversationId: string): Promise<{ page: Page; html: string } | null> {
   // Validate conversationId
-  console.log(`🔍 crawlPage called with conversationId: ${conversationId} (type: ${typeof conversationId})`);
   if (!conversationId) {
     console.error(`❌ conversationId is required but was: ${conversationId}`);
     throw new Error(`conversationId is required for page insertion`);
   }
 
   try {
-    console.log(`🌐 Fetching ${url}...`);
     const fetchStart = Date.now();
     const response = await fetch(url, {
       headers: {
@@ -542,12 +443,9 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
       throw new Error(`HTTP ${response.status}`);
     }
 
-    console.log(`📥 Downloading HTML...`);
     const html = await response.text();
     const fetchTime = Date.now() - fetchStart;
-    console.log(`✅ Downloaded ${(html.length / 1024).toFixed(1)}KB in ${fetchTime}ms`);
     
-    console.log(`🔧 Loading into cheerio...`);
     const $ = cheerio.load(html);
 
     // Extract title
@@ -573,9 +471,7 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
       throw new Error(`conversationId is required but was: ${conversationId}`);
     }
     
-    console.log(`💾 Inserting page with conversation_id: ${conversationId} (job.conversation_id: ${job.conversation_id}), source_id: ${source.id}`);
     
-    console.log(`💾 VERIFY PAGE INSERT: conversationId=${conversationId?.substring(0, 8) || 'NULL'}..., source.id=${source.id.substring(0, 8)}..., url=${url.substring(0, 50)}`);
     const insertData = {
       source_id: source.id,
       conversation_id: conversationId,
@@ -586,16 +482,7 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
       status: 'indexed' as const,
       owner_id: source.owner_id,
     };
-    
-    console.log(`📝 Insert data:`, { 
-      source_id: insertData.source_id?.substring(0, 8) + '...', 
-      conversation_id: insertData.conversation_id?.substring(0, 8) + '...',
-      job_conversation_id: job.conversation_id?.substring(0, 8) + '...',
-      url: insertData.url?.substring(0, 50),
-      hasContent: !!insertData.content,
-      match: insertData.conversation_id === job.conversation_id ? '✅' : '❌ MISMATCH'
-    });
-    
+
     const { data: page, error } = await supabase
       .from('pages')
       .insert(insertData)
@@ -627,7 +514,6 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
         .single();
 
       if (existing) {
-        console.log(`✅ Found existing page (duplicate): ${url}`);
         return { page: existing as Page, html };
       }
       const errorDetails = {
@@ -645,11 +531,9 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
       };
       console.error(`❌ No existing page found, error details:`, JSON.stringify(errorDetails, null, 2));
       // Don't throw - return null so crawler can continue
-      console.warn(`⚠️  Skipping page ${url} due to insertion error`);
       return null;
     }
 
-    console.log(`✅ Successfully inserted page: ${url} with conversation_id: ${page?.conversation_id}`);
     return { page: page as Page, html };
   } catch (error) {
     console.error(`Failed to crawl page ${url}:`, error);
@@ -659,11 +543,9 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
 
 function extractLinks(html: string, pageUrl: string, source: Source): string[] {
   try {
-    console.log(`📝 Parsing HTML (${(html.length / 1024).toFixed(1)}KB)...`);
     const parseStart = Date.now();
     const $ = cheerio.load(html);
     const parseTime = Date.now() - parseStart;
-    console.log(`✅ HTML parsed in ${parseTime}ms`);
     
     // Find main content area (prioritize links in main content)
     const mainContent = $('main, article, #content, #bodyContent, .mw-parser-output').first();
@@ -693,7 +575,6 @@ function extractLinks(html: string, pageUrl: string, source: Source): string[] {
     }
     const normalizedCurrentUrl = currentUrlObj.toString();
 
-    console.log(`🔍 Extracting links from ${pageUrl}...`);
     let totalLinksFound = 0;
     let skippedAnchor = 0;
     let skippedSamePage = 0;
@@ -706,7 +587,6 @@ function extractLinks(html: string, pageUrl: string, source: Source): string[] {
     const earlyContentLinks = earlyContentSelector.find('a[href]');
     const mainContentLinks = contentSelector.find('a[href]');
     const allLinks = $('a[href]');
-    console.log(`📊 Found ${allLinks.length} total links (${mainContentLinks.length} in main content, ${earlyContentLinks.length} in first paragraphs)`);
     
     // Process early content links first for proximity-based prioritization
     const linkElements = earlyContentLinks.length > 0 ? earlyContentLinks : (mainContentLinks.length > 0 ? mainContentLinks : allLinks);
@@ -716,7 +596,6 @@ function extractLinks(html: string, pageUrl: string, source: Source): string[] {
     linkElements.each((_, element) => {
       processedCount++;
       if (processedCount % logInterval === 0) {
-        console.log(`  ⏳ Processed ${processedCount}/${linkElements.length} links...`);
       }
       const href = $(element).attr('href');
       if (!href) return;
@@ -838,7 +717,6 @@ function extractLinks(html: string, pageUrl: string, source: Source): string[] {
         }
       } catch (urlError) {
         // Invalid URL, skip
-        console.log(`⚠️  Invalid URL skipped: ${href}`);
       }
     });
 
@@ -846,8 +724,6 @@ function extractLinks(html: string, pageUrl: string, source: Source): string[] {
     // This ensures we crawl links "close to the source" first
     const allValidLinks = [...earlyLinks, ...priorityLinks, ...links];
     const summary = `📊 Link extraction summary: ${totalLinksFound} total, ${added} added (${earlyLinks.length} early, ${priorityLinks.length} main content), ${skippedAnchor} anchor-only, ${skippedSamePage} same-page, ${skippedDomain} filtered, ${skippedPdf} PDF, ${skippedProtocol} wrong-protocol`;
-    console.log(summary);
-    console.log(`✅ Returning ${allValidLinks.length} valid links (${earlyLinks.length} from first paragraphs, ${priorityLinks.length} from main content)`);
     return allValidLinks;
   } catch (error) {
     console.error(`❌ Error extracting links:`, error);
@@ -899,7 +775,6 @@ export async function claimJob(): Promise<CrawlJob | null> {
     .limit(10);
 
   if (stuckJobs && stuckJobs.length > 0) {
-    console.log(`🔄 Reclaiming ${stuckJobs.length} stuck job(s)`);
     // Reset to queued so they can be claimed
     const stuckIds = stuckJobs.map(j => j.id);
     await supabase

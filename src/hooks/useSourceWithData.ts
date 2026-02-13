@@ -33,6 +33,7 @@ export const useSourceWithData = (dbSource: DBSource | null): Source | null => {
     id: dbSource.id,
     url: dbSource.url,
     domain: dbSource.domain,
+    source_label: (dbSource as { source_label?: string | null }).source_label ?? undefined,
     favicon: dbSource.favicon || undefined,
     status,
     crawlDepth: dbSource.crawl_depth,

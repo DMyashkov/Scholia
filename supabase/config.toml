@@ -1,0 +1,5 @@
+# Skip gateway JWT verification so the function receives the request.
+# The function still uses the Authorization header to create a user-scoped Supabase
+# client; RLS applies to all DB calls. Required when using publishable keys.
+[functions.chat-with-rag]
+verify_jwt = false

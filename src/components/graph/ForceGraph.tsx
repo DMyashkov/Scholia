@@ -236,8 +236,6 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
   const labelFontSize = Math.max(4, Math.min(22, 10 / zoomLevel));
   // More chars when zoomed in (more room between nodes)
   const maxLabelChars = Math.round(22 + zoomLevel * 8);
-  // Tooltip scales with zoom so it's proportionate to the graph (smaller when zoomed in)
-  const tooltipScale = Math.max(0.65, Math.min(1.1, 1 / zoomLevel));
 
   return (
     <div 
@@ -375,14 +373,14 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
         </g>
       </svg>
       
-      {/* Tooltip - follows cursor/node position, kept within bounds */}
+      {/* Tooltip - fixed size (screen pixels), stays consistent regardless of zoom */}
       {tooltipData && (
         <div 
-          className="absolute z-20 px-3 py-2 text-sm bg-popover text-popover-foreground rounded-lg shadow-lg border border-border pointer-events-none max-w-[260px]"
+          className="absolute z-20 px-2.5 py-1.5 text-xs max-w-[200px] bg-popover text-popover-foreground rounded-md shadow-lg border border-border pointer-events-none"
           style={{
             left: (() => {
-              const pad = 12;
-              const tipW = 260;
+              const pad = 10;
+              const tipW = 200;
               const x = tooltipData.x + pad;
               if (x + tipW > dimensions.width - pad) return dimensions.width - tipW - pad;
               if (x < pad) return pad;
@@ -390,7 +388,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
             })(),
             top: (() => {
               const pad = 8;
-              const tipH = 48;
+              const tipH = 42;
               const y = tooltipData.y - tipH - 8;
               if (y < pad) return tooltipData.y + pad;
               if (y + tipH > dimensions.height - pad) return Math.max(pad, dimensions.height - tipH - pad);
@@ -401,7 +399,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
         >
           <div className="font-medium break-words line-clamp-3">{tooltipData.node.title}</div>
           {tooltipData.node.url && (
-            <div className="text-[11px] text-muted-foreground truncate opacity-75 mt-0.5">
+            <div className="text-[10px] text-muted-foreground truncate opacity-75 mt-0.5">
               Click to open
             </div>
           )}

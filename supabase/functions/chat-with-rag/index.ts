@@ -5,7 +5,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 const OPENAI_CHAT_MODEL = 'gpt-4o-mini';
-const MATCH_CHUNKS_COUNT = 20;
+ const MATCH_CHUNKS_PER_QUERY = 12;
+const MATCH_CHUNKS_MERGED_CAP = 45;
 const LAST_MESSAGES_COUNT = 10;
 
 const corsHeaders = {
@@ -108,29 +109,50 @@ Deno.serve(async (req) => {
     const leadList = (leadChunks || []) as ChunkRow[];
     const leadIds = new Set(leadList.map((c) => c.id));
 
-    const queryEmbedding = await embed(openaiKey, userMessage.trim());
-    const { data: matchedChunks, error: rpcError } = await supabase.rpc('match_chunks', {
-      query_embedding: queryEmbedding,
-      match_page_ids: pageIds,
-      match_count: MATCH_CHUNKS_COUNT,
-    });
+    // Step 1: Decompose + reformulate — split multi-part questions and make each search-optimized
+    let searchQueries: string[];
+    try {
+      searchQueries = await decomposeAndReformulate(openaiKey, userMessage.trim());
+    } catch (e) {
+      console.warn('[RAG decomposition] failed, using original message:', e);
+      searchQueries = [userMessage.trim()];
+    }
+    console.log('[RAG decomposition] searchQueries=', searchQueries.length, searchQueries);
 
-    const matchedList = (matchedChunks || []) as ChunkRow[];
-    console.log('[RAG retrieval] pages=', pageIds.length, 'leadChunks=', leadList.length, 'matchChunks=', matchedList.length, 'leadErr=', leadErr?.message ?? null, 'rpcErr=', rpcError?.message ?? null);
+    // Step 2: Embed all search queries (batch)
+    const embeddings = await embedBatch(openaiKey, searchQueries);
 
-    // Retrieval log: question, what was included (lead vs similarity), and why (distance = lower is more similar)
+    // Step 3: Retrieve per query, merge by chunk id (keep best distance)
+    const chunkMap = new Map<string, ChunkRow>();
+    for (let i = 0; i < embeddings.length; i++) {
+      const { data: matchedChunks, error: rpcError } = await supabase.rpc('match_chunks', {
+        query_embedding: embeddings[i],
+        match_page_ids: pageIds,
+        match_count: MATCH_CHUNKS_PER_QUERY,
+      });
+      const list = (matchedChunks || []) as ChunkRow[];
+      for (const c of list) {
+        const dist = (c as { distance?: number }).distance ?? 1;
+        const existing = chunkMap.get(c.id);
+        if (!existing || ((existing as { distance?: number }).distance ?? 1) > dist) {
+          chunkMap.set(c.id, { ...c, distance: dist });
+        }
+      }
+    }
+    const matchedList = Array.from(chunkMap.values()).sort((a, b) => ((a as { distance?: number }).distance ?? 1) - ((b as { distance?: number }).distance ?? 1));
+    const cappedMatch = matchedList.slice(0, MATCH_CHUNKS_MERGED_CAP);
+
+    console.log('[RAG retrieval] pages=', pageIds.length, 'leadChunks=', leadList.length, 'matchChunks=', cappedMatch.length, 'queries=', searchQueries.length);
+
     console.log('[RAG retrieval] Question:', userMessage.trim());
-    console.log('[RAG retrieval] Lead chunks (one per page, always included):');
-    leadList.forEach((c, i) => {
-      console.log(`  ${i + 1}. ${c.source_domain}${c.page_path} | ${preview(c)}`);
-    });
-    console.log('[RAG retrieval] Similarity chunks (top by distance, lower = more similar to question):');
-    matchedList.forEach((c, i) => {
+    console.log('[RAG retrieval] Search queries:', searchQueries);
+    console.log('[RAG retrieval] Similarity chunks (top by distance):');
+    cappedMatch.forEach((c, i) => {
       const dist = (c as { distance?: number }).distance ?? null;
       console.log(`  ${i + 1}. distance=${dist?.toFixed(4) ?? '?'} | ${c.source_domain}${c.page_path} | ${preview(c)}`);
     });
 
-    const combined = [...leadList, ...matchedList.filter((c) => !leadIds.has(c.id))];
+    const combined = [...leadList, ...cappedMatch.filter((c) => !leadIds.has(c.id))];
 
     if (combined.length === 0) {
       const noChunksMessage = "I don't have indexed source content to cite yet. The crawl may have finished but chunking/embeddings may still be running (often 1–2 minutes after the crawl). Please try again in a moment, or re-open the source drawer to confirm indexing completed.";
@@ -267,6 +289,71 @@ async function embed(apiKey: string, text: string): Promise<number[]> {
   if (!res.ok) throw new Error(`OpenAI embed: ${res.status}`);
   const data = (await res.json()) as { data: { embedding: number[] }[] };
   return data.data[0].embedding;
+}
+
+async function embedBatch(apiKey: string, texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const res = await fetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ model: OPENAI_EMBEDDING_MODEL, input: texts }),
+  });
+  if (!res.ok) throw new Error(`OpenAI embed batch: ${res.status}`);
+  const data = (await res.json()) as { data: { embedding: number[] }[] };
+  return data.data.map((d) => d.embedding);
+}
+
+/**
+ * Splits multi-part questions and reformulates each for optimal semantic search.
+ * Returns search-optimized sub-queries: explicit, factual, keyword-rich.
+ */
+async function decomposeAndReformulate(apiKey: string, userMessage: string): Promise<string[]> {
+  const sys = `You help reformulate user questions for semantic search over indexed documents (e.g. Wikipedia).
+
+If the user asks a SINGLE question: output exactly 1 reformulated query that is explicit, factual, and keyword-rich. E.g. "when was Biden born" → "Joe Biden birth date and place".
+
+If the user asks MULTIPLE questions or a complex request: split into 2-6 sub-questions. Each must be explicit, factual, keyword-rich for semantic search. Use names, dates, specific terms.
+
+Output a JSON object: {"queries": ["query1", "query2", ...]}. No other text.`;
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: OPENAI_CHAT_MODEL,
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: userMessage },
+      ],
+      response_format: { type: 'json_object' },
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenAI decompose: ${res.status}`);
+  const data = (await res.json()) as { choices: { message: { content: string } }[] };
+  const raw = data.choices[0]?.message?.content ?? '{}';
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [userMessage];
+  }
+  if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'string') {
+    return parsed as string[];
+  }
+  if (parsed && typeof parsed === 'object' && 'queries' in parsed && Array.isArray((parsed as { queries: unknown }).queries)) {
+    const q = (parsed as { queries: unknown[] }).queries.filter((x) => typeof x === 'string') as string[];
+    if (q.length > 0) return q;
+  }
+  if (parsed && typeof parsed === 'object' && 'query' in parsed && typeof (parsed as { query: unknown }).query === 'string') {
+    return [(parsed as { query: string }).query];
+  }
+  return [userMessage];
 }
 
 async function getLastMessages(

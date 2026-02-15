@@ -77,14 +77,20 @@ export const SourceDrawer = ({
   const displayName = source ? getSourceDisplayLabel(source) : '';
   const initial = displayName.charAt(0).toUpperCase() || '';
 
-  // Crawl job and status first so we can pass refetchInterval when crawling
+  // Crawl job - same query key as SidebarCrawlPanel for cache sharing, poll when crawling
+  const sourceIds = useMemo(() => (source?.id ? [source.id] : []), [source?.id]);
   const { data: crawlJobsData = [] } = useQuery({
-    queryKey: ['crawl-jobs-for-source-drawer', source?.id],
+    queryKey: ['crawl-jobs-for-sources', sourceIds],
     queryFn: async () => {
       if (!source?.id) return [];
       return crawlJobsApi.listBySource(source.id);
     },
     enabled: !!source?.id,
+    refetchInterval: (query) => {
+      const jobs = (query.state.data ?? []) as { status?: string }[];
+      const isCrawling = jobs.some((j) => j.status === 'queued' || j.status === 'running');
+      return isCrawling ? 2000 : false;
+    },
   });
 
   const crawlJob = useMemo(() => {
@@ -196,6 +202,7 @@ export const SourceDrawer = ({
               <CrawlStats
                 pagesDiscovered={pagesDiscovered}
                 pagesIndexed={pagesIndexed}
+                targetPages={maxPagesForDepth}
                 connectionsFound={connectionsFound}
                 isCrawling={realStatus === 'crawling'}
               />

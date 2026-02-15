@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 interface CrawlStatsProps {
   pagesDiscovered: number;
   pagesIndexed: number;
+  targetPages: number;
   connectionsFound: number;
   isCrawling: boolean;
 }
@@ -10,9 +11,11 @@ interface CrawlStatsProps {
 export const CrawlStats = ({ 
   pagesDiscovered, 
   pagesIndexed, 
+  targetPages,
   connectionsFound,
   isCrawling,
 }: CrawlStatsProps) => {
+  const progressPercent = targetPages > 0 ? Math.min(100, (pagesIndexed / targetPages) * 100) : 0;
   return (
     <div className="space-y-3">
       {/* Stats grid */}
@@ -33,12 +36,12 @@ export const CrawlStats = ({
         />
       </div>
       
-      {/* Crawling activity indicator */}
-      {isCrawling && (
+      {/* Crawling activity indicator - same formula as SidebarCrawlPanel: indexed/target */}
+      {isCrawling && targetPages > 0 && (
         <div className="relative h-0.5 bg-border/30 rounded-full overflow-hidden">
           <div 
             className="absolute inset-y-0 left-0 bg-primary/60 rounded-full animate-crawl-progress"
-            style={{ width: `${(pagesIndexed / pagesDiscovered) * 100}%` }}
+            style={{ width: `${progressPercent}%` }}
           />
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent animate-shimmer" />
         </div>

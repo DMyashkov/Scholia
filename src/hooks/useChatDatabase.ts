@@ -1,7 +1,7 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useConversations, useCreateConversation, useDeleteConversation, useUpdateConversation } from './useConversations';
-import { useMessages, useCreateMessage } from './useMessages';
+import { useConversations, useCreateConversation, useDeleteConversation, useUpdateConversation, useDeleteAllConversations, DELETE_ALL_CONVERSATIONS_EVENT } from './useConversations';
+import { useMessages, useCreateMessage, useUpdateMessage } from './useMessages';
 import { useConversationSources, useAddSourceToConversation, useRemoveSourceFromConversation, useCheckExistingSource } from './useConversationSources';
 import { useSourceWithData } from './useSourceWithData';
 import { useRealtimeCrawlUpdates } from './useRealtimeCrawlUpdates';
@@ -14,17 +14,24 @@ import { generateTitle } from '@/data/mockResponses';
 import { generateQuotesForMessage, generateSourcedResponse } from '@/data/mockSourceContent';
 
 // Convert database types to UI types
-const dbConversationToUI = (db: DBConversation, messages: DBMessage[], sources: Source[]): Conversation => ({
+const dbConversationToUI = (db: DBConversation & { dynamic_mode?: boolean }, messages: DBMessage[], sources: Source[]): Conversation => ({
   id: db.id,
   title: db.title,
   messages: messages.map(dbMessageToUI),
   sources,
+  dynamicMode: db.dynamic_mode ?? true,
   createdAt: new Date(db.created_at),
   updatedAt: new Date(db.updated_at),
 });
 
 const dbMessageToUI = (db: DBMessage): Message => {
-  const quotes = (db as DBMessage & { quotes?: { id: string; sourceId: string; pageId: string; snippet: string; pageTitle: string; pagePath: string; domain: string; contextBefore?: string; contextAfter?: string }[] }).quotes ?? [];
+  const extended = db as DBMessage & {
+    quotes?: { id: string; sourceId: string; pageId: string; snippet: string; pageTitle: string; pagePath: string; domain: string; contextBefore?: string; contextAfter?: string }[];
+    suggested_pages?: { url: string; title: string; contextSnippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string }[];
+    follows_message_id?: string | null;
+    indexed_page_display?: string | null;
+  };
+  const quotes = extended.quotes ?? [];
   return {
     id: db.id,
     role: db.role,
@@ -33,6 +40,9 @@ const dbMessageToUI = (db: DBMessage): Message => {
     quotes: quotes as Message['quotes'],
     sourcesUsed: [...new Set(quotes.map((q) => q.sourceId))],
     wasMultiStep: db.was_multi_step ?? false,
+    suggestedPages: extended.suggested_pages,
+    followsMessageId: extended.follows_message_id ?? undefined,
+    indexedPageDisplay: extended.indexed_page_display ?? undefined,
   };
 };
 
@@ -55,10 +65,17 @@ export const useChatDatabase = () => {
   const { data: dbConversations = [], isLoading: conversationsLoading } = useConversations();
   const createConversationMutation = useCreateConversation();
   const deleteConversationMutation = useDeleteConversation();
+
+  useEffect(() => {
+    const handler = () => setActiveConversationId(null);
+    window.addEventListener(DELETE_ALL_CONVERSATIONS_EVENT, handler);
+    return () => window.removeEventListener(DELETE_ALL_CONVERSATIONS_EVENT, handler);
+  }, []);
   const updateConversationMutation = useUpdateConversation();
 
   const { data: dbMessages = [] } = useMessages(activeConversationId);
   const createMessageMutation = useCreateMessage();
+  const updateMessageMutation = useUpdateMessage();
 
   const { data: conversationSourcesData = [] } = useConversationSources(activeConversationId);
   const addSourceMutation = useAddSourceToConversation();
@@ -199,8 +216,139 @@ export const useChatDatabase = () => {
     // TODO: Implement recrawl logic (create new crawl job)
   }, [activeConversationId]);
 
+  const updateDynamicMode = useCallback(async (conversationId: string, dynamicMode: boolean) => {
+    await updateConversationMutation.mutateAsync({ id: conversationId, dynamic_mode: dynamicMode });
+  }, [updateConversationMutation]);
+
+  const addPageToSource = useCallback(async (conversationId: string, sourceId: string, url: string) => {
+    const functionsUrl = getFunctionsUrl();
+    console.log('[addPageToSource] start', { conversationId, sourceId, url, functionsUrl });
+    if (!functionsUrl) {
+      console.error('[addPageToSource] Functions URL not configured');
+      throw new Error('Functions URL not configured');
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    console.log('[addPageToSource] auth:', { hasSession: !!session?.access_token });
+    const res = await fetch(`${functionsUrl}/add-page`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
+      body: JSON.stringify({ conversationId, sourceId, url }),
+    });
+    console.log('[addPageToSource] fetch response', { status: res.status, ok: res.ok });
+    if (!res.ok) {
+      const errBody = await res.text();
+      let err: { error?: string } = {};
+      try {
+        err = JSON.parse(errBody);
+      } catch {
+        err = { error: errBody || `HTTP ${res.status}` };
+      }
+      console.error('[addPageToSource] fetch failed', { status: res.status, body: errBody });
+      throw new Error(err?.error ?? `Failed to add page: ${res.status}`);
+    }
+    const data = await res.json();
+    console.log('[addPageToSource] success', data);
+    queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+    queryClient.invalidateQueries({ queryKey: ['conversation-pages', conversationId] });
+    queryClient.invalidateQueries({ queryKey: ['conversation-page-edges', conversationId] });
+    queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
+    // Refetch pages/edges so UI and RAG caller have latest before re-asking
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: ['conversation-pages', conversationId] }),
+      queryClient.refetchQueries({ queryKey: ['conversation-page-edges', conversationId] }),
+      queryClient.refetchQueries({ queryKey: ['discovered-links-counts', conversationId] }),
+    ]);
+    return data;
+  }, [queryClient]);
+
+  const addPageAndContinueResponse = useCallback(async (
+    conversationId: string,
+    sourceId: string,
+    url: string,
+    messageId: string,
+    userMessage: string,
+    indexedPageDisplay?: string
+  ) => {
+    const functionsUrl = getFunctionsUrl();
+    if (!functionsUrl) throw new Error('Functions URL not configured');
+
+    // Clear suggested_pages immediately so the card disappears (persists on reload)
+    await updateMessageMutation.mutateAsync({
+      id: messageId,
+      conversationId,
+      updates: { suggested_pages: null },
+    });
+
+    await addPageToSource(conversationId, sourceId, url);
+    await new Promise((r) => setTimeout(r, 500));
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${functionsUrl}/chat-with-rag`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
+      body: JSON.stringify({
+        conversationId,
+        userMessage: userMessage.trim(),
+        appendToMessageId: messageId,
+        indexedPageDisplay: indexedPageDisplay ?? undefined,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+    }
+    const reader = res.body?.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line) as Record<string, unknown>;
+            if (event.error) throw new Error(String(event.error));
+            if (event.done === true) {
+              queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+              return;
+            }
+          } catch (e) {
+            if (e instanceof SyntaxError) continue;
+            throw e;
+          }
+        }
+      }
+      if (buffer.trim()) {
+        try {
+          const event = JSON.parse(buffer) as Record<string, unknown>;
+          if (event.done === true) {
+            queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+            return;
+          }
+          if (event.error) throw new Error(String(event.error));
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+  }, [queryClient, addPageToSource, updateMessageMutation]);
+
   const sendMessage = useCallback(async (content: string) => {
-    if (!content.trim() || isLoading) return;
+    if (!content.trim() || isLoading) {
+      console.log('[sendMessage] early return', { hasContent: !!content?.trim(), isLoading });
+      return;
+    }
 
     let conversationId = activeConversationId;
     let conversationSources: Source[] = [];
@@ -389,5 +537,8 @@ export const useChatDatabase = () => {
     addSourceToConversation,
     removeSourceFromConversation,
     recrawlSource,
+    updateDynamicMode,
+    addPageToSource,
+    addPageAndContinueResponse,
   };
 };

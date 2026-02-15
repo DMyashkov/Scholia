@@ -24,6 +24,18 @@ export const useCreateMessage = () => {
   });
 };
 
+export const useUpdateMessage = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, conversationId, updates }: { id: string; conversationId: string; updates: Record<string, unknown> }) =>
+      messagesApi.update(id, updates),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['messages', variables.conversationId] });
+    },
+  });
+};
+
 export const useDeleteMessage = () => {
   const queryClient = useQueryClient();
 

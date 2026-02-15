@@ -1,5 +1,6 @@
 import { Quote } from '@/types/source';
 import { cn } from '@/lib/utils';
+import { cleanPageTitleForDisplay } from '@/lib/sourceDisplay';
 import { Quote as QuoteIcon } from 'lucide-react';
 
 interface CitedPagesProps {
@@ -39,10 +40,10 @@ export const CitedPages = ({ quotes, onQuoteClick }: CitedPagesProps) => {
               'text-[11px] font-medium text-muted-foreground hover:text-foreground',
               'max-w-[180px] truncate'
             )}
-            title={`${quote.pageTitle} – ${quote.domain}${quote.pagePath}`}
+            title={`${quote.pageTitle || quote.pagePath} – ${quote.domain}${quote.pagePath}`}
           >
             <QuoteIcon className="h-3 w-3 shrink-0 text-primary/70" />
-            <span className="truncate">{quote.pageTitle || quote.pagePath || quote.domain}</span>
+            <span className="truncate">{cleanPageTitleForDisplay(quote.pageTitle) || quote.pagePath || quote.domain}</span>
           </button>
         ))}
       </div>

@@ -4,6 +4,7 @@ const CRAWL_INTERVAL_MS = parseInt(process.env.CRAWL_INTERVAL_MS || '5000', 10);
 const MAX_CONCURRENT_JOBS = parseInt(process.env.MAX_CONCURRENT_JOBS || '3', 10);
 
 let activeJobs = new Set<string>();
+let idlePollCount = 0;
 
 async function main() {
   console.log('[worker] Started, polling for crawl jobs every', CRAWL_INTERVAL_MS / 1000, 's');
@@ -12,7 +13,14 @@ async function main() {
       while (activeJobs.size < MAX_CONCURRENT_JOBS) {
         const job = await claimJob();
 
-        if (!job) break;
+        if (!job) {
+          idlePollCount++;
+          if (idlePollCount % 10 === 1 && idlePollCount > 1) {
+            console.log('[worker] idle', { pollCount: idlePollCount, activeJobs: activeJobs.size });
+          }
+          break;
+        }
+        idlePollCount = 0;
 
         const sourceShort = (job as { source_id?: string }).source_id?.slice(0, 8) || '?';
         console.log('[worker] Claimed job', job.id.slice(0, 8), 'source', sourceShort);

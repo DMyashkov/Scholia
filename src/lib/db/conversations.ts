@@ -51,7 +51,7 @@ export const conversationsApi = {
     return data as Conversation;
   },
 
-  async update(id: string, updates: Partial<Pick<Conversation, 'title'>>) {
+  async update(id: string, updates: Partial<Pick<Conversation, 'title' | 'dynamic_mode'>>) {
     const { data, error } = await supabase
       .from('conversations')
       .update(updates)
@@ -106,6 +106,19 @@ export const conversationsApi = {
       console.error('RLS policy blocked deletion. Conversation owner_id:', existing.owner_id, 'Current user:', currentUserId);
       throw new Error('Failed to delete conversation. RLS policy may be blocking deletion. Please check your database policies.');
     }
+  },
+
+  async deleteAll() {
+    const { data: { user } } = await supabase.auth.getUser();
+    const currentUserId = user?.id ?? null;
+    let query = supabase.from('conversations').delete();
+    if (currentUserId) {
+      query = query.eq('owner_id', currentUserId);
+    } else {
+      query = query.is('owner_id', null);
+    }
+    const { error } = await query;
+    if (error) throw error;
   },
 };
 

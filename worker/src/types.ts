@@ -23,7 +23,7 @@ export interface Source {
   url: string;
   domain: string;
   favicon: string | null;
-  crawl_depth: 'shallow' | 'medium' | 'deep';
+  crawl_depth: 'shallow' | 'medium' | 'deep' | 'dynamic';
   include_subpages: boolean;
   include_pdfs: boolean;
   same_domain_only: boolean;

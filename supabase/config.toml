@@ -3,3 +3,6 @@
 # client; RLS applies to all DB calls. Required when using publishable keys.
 [functions.chat-with-rag]
 verify_jwt = false
+
+[functions.add-page]
+verify_jwt = false

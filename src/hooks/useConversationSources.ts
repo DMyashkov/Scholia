@@ -3,6 +3,7 @@ import { conversationSourcesApi } from '@/lib/db/conversation-sources';
 import { sourcesApi } from '@/lib/db/sources';
 import type { SourceInsert } from '@/lib/db/types';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { normalizeSourceUrl } from '@/lib/urlUtils';
 
 export type ExistingConversationInfo = {
   conversationId: string;
@@ -54,17 +55,25 @@ export const useAddSourceToConversation = () => {
       sourceData: SourceInsert;
       inheritFromConversationId?: string;
     }) => {
+      const normalizedUrl = normalizeSourceUrl(sourceData.url || '');
+      const sourceDataNorm = { ...sourceData, url: normalizedUrl };
       const userId = user?.id || null;
       const existingSources = await sourcesApi.list(userId);
-      let source = existingSources.find(s => s.url === sourceData.url);
+      let source = existingSources.find(s => s.url === normalizedUrl);
 
       if (!source) {
-        source = await sourcesApi.create(sourceData);
+        source = await sourcesApi.create(sourceDataNorm);
       } else {
-        source = await sourcesApi.update(source.id, sourceData);
+        source = await sourcesApi.update(source.id, sourceDataNorm);
       }
 
+      console.log('[addSource] calling conversationSourcesApi.add', {
+        conversationId: conversationId.slice(0, 8),
+        sourceId: source.id.slice(0, 8),
+        url: normalizedUrl?.slice(0, 60),
+      });
       await conversationSourcesApi.add(conversationId, source.id, false);
+      console.log('[addSource] add complete', { sourceId: source.id.slice(0, 8) });
       return source;
     },
     onSuccess: (newSource, variables) => {

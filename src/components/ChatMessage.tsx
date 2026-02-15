@@ -1,6 +1,7 @@
-import React from 'react';
-import { User, Sparkles, Layers } from 'lucide-react';
-import { Message } from '@/types/chat';
+import React, { useState } from 'react';
+import { toast } from 'sonner';
+import { User, Sparkles, Layers, Plus, Loader2 } from 'lucide-react';
+import { Message, SuggestedPage } from '@/types/chat';
 import { Quote } from '@/types/source';
 import { cn } from '@/lib/utils';
 import { QuoteCardsList } from './QuoteCard';
@@ -14,16 +15,23 @@ import {
 
 interface ChatMessageProps {
   message: Message;
+  /** Follow-up assistant message (add page + re-answer flow) - rendered below divider */
+  followUp?: Message;
   isStreaming?: boolean;
   sources?: { id: string; domain: string }[];
   onQuoteClick?: (quote: Quote) => void;
   onSourceClick?: (sourceId: string) => void;
+  onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string) => Promise<void>;
+  conversationId?: string | null;
 }
 
 export const ChatMessage = ({ 
   message, 
+  followUp,
   isStreaming,
   onQuoteClick,
+  onAddSuggestedPage,
+  conversationId,
 }: ChatMessageProps) => {
   const isUser = message.role === 'user';
   const quotes = message.quotes || [];
@@ -96,6 +104,43 @@ export const ChatMessage = ({
           {/* Cited pages - specific pages from quotes, not just source name */}
           {!isUser && !isStreaming && quotes.length > 0 && onQuoteClick && (
             <CitedPages quotes={quotes} onQuoteClick={onQuoteClick} />
+          )}
+
+          {/* Follow-up: separate assistant message after user added suggested page */}
+          {!isUser && !isStreaming && followUp && (
+            <>
+              <div className="my-4 h-px bg-border" />
+              <p className="text-xs text-muted-foreground mb-3">
+                Indexed {followUp.indexedPageDisplay || 'new page'}
+              </p>
+              <div className="space-y-2">
+                <div className="flex items-center justify-end">
+                  <CopyMessageButton message={followUp} className="h-8 w-8 shrink-0 opacity-70 hover:opacity-100" />
+                </div>
+                <div className="prose prose-invert prose-sm max-w-none">
+                  <MessageContent 
+                    content={followUp.content} 
+                    quotes={followUp.quotes ?? []}
+                    onQuoteClick={onQuoteClick}
+                  />
+                </div>
+                {(followUp.quotes?.length ?? 0) > 0 && onQuoteClick && (
+                  <QuoteCardsList quotes={followUp.quotes ?? []} onQuoteClick={onQuoteClick} />
+                )}
+                {(followUp.quotes?.length ?? 0) > 0 && onQuoteClick && (
+                  <CitedPages quotes={followUp.quotes ?? []} onQuoteClick={onQuoteClick} />
+                )}
+              </div>
+            </>
+          )}
+
+          {/* "Would you like to index X?" when context can't answer (hidden when follow-up exists) */}
+          {!isUser && !isStreaming && !followUp && message.suggestedPages && message.suggestedPages.length > 0 && onAddSuggestedPage && conversationId && (
+            <IndexSuggestionCard
+              suggestedPages={message.suggestedPages}
+              messageId={message.id}
+              onAddAndReask={onAddSuggestedPage}
+            />
           )}
         </div>
       </div>
@@ -236,6 +281,90 @@ const MessageContent = ({
     </div>
   );
 };
+
+function getDomainDisplay(url: string): string {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    if (host === 'en.wikipedia.org' || host.endsWith('.wikipedia.org')) return 'Wikipedia';
+    return host;
+  } catch {
+    return '';
+  }
+}
+
+function IndexSuggestionCard({
+  suggestedPages,
+  messageId,
+  onAddAndReask,
+}: {
+  suggestedPages: SuggestedPage[];
+  messageId: string;
+  onAddAndReask: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string) => Promise<void>;
+}) {
+  const [adding, setAdding] = useState<string | null>(null);
+  const [added, setAdded] = useState(false);
+
+  const sp = suggestedPages[0];
+  if (!sp) return null;
+
+  const key = `${sp.sourceId}:${sp.url}`;
+  const isAdding = adding === key;
+  const hasReask = !!sp.promptedByQuestion;
+  const indexedPageDisplay = `${sp.title} - ${getDomainDisplay(sp.url)}`.replace(/ - $/, '');
+
+  const handleYes = async () => {
+    setAdding(key);
+    console.log('[IndexSuggestion] Yes clicked', { url: sp.url, sourceId: sp.sourceId, question: sp.promptedByQuestion });
+    try {
+      await onAddAndReask(sp.url, sp.sourceId, sp.promptedByQuestion, messageId, indexedPageDisplay);
+      console.log('[IndexSuggestion] onAddAndReask completed successfully');
+      setAdded(true);
+    } catch (err) {
+      console.error('[IndexSuggestion] onAddAndReask failed:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error('Failed to add page', { description: msg });
+    } finally {
+      setAdding(null);
+    }
+  };
+
+  if (added) return null;
+
+  const branchingText = sp.fromPageTitle ? ` (branching out from "${sp.fromPageTitle}")` : '';
+
+  return (
+    <div className="mt-3 rounded-lg border border-primary/30 bg-primary/10 p-4">
+      <p className="text-sm text-foreground mb-3">
+        Would you like to index <strong>{sp.title}</strong>{branchingText}? {hasReask && 'I\'ll add it to the graph and answer your question with the new context.'}
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleYes}
+          disabled={isAdding}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          {isAdding ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {hasReask ? 'Adding & answering...' : 'Adding...'}
+            </>
+          ) : (
+            'Yes'
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => setAdded(true)}
+          disabled={isAdding}
+          className="px-4 py-2 rounded-md text-sm font-medium border border-border hover:bg-secondary disabled:opacity-50"
+        >
+          No
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export const TypingIndicator = () => {
   return (

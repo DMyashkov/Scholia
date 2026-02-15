@@ -9,9 +9,11 @@ const MAX_PAGES: Record<Source['crawl_depth'], number> = {
   shallow: 5,
   medium: 15,
   deep: 35,
+  dynamic: 1, // Only the seed page; discovered links stored for RAG suggestion
 };
 
 export async function processCrawlJob(jobId: string) {
+  console.log('[crawl] processCrawlJob start', { jobId: jobId.slice(0, 8) });
 
   try {
     // Get the crawl job
@@ -25,9 +27,16 @@ export async function processCrawlJob(jobId: string) {
       console.error(`❌ Failed to fetch job ${jobId}:`, jobError);
       return;
     }
+    console.log('[crawl] job loaded', {
+      jobId: job.id?.slice(0, 8),
+      status: job.status,
+      sourceId: job.source_id?.slice(0, 8),
+      conversationId: job.conversation_id?.slice(0, 8),
+    });
 
     // Check if job is still queued or running (might have been claimed)
     if (job.status !== 'queued' && job.status !== 'running') {
+      console.log('[crawl] job no longer runnable', { jobId: job.id?.slice(0, 8), status: job.status });
       return;
     }
 
@@ -139,17 +148,41 @@ async function crawlSource(job: CrawlJob, source: Source) {
   return crawlSourceWithConversationId(job, source, conversationId);
 }
 
-async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conversationId: string) {
+function normalizeUrlForCrawl(input: string): string {
+  let s = (input || '').trim();
+  const hashIdx = s.indexOf('#');
+  if (hashIdx >= 0) s = s.slice(0, hashIdx);
+  const qIdx = s.indexOf('?');
+  if (qIdx >= 0) s = s.slice(0, qIdx);
+  s = s.trim();
+  s = s.replace(/^(https?:\/\/)+/i, '');
+  s = 'https://' + s;
+  try {
+    const u = new URL(s);
+    u.hash = '';
+    u.search = '';
+    if (u.pathname.endsWith('/') && u.pathname !== '/') u.pathname = u.pathname.slice(0, -1);
+    return u.toString();
+  } catch {
+    return s;
+  }
+}
 
-  const maxPages = MAX_PAGES[source.crawl_depth];
+async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conversationId: string) {
+  const seedUrl = normalizeUrlForCrawl(source.url);
+
+  const rawDepth = (source as { crawl_depth?: string }).crawl_depth;
+  const maxPages =
+    (rawDepth && MAX_PAGES[rawDepth as Source['crawl_depth']]) ??
+    (rawDepth === 'dynamic' ? 1 : 15);
   const visited = new Set<string>();
   const discovered = new Set<string>(); // All discovered URLs (including queued)
   // Hub-and-spoke: prioritize direct links from starting page
   // Queue structure: { url, depth, priority }
   // Priority: 0 = starting page, 1 = direct links from starting page, 2 = links from depth 1 pages, etc.
-  const queue: Array<{ url: string; depth: number; priority: number }> = [{ url: source.url, depth: 0, priority: 0 }];
+  const queue: Array<{ url: string; depth: number; priority: number }> = [{ url: seedUrl, depth: 0, priority: 0 }];
   const directLinksFromStart: string[] = []; // Links directly from the starting page
-  discovered.add(source.url);
+  discovered.add(seedUrl);
   let linksCount = 0;
 
 
@@ -159,7 +192,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
   // Fetch robots.txt
   let robotsParser: any = null;
   try {
-    const robotsUrl = new URL('/robots.txt', source.url).toString();
+    const robotsUrl = new URL('/robots.txt', seedUrl).toString();
     const robotsResponse = await fetch(robotsUrl);
     if (robotsResponse.ok) {
       const robotsText = await robotsResponse.text();
@@ -171,12 +204,12 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
   
   if (queue.length === 0) {
     console.error(`❌ CRITICAL: Queue is empty before starting crawl! This should never happen.`);
-    console.error(`❌ Source URL: ${source.url}`);
+    console.error(`❌ Source URL: ${seedUrl}`);
     return;
   }
 
-  const sourceShort = new URL(source.url).pathname?.replace(/^\/wiki\//, '') || source.url.slice(0, 40);
-  console.log(`[crawl] START source=${sourceShort} maxPages=${maxPages} depth=${source.crawl_depth}`);
+  const sourceShort = new URL(seedUrl).pathname?.replace(/^\/wiki\//, '') || seedUrl.slice(0, 40);
+  console.log(`[crawl] START source=${sourceShort} url=${seedUrl} maxPages=${maxPages} depth=${source.crawl_depth} jobId=${job.id?.slice(0, 8)}`);
   
   let loopIterations = 0;
   while (queue.length > 0 && visited.size < maxPages) {
@@ -217,9 +250,16 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       }
       const result = await crawlPage(normalizedUrl, source, job, conversationId);
       if (!result) {
-        console.error(`❌ Failed to crawl page ${normalizedUrl} - skipping and continuing`);
-        console.error(`❌ CRITICAL: Page insertion failed! This means no pages will be in the database.`);
-        console.error(`❌ Check the error logs above to see why page insertion failed.`);
+        console.error(`❌ Failed to crawl page ${normalizedUrl} - skipping and continuing`, {
+          depth,
+          isSeedPage: depth === 0,
+          jobId: job.id?.slice(0, 8),
+          sourceId: source.id?.slice(0, 8),
+        });
+        if (depth === 0) {
+          console.error(`❌ CRITICAL: Seed page failed! No pages will be indexed for this source.`);
+        }
+        console.error(`❌ Check the error logs above to see why page insertion/fetch failed.`);
         // Mark as visited anyway to avoid infinite retries
         visited.add(normalizedUrl);
         continue;
@@ -248,11 +288,40 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       }
 
       // Extract links BEFORE updating progress (so we count discovered)
+      const isDynamic = source.crawl_depth === 'dynamic';
       const links = extractLinks(html, normalizedUrl, source);
+      // Only extract links-with-context for dynamic sources (expensive: 200-char context + embeddings for RAG suggestions)
+      const linksWithContext = isDynamic ? extractLinksWithContext(html, normalizedUrl, source) : [];
+
       const newLinks: string[] = [];
       const edgesToInsert: Array<{conversation_id: string; source_id: string; from_page_id: string; from_url: string; to_url: string; owner_id: string | null}> = [];
       
       const linksToProcess = links.slice(0, 200);
+
+      // Insert discovered_links only for dynamic sources (avoids expensive embedding of every link for shallow/medium/deep)
+      if (isDynamic && linksWithContext.length > 0) {
+        const toInsert = linksWithContext
+          .filter((l) => l.contextSnippet.length > 0)
+          .slice(0, 500)
+          .map((l) => ({
+            conversation_id: conversationId,
+            source_id: source.id,
+            from_page_id: page.id,
+            to_url: l.url,
+            anchor_text: l.anchorText || null,
+            context_snippet: l.contextSnippet.substring(0, 500),
+            owner_id: source.owner_id,
+          }));
+        const { error: dlError } = await supabase.from('discovered_links').upsert(toInsert, {
+          onConflict: 'conversation_id,source_id,to_url',
+          ignoreDuplicates: true,
+        });
+        if (dlError) {
+          console.warn('[crawl] discovered_links insert error:', dlError.message);
+        } else {
+          console.log(`[crawl] inserted ${toInsert.length} discovered_links`);
+        }
+      }
 
       for (const link of linksToProcess) {
           // Links are already normalized by extractLinks, but double-check normalization
@@ -538,8 +607,130 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
 
     return { page: page as Page, html };
   } catch (error) {
-    console.error(`Failed to crawl page ${url}:`, error);
+    const msg = error instanceof Error ? error.message : String(error);
+    const isFetch = msg.includes('HTTP') || msg.includes('fetch') || msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT');
+    console.error(`[crawl] crawlPage failed url=${url}`, {
+      error: msg,
+      isFetchError: isFetch,
+    });
     return null;
+  }
+}
+
+const CONTEXT_SNIPPET_LENGTH = 200;
+
+/** For dynamic mode: extract links with ~200 chars of surrounding context for RAG */
+function extractLinksWithContext(
+  html: string,
+  pageUrl: string,
+  source: Source
+): Array<{ url: string; contextSnippet: string; anchorText: string }> {
+  try {
+    const $ = cheerio.load(html);
+    const baseUrl = new URL(pageUrl);
+    const seen = new Set<string>();
+
+    const currentUrlObj = new URL(pageUrl);
+    currentUrlObj.hash = '';
+    currentUrlObj.search = '';
+    if (currentUrlObj.pathname === '/' || currentUrlObj.pathname === '') {
+      currentUrlObj.pathname = '/';
+    } else if (currentUrlObj.pathname.endsWith('/')) {
+      currentUrlObj.pathname = currentUrlObj.pathname.slice(0, -1);
+    }
+    const normalizedCurrentUrl = currentUrlObj.toString();
+
+    const mainContent = $('main, article, #content, #bodyContent, .mw-parser-output').first();
+    const contentSelector = mainContent.length > 0 ? mainContent : $('body');
+    const linkElements = contentSelector.find('a[href]').length > 0
+      ? contentSelector.find('a[href]')
+      : $('a[href]');
+
+    const result: Array<{ url: string; contextSnippet: string; anchorText: string }> = [];
+
+    linkElements.each((_, element) => {
+      const href = $(element).attr('href');
+      if (!href) return;
+
+      const trimmedHref = href.trim();
+      if (trimmedHref === '#' || (trimmedHref.startsWith('#') && !trimmedHref.startsWith('http'))) return;
+
+      try {
+        const linkUrl = new URL(href, pageUrl);
+        linkUrl.hash = '';
+        linkUrl.search = '';
+        if (linkUrl.pathname === '/' || linkUrl.pathname === '') {
+          linkUrl.pathname = '/';
+        } else if (linkUrl.pathname.endsWith('/')) {
+          linkUrl.pathname = linkUrl.pathname.slice(0, -1);
+        }
+        const normalizedUrl = linkUrl.toString();
+
+        if (seen.has(normalizedUrl)) return;
+        seen.add(normalizedUrl);
+        if (normalizedUrl === normalizedCurrentUrl) return;
+
+        if (linkUrl.hostname.includes('wikipedia.org')) {
+          const pathParts = linkUrl.pathname.split('/').filter((p) => p);
+          if (pathParts.length >= 2 && pathParts[0] === 'wiki') {
+            const pageName = decodeURIComponent(pathParts[1] || '');
+            if (
+              pageName.startsWith('Wikipedia:') ||
+              pageName.startsWith('Wikipedia_talk:') ||
+              pageName.startsWith('Special:') ||
+              pageName.startsWith('Portal:') ||
+              pageName.startsWith('Help:') ||
+              pageName.startsWith('Template:') ||
+              pageName.startsWith('Category:') ||
+              pageName.startsWith('File:') ||
+              pageName.startsWith('Media:') ||
+              pageName.startsWith('Talk:') ||
+              pageName.startsWith('User:') ||
+              pageName.startsWith('User_talk:') ||
+              pageName === 'Main_Page'
+            )
+              return;
+          } else if (pathParts.length === 1 && pathParts[0] === 'Main_Page') return;
+        }
+
+        if (source.same_domain_only) {
+          const baseDomain = baseUrl.hostname.replace(/^www\./, '');
+          const linkDomain = linkUrl.hostname.replace(/^www\./, '');
+          const isSameDomain =
+            linkDomain === baseDomain ||
+            linkDomain.endsWith('.' + baseDomain) ||
+            baseDomain.endsWith('.' + linkDomain);
+          if (!isSameDomain) return;
+        }
+
+        if (!source.include_pdfs && linkUrl.pathname.endsWith('.pdf')) return;
+        if (linkUrl.protocol !== 'http:' && linkUrl.protocol !== 'https:') return;
+
+        const anchorText = $(element).text().trim().replace(/\s+/g, ' ').substring(0, 100);
+        // Get surrounding context: parent p, li, div, or paragraph-like block
+        let contextEl = $(element).closest('p, li, td, .mw-parser-output > div');
+        if (contextEl.length === 0) {
+          contextEl = $(element).parent();
+        }
+        const rawText = contextEl.first().text().trim().replace(/\s+/g, ' ');
+        const contextSnippet = rawText.substring(0, CONTEXT_SNIPPET_LENGTH);
+
+        if (contextSnippet.length < 20) return; // Skip very short context
+
+        result.push({
+          url: normalizedUrl,
+          contextSnippet,
+          anchorText,
+        });
+      } catch {
+        // Invalid URL
+      }
+    });
+
+    return result;
+  } catch (error) {
+    console.error(`❌ Error extracting links with context:`, error);
+    return [];
   }
 }
 
@@ -711,13 +902,22 @@ export async function claimJob(): Promise<CrawlJob | null> {
     return null;
   }
 
-  // Debug: Check all jobs to see what statuses exist
+  // Log when no queued jobs (helps debug "crawl never started")
   if (!jobs || jobs.length === 0) {
     const { data: allJobs } = await supabase
       .from('crawl_jobs')
-      .select('id, status, conversation_id, created_at')
+      .select('id, status, source_id, conversation_id, created_at')
       .order('created_at', { ascending: false })
-      .limit(5);
+      .limit(10);
+    console.log('[worker] no queued jobs', {
+      recentCount: allJobs?.length ?? 0,
+      recent: (allJobs ?? []).map((j: any) => ({
+        id: j.id?.slice(0, 8),
+        status: j.status,
+        source: j.source_id?.slice(0, 8),
+        created: j.created_at,
+      })),
+    });
     return null;
   }
     
@@ -739,7 +939,10 @@ export async function claimJob(): Promise<CrawlJob | null> {
     .single();
 
   if (updateError || !updated) {
-    // Job was claimed by another worker or no longer queued
+    console.log('[worker] claim failed (race or no longer queued)', {
+      jobId: jobToClaim.id?.slice(0, 8),
+      updateError: updateError?.message,
+    });
     return null;
   }
 

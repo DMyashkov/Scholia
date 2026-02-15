@@ -1,8 +1,10 @@
 import { Source } from '@/types/source';
 import { cn } from '@/lib/utils';
 import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
-import { Plus, Check, AlertTriangle, Clock, LogIn } from 'lucide-react';
+import { Plus, Check, AlertTriangle, Clock, LogIn, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import {
   Tooltip,
   TooltipContent,
@@ -11,6 +13,7 @@ import {
 } from '@/components/ui/tooltip';
 import { useQuery } from '@tanstack/react-query';
 import { crawlJobsApi } from '@/lib/db/crawl-jobs';
+import { useConversationPages } from '@/hooks/usePages';
 import { useMemo } from 'react';
 
 interface SourcesBarProps {
@@ -21,10 +24,15 @@ interface SourcesBarProps {
   showSignIn?: boolean;
   onSignIn?: () => void;
   className?: string;
+  dynamicMode?: boolean;
+  onDynamicModeChange?: (enabled: boolean) => void;
+  conversationId?: string | null;
+  addingPageSourceId?: string | null;
 }
 
 const getDepthLabel = (depth: string) => {
   switch (depth) {
+    case 'dynamic': return 'Dynamic (1 page)';
     case 'shallow': return 'Shallow (5 pages)';
     case 'medium': return 'Medium (15 pages)';
     case 'deep': return 'Deep (35 pages)';
@@ -112,6 +120,10 @@ const SourceChip = ({
             <span className="text-xs text-foreground/80 group-hover:text-foreground max-w-[100px] truncate">
               {displayName}
             </span>
+            {/* Dynamic source indicator - lightning bolt */}
+            {source.crawlDepth === 'dynamic' && (
+              <Zap className="h-3 w-3 text-primary/80 shrink-0" title="Dynamic source" />
+            )}
             
             {/* Status icon (only for non-crawling states) */}
             <StatusIcon status={source.status} />
@@ -157,7 +169,13 @@ export const SourcesBar = ({
   showSignIn,
   onSignIn,
   className,
+  dynamicMode = true,
+  onDynamicModeChange,
+  conversationId,
+  addingPageSourceId,
 }: SourcesBarProps) => {
+  const hasDynamicSources = sources.some(s => s.crawlDepth === 'dynamic');
+  const { data: conversationPages = [] } = useConversationPages(conversationId ?? null);
   // Load crawl jobs for all sources to determine real status
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const { data: crawlJobsData = [] } = useQuery({
@@ -184,10 +202,11 @@ export const SourcesBar = ({
     return map;
   }, [crawlJobsData]);
   
-  // Update sources with real status from crawl jobs
+  // Update sources with real status from crawl jobs (and actual page count for dynamic)
   const sourcesWithStatus = useMemo(() => {
     return sources.map(source => {
       const crawlJob = crawlJobMap.get(source.id);
+      const sourcePages = conversationPages.filter(p => p.source_id === source.id);
       
       // Determine status from crawl job
       // Default to 'crawling' if no crawl job yet (source was just added)
@@ -196,7 +215,9 @@ export const SourcesBar = ({
       let totalPages = source.totalPages;
       
       if (crawlJob) {
-        if (crawlJob.status === 'queued' || crawlJob.status === 'running') {
+        if (addingPageSourceId === source.id) {
+          status = 'crawling';
+        } else if (crawlJob.status === 'queued' || crawlJob.status === 'running') {
           status = 'crawling';
         } else if (crawlJob.status === 'failed') {
           status = 'error';
@@ -204,16 +225,20 @@ export const SourcesBar = ({
           status = 'ready';
         }
         
-        // Use indexed_count if available, fallback to pages_indexed
-        pagesIndexed = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? source.pagesIndexed;
-        // Use max pages from crawl depth as the target (total_pages is usually null)
-        const maxPagesForDepth = source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
-        totalPages = maxPagesForDepth;
+        // Use indexed_count if available, fallback to pages_indexed; prefer actual DB count when we have pages
+        const jobIndexed = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? 0;
+        pagesIndexed = Math.max(jobIndexed, sourcePages.length);
+        const maxPagesForDepth = source.crawlDepth === 'dynamic' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
+        if (source.crawlDepth === 'dynamic') {
+          totalPages = sourcePages.length;
+        } else {
+          totalPages = maxPagesForDepth;
+        }
       } else {
         // No crawl job yet - assume it's being created, show as crawling
         status = 'crawling';
-        pagesIndexed = 0;
-        totalPages = 0;
+        pagesIndexed = sourcePages.length || 0;
+        totalPages = source.crawlDepth === 'dynamic' ? sourcePages.length : 0;
       }
       
       return {
@@ -223,7 +248,7 @@ export const SourcesBar = ({
         totalPages,
       };
     });
-  }, [sources, crawlJobMap]);
+  }, [sources, crawlJobMap, conversationPages, addingPageSourceId]);
   
   if (sources.length === 0) {
     return (
@@ -284,6 +309,21 @@ export const SourcesBar = ({
         </Button>
       </div>
       
+      {/* Dynamic mode toggle - only when we have dynamic sources */}
+      {hasDynamicSources && onDynamicModeChange && conversationId && (
+        <div className="flex items-center gap-2 shrink-0 ml-2 pl-2 border-l border-border">
+          <Zap className="h-3.5 w-3.5 text-primary" />
+          <Label htmlFor="dynamic-mode" className="text-xs text-muted-foreground cursor-pointer">
+            Dynamic Mode (Suggest New Pages)
+          </Label>
+          <Switch
+            id="dynamic-mode"
+            checked={dynamicMode}
+            onCheckedChange={onDynamicModeChange}
+          />
+        </div>
+      )}
+
       {/* Sign in button - right edge of screen, matching New chat button style */}
       {showSignIn && onSignIn && (
         <Button

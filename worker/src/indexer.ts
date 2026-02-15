@@ -83,7 +83,37 @@ export async function indexConversationForRag(conversationId: string): Promise<{
     inserted += batch.length;
   }
 
-  return { chunksCreated: inserted };
+  // Embed discovered_links for dynamic mode (RAG suggestions)
+  const discoveredEmbedded = await embedDiscoveredLinks(conversationId, apiKey);
+
+  return { chunksCreated: inserted + discoveredEmbedded };
+}
+
+async function embedDiscoveredLinks(conversationId: string, apiKey: string): Promise<number> {
+  const { data: links, error: fetchError } = await supabase
+    .from('discovered_links')
+    .select('id, context_snippet')
+    .eq('conversation_id', conversationId)
+    .is('embedding', null);
+
+  if (fetchError || !links?.length) return 0;
+
+  const texts = links.map((l) => l.context_snippet);
+  const embeddings = await embedBatch(apiKey, texts);
+  if (embeddings.length !== links.length) return 0;
+
+  let updated = 0;
+  for (let i = 0; i < links.length; i++) {
+    const { error } = await supabase
+      .from('discovered_links')
+      .update({ embedding: embeddings[i] })
+      .eq('id', links[i].id);
+    if (!error) updated++;
+  }
+  if (updated > 0) {
+    console.log('[indexer] Embedded', updated, 'discovered_links');
+  }
+  return 0; // Don't count toward chunksCreated
 }
 
 function chunkText(text: string, maxChars: number, overlap: number): string[] {

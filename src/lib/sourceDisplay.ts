@@ -26,3 +26,20 @@ function deriveLabelFromUrl(url: string): string | null {
   }
   return null;
 }
+
+/** Strip redundant site suffixes from page titles (e.g. "Article - Wikipedia" → "Article") */
+export function cleanPageTitleForDisplay(title: string | null | undefined, domain?: string): string {
+  if (!title?.trim()) return title || '';
+  let s = title.trim();
+  // Common suffixes that repeat the domain/source
+  const suffixes = [
+    /\s*-\s*Wikipedia\s*$/i,
+    /\s*–\s*Wikipedia\s*$/i,
+    /\s*-\s*Wikidata\s*$/i,
+    /\s*-\s*Wikimedia\s*$/i,
+  ];
+  for (const suffix of suffixes) {
+    s = s.replace(suffix, '').trim();
+  }
+  return s || title.trim();
+}

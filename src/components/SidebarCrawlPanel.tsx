@@ -5,22 +5,17 @@ import { cn } from '@/lib/utils';
 import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
 import { useConversationSources } from '@/hooks/useConversationSources';
-import { crawlJobsApi } from '@/lib/db/crawl-jobs';
+import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import { useQuery } from '@tanstack/react-query';
 
 interface SidebarCrawlPanelProps {
   sources: Source[];
   className?: string;
   conversationId?: string | null;
+  addingPageSourceId?: string | null;
 }
 
-interface SidebarCrawlPanelProps {
-  sources: Source[];
-  className?: string;
-  conversationId?: string | null;
-}
-
-export const SidebarCrawlPanel = ({ sources, className, conversationId }: SidebarCrawlPanelProps) => {
+export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPageSourceId }: SidebarCrawlPanelProps) => {
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
 
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
@@ -39,6 +34,11 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
 
   const { data: pages = [], isLoading: pagesLoading, error: pagesError } = useConversationPages(conversationId);
   const { data: edges = [], isLoading: edgesLoading, error: edgesError } = useConversationPageEdges(conversationId);
+  const { data: discoveredCountsMap = {} } = useQuery({
+    queryKey: ['discovered-links-counts', conversationId],
+    queryFn: () => (conversationId ? discoveredLinksApi.countsByConversation(conversationId) : {}),
+    enabled: !!conversationId,
+  });
 
   // Create a map of sourceId -> crawlJob
   const crawlJobMap = useMemo(() => {
@@ -66,7 +66,9 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
       let totalPages = sourcePages.length;
       
       if (crawlJob) {
-        if (crawlJob.status === 'queued' || crawlJob.status === 'running') {
+        if (addingPageSourceId === source.id) {
+          status = 'crawling';
+        } else if (crawlJob.status === 'queued' || crawlJob.status === 'running') {
           status = 'crawling';
         } else if (crawlJob.status === 'failed') {
           status = 'error';
@@ -74,12 +76,16 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
           status = 'ready';
         }
         
-        // Use indexed_count if available, fallback to pages_indexed
-        pagesIndexed = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? sourcePages.length;
-        // Use max pages from crawl depth as the target (total_pages is usually null)
-        const maxPagesForDepth = source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
-        // Always use maxPagesForDepth as the target, not total_pages (which is usually null)
-        totalPages = maxPagesForDepth;
+        // Use indexed_count if available, fallback to pages_indexed; prefer actual DB count when we have pages
+        const jobIndexed = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? 0;
+        pagesIndexed = Math.max(jobIndexed, sourcePages.length);
+        // For dynamic: use actual page count (can grow when user adds pages via "Yes")
+        const maxPagesForDepth = source.crawlDepth === 'dynamic' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
+        if (source.crawlDepth === 'dynamic') {
+          totalPages = sourcePages.length;
+        } else {
+          totalPages = maxPagesForDepth;
+        }
       } else {
         // No crawl job yet - assume it's being created, show as crawling
         status = 'crawling';
@@ -101,7 +107,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
         })),
       };
     });
-  }, [sources, crawlJobMap, pages]);
+  }, [sources, crawlJobMap, pages, addingPageSourceId]);
   
   const crawlingSources = sourcesWithStatus.filter(s => s.status === 'crawling');
   
@@ -109,16 +115,20 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
   const activeSource = activeSourceId ? sourcesWithStatus.find(s => s.id === activeSourceId) : null;
   const displaySources = activeSource ? [activeSource] : sourcesWithStatus;
   
-  // Aggregate stats - use discovered_count from crawl jobs
+  // Aggregate stats - for dynamic use discovered_links count (includes add-page); else crawl job
   const totalDiscovered = displaySources.reduce((sum, s) => {
+    const dlCount = discoveredCountsMap[s.id] ?? 0;
     const crawlJob = crawlJobMap.get(s.id);
-    const discoveredCount = crawlJob ? ((crawlJob as any).discovered_count ?? 0) : 0;
-    return sum + discoveredCount;
+    const jobDiscovered = crawlJob ? ((crawlJob as any).discovered_count ?? 0) : 0;
+    if (s.crawlDepth === 'dynamic') {
+      return sum + Math.max(jobDiscovered, dlCount);
+    }
+    return sum + jobDiscovered;
   }, 0);
   const totalIndexed = displaySources.reduce((sum, s) => sum + s.pagesIndexed, 0);
   const totalConnections = edges.length;
   
-  const isCrawling = crawlingSources.length > 0;
+  const isCrawling = crawlingSources.length > 0 || !!addingPageSourceId;
   const isIndexing = crawlingSources.some(s => s.totalPages > 0 && s.pagesIndexed >= s.totalPages);
   const hasAnySources = sources.length > 0;
 
@@ -314,6 +324,11 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
             )}>
               {getSourceDisplayLabel(source)}
             </span>
+            {source.crawlDepth === 'dynamic' && (
+              <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-medium bg-primary/15 text-primary border border-primary/20">
+                dynamic
+              </span>
+            )}
             <span 
               className="ml-auto text-[10px] tabular-nums"
               title={source.status === 'ready' && source.pagesIndexed < source.totalPages 

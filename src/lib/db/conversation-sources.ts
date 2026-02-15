@@ -71,14 +71,21 @@ export const conversationSourcesApi = {
 
     // Only create a crawl job if not inheriting (skipCrawlJob = true means inheriting)
     if (!skipCrawlJob) {
-      // Create a crawl job for this source if one doesn't exist
       const existingJobs = await crawlJobsApi.listBySource(sourceId);
       const activeJob = existingJobs.find(
         j => j.status === 'queued' || j.status === 'running'
       );
+      console.log('[crawl-job] add source', {
+        conversationId,
+        sourceId: sourceId.slice(0, 8),
+        existingJobsCount: existingJobs.length,
+        existingStatuses: existingJobs.map(j => j.status),
+        activeJob: activeJob ? { id: activeJob.id.slice(0, 8), status: activeJob.status } : null,
+        willCreate: !activeJob,
+      });
 
       if (!activeJob) {
-        await crawlJobsApi.create({
+        const job = await crawlJobsApi.create({
           source_id: sourceId,
           conversation_id: conversationId,
           status: 'queued',
@@ -92,6 +99,13 @@ export const conversationSourcesApi = {
           completed_at: null,
           last_activity_at: null,
         });
+        console.log('[crawl-job] created', {
+          jobId: job.id.slice(0, 8),
+          sourceId: sourceId.slice(0, 8),
+          conversationId: conversationId.slice(0, 8),
+        });
+      } else {
+        console.log('[crawl-job] skipped create (existing active job)', { sourceId: sourceId.slice(0, 8) });
       }
     }
 

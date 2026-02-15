@@ -7,6 +7,7 @@ import { useAuthContext } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 import { Source, CrawlDepth } from '@/types/source';
 import { cn } from '@/lib/utils';
+import { normalizeSourceUrl } from '@/lib/urlUtils';
 
 const extractDomain = (url: string): string => {
   try {
@@ -27,6 +28,7 @@ const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
+  const [addingPageSourceId, setAddingPageSourceId] = useState<string | null>(null);
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   
   const {
@@ -43,6 +45,9 @@ const Index = () => {
     addSourceToConversation,
     removeSourceFromConversation,
     recrawlSource,
+    updateDynamicMode,
+    addPageToSource,
+    addPageAndContinueResponse,
   } = useChatDatabase();
 
   // Toggle with animation
@@ -90,8 +95,8 @@ const Index = () => {
     depth: CrawlDepth,
     options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }
   ): Promise<Source | null> => {
-    const domain = extractDomain(url);
-    const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+    const fullUrl = normalizeSourceUrl(url);
+    const domain = extractDomain(fullUrl);
 
     const newSource: Source = {
       id: '',
@@ -110,6 +115,36 @@ const Index = () => {
 
     return addSourceToConversation(newSource);
   }, [addSourceToConversation]);
+
+  const handleDynamicModeChange = useCallback((enabled: boolean) => {
+    if (activeConversationId) updateDynamicMode(activeConversationId, enabled);
+  }, [activeConversationId, updateDynamicMode]);
+
+  const handleAddSuggestedPage = useCallback(async (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string) => {
+    const normalizedUrl = normalizeSourceUrl(url);
+    console.log('[AddSuggestedPage] called', { url: normalizedUrl, sourceId, questionToReask, messageId, indexedPageDisplay, activeConversationId });
+    if (!activeConversationId) {
+      console.warn('[AddSuggestedPage] no activeConversationId, aborting');
+      return;
+    }
+    setAddingPageSourceId(sourceId);
+    try {
+      if (questionToReask?.trim() && messageId) {
+        await addPageAndContinueResponse(activeConversationId, sourceId, normalizedUrl, messageId, questionToReask.trim(), indexedPageDisplay);
+      } else {
+        await addPageToSource(activeConversationId, sourceId, normalizedUrl);
+        if (questionToReask?.trim()) {
+          await new Promise((r) => setTimeout(r, 500));
+          sendMessage(questionToReask.trim());
+        }
+      }
+    } catch (err) {
+      console.error('[AddSuggestedPage] error:', err);
+      throw err;
+    } finally {
+      setAddingPageSourceId(null);
+    }
+  }, [activeConversationId, addPageToSource, addPageAndContinueResponse, sendMessage]);
 
   if (loading) {
     return (
@@ -139,6 +174,7 @@ const Index = () => {
             onSelectConversation={selectConversation}
             onDeleteConversation={deleteConversation}
             currentSources={currentSources}
+            addingPageSourceId={addingPageSourceId}
           />
         </div>
         
@@ -173,6 +209,9 @@ const Index = () => {
           onToggleSidebar={handleToggleSidebar}
           showSignIn={!user}
           onSignIn={() => navigate('/auth')}
+          onDynamicModeChange={handleDynamicModeChange}
+          onAddSuggestedPage={handleAddSuggestedPage}
+          addingPageSourceId={addingPageSourceId}
         />
       </div>
     </div>

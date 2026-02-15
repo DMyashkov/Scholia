@@ -16,7 +16,7 @@ import { ForceGraph } from './graph';
 import { CrawlStats } from './CrawlStats';
 import { useMemo } from 'react';
 import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
-import { crawlJobsApi } from '@/lib/db/crawl-jobs';
+import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import { useQuery } from '@tanstack/react-query';
 // MAX_PAGES defined inline
 
@@ -27,6 +27,7 @@ interface SourceDrawerProps {
   onOpenChange: (open: boolean) => void;
   onRecrawl: (sourceId: string) => void;
   onRemove: (sourceId: string) => void;
+  addingPageSourceId?: string | null;
 }
 
 const getStatusBadge = (status: Source['status']) => {
@@ -59,6 +60,7 @@ const getPageStatusIcon = (status: string) => {
 
 const getDepthLabel = (depth: string) => {
   switch (depth) {
+    case 'dynamic': return 'Dynamic';
     case 'shallow': return 'Shallow';
     case 'medium': return 'Medium';
     case 'deep': return 'Deep';
@@ -73,6 +75,7 @@ export const SourceDrawer = ({
   onOpenChange,
   onRecrawl,
   onRemove,
+  addingPageSourceId,
 }: SourceDrawerProps) => {
   const displayName = source ? getSourceDisplayLabel(source) : '';
   const initial = displayName.charAt(0).toUpperCase() || '';
@@ -102,13 +105,14 @@ export const SourceDrawer = ({
 
   const realStatus: Source['status'] = useMemo(() => {
     if (!source) return 'crawling';
+    if (addingPageSourceId === source.id) return 'crawling';
     if (crawlJob) {
       if (crawlJob.status === 'queued' || crawlJob.status === 'running') return 'crawling';
       if (crawlJob.status === 'failed') return 'error';
       if (crawlJob.status === 'completed') return 'ready';
     }
     return source.status || 'crawling';
-  }, [source, crawlJob]);
+  }, [source, crawlJob, addingPageSourceId]);
 
   // Use the conversation that ran the crawl so we get the right pages/edges (can differ from active conversation)
   const graphConversationId = crawlJob?.conversation_id ?? conversationId;
@@ -120,6 +124,12 @@ export const SourceDrawer = ({
   });
   const { data: allEdges = [], isLoading: edgesLoading } = useConversationPageEdges(graphConversationId, {
     refetchInterval: pollInterval,
+  });
+  const { data: discoveredCount = 0 } = useQuery({
+    queryKey: ['discovered-links-count', graphConversationId, source?.id],
+    queryFn: () => (graphConversationId && source?.id ? discoveredLinksApi.countBySource(graphConversationId, source.id) : 0),
+    enabled: !!graphConversationId && !!source?.id,
+    refetchInterval: addingPageSourceId === source?.id ? 1000 : false,
   });
 
   // Filter pages and edges for the selected source only (no inference fallback)
@@ -143,16 +153,18 @@ export const SourceDrawer = ({
   }, [crawlJob, sourcePages.length]);
   
   const pagesDiscovered = useMemo(() => {
-    if (crawlJob) {
-      return (crawlJob as any).discovered_count ?? 0;
+    const jobCount = crawlJob ? ((crawlJob as any).discovered_count ?? 0) : 0;
+    if (source?.crawlDepth === 'dynamic') {
+      return Math.max(jobCount, discoveredCount);
     }
-    return sourcePages.length;
-  }, [crawlJob, sourcePages.length]);
+    return jobCount || sourcePages.length;
+  }, [crawlJob, sourcePages.length, source?.crawlDepth, discoveredCount]);
   
   const maxPagesForDepth = useMemo(() => {
     if (!source) return 0;
+    if (source.crawlDepth === 'dynamic') return Math.max(1, sourcePages.length);
     return source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
-  }, [source?.crawlDepth]);
+  }, [source?.crawlDepth, sourcePages.length]);
 
   const connectionsFound = sourceEdges.length;
 
@@ -232,14 +244,6 @@ export const SourceDrawer = ({
                   <div className="flex justify-between">
                     <span>Depth:</span>
                     <span className="text-foreground">{getDepthLabel(source.crawlDepth)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Include subpages:</span>
-                    <span className="text-foreground">{source.includeSubpages ? 'Yes' : 'No'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Include PDFs:</span>
-                    <span className="text-foreground">{source.includePdfs ? 'Yes' : 'No'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Same domain only:</span>

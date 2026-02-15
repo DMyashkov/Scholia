@@ -24,6 +24,18 @@ export const messagesApi = {
     return data as Message;
   },
 
+  async update(id: string, updates: Record<string, unknown>) {
+    const { data, error } = await supabase
+      .from('messages')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data as Message;
+  },
+
   async delete(id: string) {
     const { error } = await supabase
       .from('messages')

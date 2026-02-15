@@ -25,6 +25,9 @@ interface ChatAreaProps {
   onToggleSidebar?: () => void;
   showSignIn?: boolean;
   onSignIn?: () => void;
+  onDynamicModeChange?: (enabled: boolean) => void;
+  onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string) => Promise<void>;
+  addingPageSourceId?: string | null;
 }
 
 export const ChatArea = ({
@@ -40,6 +43,9 @@ export const ChatArea = ({
   onToggleSidebar,
   showSignIn,
   onSignIn,
+  onDynamicModeChange,
+  onAddSuggestedPage,
+  addingPageSourceId,
 }: ChatAreaProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [addSourceOpen, setAddSourceOpen] = useState(false);
@@ -126,6 +132,10 @@ export const ChatArea = ({
           showSignIn={showSignIn}
           onSignIn={onSignIn}
           className={!sidebarOpen ? 'pl-0' : undefined}
+          dynamicMode={conversation?.dynamicMode ?? true}
+          onDynamicModeChange={(enabled) => conversation && onDynamicModeChange?.(enabled)}
+          conversationId={conversation?.id}
+          addingPageSourceId={addingPageSourceId}
         />
       </div>
 
@@ -133,15 +143,24 @@ export const ChatArea = ({
         <>
           <ScrollArea className="flex-1 scrollbar-thin" ref={scrollRef}>
             <div className="pb-4">
-              {conversation.messages.map((message) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message}
-                  sources={sourcesList}
-                  onQuoteClick={handleQuoteClick}
-                  onSourceClick={handleKnowledgeTrailClick}
-                />
-              ))}
+              {conversation.messages.map((message, i) => {
+                // Skip messages that are follow-ups (rendered with their parent)
+                if (message.followsMessageId) return null;
+                const next = conversation.messages[i + 1];
+                const followUp = next?.followsMessageId === message.id ? next : undefined;
+                return (
+                  <ChatMessage
+                    key={message.id}
+                    message={message}
+                    followUp={followUp}
+                    sources={sourcesList}
+                    onQuoteClick={handleQuoteClick}
+                    onSourceClick={handleKnowledgeTrailClick}
+                    onAddSuggestedPage={onAddSuggestedPage}
+                    conversationId={conversation.id}
+                  />
+                );
+              })}
               {isLoading && streamingMessage && (
                 <ChatMessage
                   message={{
@@ -160,7 +179,7 @@ export const ChatArea = ({
         </>
       ) : (
         <>
-          <WelcomeScreen onExampleClick={onSendMessage} />
+          <WelcomeScreen onAddSource={() => setAddSourceOpen(true)} hasSources={sources.length > 0} />
           <ChatInput onSendMessage={onSendMessage} isLoading={isLoading} />
         </>
       )}
@@ -179,6 +198,7 @@ export const ChatArea = ({
         onOpenChange={setSourceDrawerOpen}
         onRecrawl={onRecrawlSource}
         onRemove={handleRemoveSource}
+        addingPageSourceId={addingPageSourceId}
       />
 
       <SourcePreviewDrawer

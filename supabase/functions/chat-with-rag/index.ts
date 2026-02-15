@@ -67,10 +67,13 @@ Deno.serve(async (req) => {
 
   const run = async () => {
   try {
-    const { conversationId, userMessage } = (await req.json()) as {
+    const body = (await req.json()) as {
       conversationId: string;
       userMessage: string;
+      appendToMessageId?: string;
+      indexedPageDisplay?: string;
     };
+    const { conversationId, userMessage, appendToMessageId, indexedPageDisplay } = body;
     if (!conversationId || !userMessage?.trim()) {
         await emit({ error: 'conversationId and userMessage required' });
         return;
@@ -294,7 +297,11 @@ Deno.serve(async (req) => {
       };
     });
 
-    const { data: conv } = await supabase.from('conversations').select('owner_id').eq('id', conversationId).single();
+    const { data: conv } = await supabase
+      .from('conversations')
+      .select('owner_id, dynamic_mode')
+      .eq('id', conversationId)
+      .single();
     const ownerId = conv?.owner_id ?? null;
 
     let logReason = '1 round';
@@ -302,8 +309,38 @@ Deno.serve(async (req) => {
     else if (decomposeResult?.needsSecondRound && !decomposeResult?.round2) logReason = 'decomposition said needsSecondRound but no round2 config';
     else if (decomposeResult?.needsSecondRound) logReason = 'decomposition said needsSecondRound but round 2 skipped (extraction empty or no queries)';
 
-    console.log('[RAG-2ROUND] inserting message:', { was_multi_step: didSecondRound, reason: logReason });
+    let assistantRow: Record<string, unknown>;
 
+    if (appendToMessageId) {
+      // Insert new assistant message as follow-up (add-page + re-ask flow)
+      // Clear suggested_pages on the original message
+      await supabase
+        .from('messages')
+        .update({ suggested_pages: null })
+        .eq('id', appendToMessageId);
+      console.log('[RAG-2ROUND] inserting follow-up message:', { follows: appendToMessageId, indexedPageDisplay });
+      const { data: insertedMsg, error: msgInsertErr } = await supabase
+        .from('messages')
+        .insert({
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: chatResult.content,
+          quotes: quotesOut,
+          owner_id: ownerId,
+          was_multi_step: didSecondRound,
+          follows_message_id: appendToMessageId,
+          indexed_page_display: indexedPageDisplay ?? null,
+        })
+        .select('*');
+      assistantRow = insertedMsg?.[0] as Record<string, unknown>;
+      if (msgInsertErr || !assistantRow) {
+        console.error('[RAG-2ROUND] follow-up message insert failed:', msgInsertErr);
+        await emit({ error: msgInsertErr?.message ?? 'Failed to save message' });
+        return;
+      }
+    } else {
+      // Normal flow: insert new message
+      console.log('[RAG-2ROUND] inserting message:', { was_multi_step: didSecondRound, reason: logReason });
       const { data: insertedMsg, error: msgInsertErr } = await supabase
         .from('messages')
         .insert({
@@ -314,23 +351,22 @@ Deno.serve(async (req) => {
           owner_id: ownerId,
           was_multi_step: didSecondRound,
         })
-      .select('*');
-    let assistantRow = insertedMsg?.[0];
-    if (msgInsertErr || !assistantRow) {
+        .select('*');
+      assistantRow = insertedMsg?.[0] as Record<string, unknown>;
+      if (msgInsertErr || !assistantRow) {
         console.error('[RAG-2ROUND] message insert failed:', msgInsertErr);
         await emit({ error: msgInsertErr?.message ?? 'Failed to save message' });
         return;
+      }
+      const { data: updated } = await supabase
+        .from('messages')
+        .update({ was_multi_step: didSecondRound })
+        .eq('id', assistantRow.id)
+        .select('*')
+        .single();
+      if (updated) assistantRow = updated as Record<string, unknown>;
+      console.log('[RAG-2ROUND] message inserted:', { id: assistantRow?.id });
     }
-
-    // Explicitly update was_multi_step in case insert didn't persist it (e.g. PostgREST schema cache)
-    const { data: updated } = await supabase
-      .from('messages')
-      .update({ was_multi_step: didSecondRound })
-      .eq('id', assistantRow.id)
-      .select('*')
-      .single();
-    if (updated) assistantRow = updated;
-    console.log('[RAG-2ROUND] message inserted:', { id: assistantRow?.id, was_multi_step: (assistantRow as { was_multi_step?: boolean })?.was_multi_step });
 
     await supabase.from('rag_run_log').insert({
       conversation_id: conversationId,
@@ -353,7 +389,84 @@ Deno.serve(async (req) => {
           }
     }
 
-      await emit({ done: true, message: assistantRow, quotes: quotesOut });
+    // Page suggestion: only when answer indicates context doesn't include the info (skip when appending)
+    let suggestedPages: { url: string; title: string; contextSnippet: string; sourceId: string; promptedByQuestion?: string }[] = [];
+    const cantAnswer = indicatesCantAnswer(chatResult.content);
+    const dynamicMode = (conv as { dynamic_mode?: boolean } | null)?.dynamic_mode !== false;
+
+    if (!appendToMessageId && cantAnswer && dynamicMode) {
+      const { data: convSources } = await supabase
+        .from('conversation_sources')
+        .select('source_id')
+        .eq('conversation_id', conversationId);
+      const allSourceIds = (convSources || []).map((cs: { source_id: string }) => cs.source_id);
+      if (allSourceIds.length > 0) {
+        try {
+          const suggestionQueries = [
+            ...searchQueries.slice(0, 3),
+            ...(searchQueries.some((q) => q.toLowerCase().includes(userMessage.trim().toLowerCase().slice(0, 30))) ? [] : [userMessage.trim()]),
+          ];
+          const uniqueQueries = [...new Set(suggestionQueries)].slice(0, 4);
+          const queryEmbs = await embedBatch(openaiKey, uniqueQueries);
+
+          const matchMap = new Map<string, { m: { to_url: string; anchor_text: string | null; context_snippet: string; source_id: string; from_page_id: string | null }; distance: number }>();
+          for (let i = 0; i < queryEmbs.length; i++) {
+            const { data: matches } = await supabase.rpc('match_discovered_links', {
+              query_embedding: queryEmbs[i],
+              match_conversation_id: conversationId,
+              match_source_ids: allSourceIds,
+              match_count: 12,
+            });
+            const list = (matches || []) as { to_url: string; anchor_text: string | null; context_snippet: string; source_id: string; from_page_id: string | null; distance: number }[];
+            for (const m of list) {
+              const key = `${m.source_id}:${m.to_url}`;
+              const dist = m.distance ?? 1;
+              const existing = matchMap.get(key);
+              if (!existing || existing.distance > dist) {
+                matchMap.set(key, { m, distance: dist });
+              }
+            }
+          }
+
+          const sorted = Array.from(matchMap.values()).sort((a, b) => a.distance - b.distance);
+          let list = sorted.map((x) => x.m);
+
+          const terms = extractQueryTerms(userMessage.trim());
+          if (terms.length > 0) {
+            const { withMatch, withoutMatch } = partitionByTermMatch(list, terms);
+            list = [...withMatch, ...withoutMatch];
+          }
+
+          const top = list[0];
+          if (top) {
+            let fromPageTitle: string | undefined;
+            if (top.from_page_id) {
+              const { data: fromPage } = await supabase.from('pages').select('title').eq('id', top.from_page_id).single();
+              fromPageTitle = (fromPage as { title: string | null } | null)?.title ?? undefined;
+            }
+            suggestedPages = [{
+              url: top.to_url,
+              title: top.anchor_text?.trim() || deriveTitleFromUrl(top.to_url),
+              contextSnippet: top.context_snippet,
+              sourceId: top.source_id,
+              promptedByQuestion: userMessage.trim(),
+              fromPageTitle,
+            }];
+          }
+        } catch (e) {
+          console.warn('[RAG] match_discovered_links failed:', e);
+        }
+      }
+    }
+
+    if (suggestedPages.length > 0) {
+      await supabase
+        .from('messages')
+        .update({ suggested_pages: suggestedPages })
+        .eq('id', assistantRow.id);
+    }
+
+      await emit({ done: true, message: assistantRow, quotes: quotesOut, suggestedPages });
   } catch (e) {
     console.error(e);
       await emit({ error: (e as Error).message });
@@ -373,6 +486,61 @@ Deno.serve(async (req) => {
     },
   });
 });
+
+function indicatesCantAnswer(content: string): boolean {
+  const lower = content.toLowerCase();
+  const patterns = [
+    /doesn't include|does not include|context does not|context doesn't/,
+    /does not provide|doesn't provide|does not contain|doesn't contain/,
+    /does not list|doesn't list|does not have|doesn't have/,
+    /unable to (find|provide|list|answer)/,
+    /i don't have|i do not have/,
+    /no (indexed |)(information|content|list|data) (in |)(the |)context/,
+    /the (provided |)context does not/,
+    /(the |)context (does not|doesn't) (include|contain|have|provide|list)/,
+    /focuses exclusively on|mainly discusses|only (discusses|mentions|covers)/,
+    /aside from|other than.*not (included|mentioned|listed)/,
+  ];
+  return patterns.some((p) => p.test(lower));
+}
+
+function deriveTitleFromUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const pathParts = u.pathname.split('/').filter(Boolean);
+    const last = pathParts[pathParts.length - 1];
+    if (last) return decodeURIComponent(last).replace(/_/g, ' ');
+    return url;
+  } catch {
+    return url;
+  }
+}
+
+/** Extract meaningful terms for re-ranking (skip stopwords) */
+function extractQueryTerms(query: string): string[] {
+  const stop = new Set(['a', 'an', 'the', 'of', 'to', 'for', 'in', 'on', 'at', 'by', 'with', 'other', 'than', 'give', 'me', 'get', 'show', 'find']);
+  return query
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !stop.has(w));
+}
+
+/** Partition: pages whose URL/anchor matches query terms go first (e.g. American_Quarter_Horse for "quarter horse") */
+function partitionByTermMatch(
+  list: { to_url: string; anchor_text: string | null }[],
+  terms: string[]
+): { withMatch: typeof list; withoutMatch: typeof list } {
+  const withMatch: typeof list = [];
+  const withoutMatch: typeof list = [];
+  for (const m of list) {
+    const urlNorm = (m.to_url + ' ' + (m.anchor_text || '') + ' ' + deriveTitleFromUrl(m.to_url)).toLowerCase().replace(/_/g, ' ');
+    const matches = terms.some((term) => urlNorm.includes(term));
+    if (matches) withMatch.push(m);
+    else withoutMatch.push(m);
+  }
+  return { withMatch, withoutMatch };
+}
 
 async function embedBatch(apiKey: string, texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
@@ -545,7 +713,10 @@ async function chat(
   userMessage: string,
   chunks: ChunkRow[],
 ): Promise<ChatResponse> {
-  const systemPrompt = `You answer the user's question using ONLY the provided source context below. The context is from the user's indexed pages (e.g. Wikipedia). Do not say the context lacks information if the answer appears anywhere in it—look carefully, including in the first sections (e.g. lead paragraph) where birth dates and basic facts often appear.
+  const systemPrompt = `You answer the user's question using ONLY the provided source context below. The context is from the user's indexed pages (e.g. Wikipedia).
+
+CRITICAL: Do NOT infer, extrapolate, or assume. Only state facts that are EXPLICITLY written in the context. If the user asks "does X have a museum" and the context only mentions "Hall of Fame" or "inducted into X" without explicitly stating there is a museum, you MUST say "The context does not include information about whether..." or "The provided context does not mention a museum." Do not guess or use external knowledge—stick strictly to what the text says.
+When the context truly does NOT contain the information needed, say clearly: "The context does not include..." or "The provided context does not list..." Be concise. This allows the system to suggest indexing another page.
 
 Context from indexed pages:
 ---
@@ -558,6 +729,7 @@ Output a JSON object with this structure only (no other text):
 Rules:
 - Use INLINE numbered citations: place [1], [2], [3] etc. immediately after each claim. Format: "Statement [1]. Another fact [2]."
 - Each quote MUST include "ref" (1-based number) matching its citation: the quote that supports [3] in the text must have "ref":3.
+- The snippet you cite MUST DIRECTLY support the claim. If you state "there is a museum," the snippet must explicitly mention a museum—not just a related term like "Hall of Fame" unless the context clearly equates them.
 - Only use citation numbers for which you have a quote.
 - Answer using ONLY the context above. Each context block has a first line "page_id: " followed by a UUID. Put that exact UUID in "pageId" when citing that block.
 - For "snippet": you MUST copy-paste a verbatim sentence or phrase from the context—do not paraphrase.

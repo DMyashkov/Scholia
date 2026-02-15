@@ -1,5 +1,6 @@
 import { Quote } from '@/types/source';
 import { cn } from '@/lib/utils';
+import { cleanPageTitleForDisplay } from '@/lib/sourceDisplay';
 import { ExternalLink } from 'lucide-react';
 
 interface QuoteCardProps {
@@ -46,7 +47,7 @@ export const QuoteCard = ({ quote, refNumber, onClick }: QuoteCardProps) => {
             </div>
             <span className="font-medium text-foreground/70">{quote.domain}</span>
             <span className="text-muted-foreground/50">•</span>
-            <span className="truncate">{quote.pageTitle}</span>
+            <span className="truncate">{cleanPageTitleForDisplay(quote.pageTitle, quote.domain)}</span>
             <ExternalLink className="h-3 w-3 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
         </div>

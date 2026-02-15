@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Quote } from '@/types/source';
+import { cleanPageTitleForDisplay } from '@/lib/sourceDisplay';
 import {
   Sheet,
   SheetContent,
@@ -68,7 +69,7 @@ export const SourcePreviewDrawer = ({
             </div>
             <div className="flex-1 min-w-0">
               <SheetTitle className="text-lg font-serif leading-tight">
-                {quote.pageTitle}
+                {cleanPageTitleForDisplay(quote.pageTitle, quote.domain)}
               </SheetTitle>
               <p className="text-xs text-muted-foreground mt-1 truncate flex items-center gap-1">
                 <span className="text-primary/80">{quote.domain}</span>

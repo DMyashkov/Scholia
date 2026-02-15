@@ -27,6 +27,7 @@ interface SidebarProps {
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
   currentSources?: import('@/types/source').Source[];
+  addingPageSourceId?: string | null;
 }
 
 export const Sidebar = ({
@@ -38,6 +39,7 @@ export const Sidebar = ({
   onSelectConversation,
   onDeleteConversation,
   currentSources = [],
+  addingPageSourceId,
 }: SidebarProps) => {
   const groupedConversations = {
     today: conversations.filter(c => {
@@ -159,7 +161,7 @@ export const Sidebar = ({
         </ScrollArea>
 
         {/* Crawl Panel - shows when there are sources */}
-        <SidebarCrawlPanel sources={currentSources} conversationId={activeConversationId} />
+        <SidebarCrawlPanel sources={currentSources} conversationId={activeConversationId} addingPageSourceId={addingPageSourceId} />
 
         {/* Footer with User Menu */}
         <UserMenu />

@@ -1,4 +1,10 @@
 import { cn } from '@/lib/utils';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 interface CrawlStatsProps {
   pagesDiscovered: number;
@@ -19,22 +25,51 @@ export const CrawlStats = ({
   return (
     <div className="space-y-3">
       {/* Stats grid */}
-      <div className="grid grid-cols-3 gap-2">
-        <StatItem 
-          label="Discovered" 
-          value={pagesDiscovered}
-          highlight={isCrawling}
-        />
-        <StatItem 
-          label="Indexed" 
-          value={pagesIndexed}
-          highlight={isCrawling}
-        />
-        <StatItem 
-          label="Links" 
-          value={connectionsFound}
-        />
-      </div>
+      <TooltipProvider delayDuration={300}>
+        <div className="grid grid-cols-3 gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <StatItem 
+                  label="Discovered" 
+                  value={pagesDiscovered}
+                  highlight={isCrawling}
+                />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[200px]">
+              <p className="text-xs">Pages/links found during crawl (or from indexed pages for dynamic sources)</p>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <StatItem 
+                  label="Indexed" 
+                  value={pagesIndexed}
+                  highlight={isCrawling}
+                />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[200px]">
+              <p className="text-xs">Pages in the graph with searchable content</p>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <StatItem 
+                  label="Connections" 
+                  value={connectionsFound}
+                />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[200px]">
+              <p className="text-xs">Links between indexed pages in the graph</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </TooltipProvider>
       
       {/* Crawling activity indicator - same formula as SidebarCrawlPanel: indexed/target */}
       {isCrawling && targetPages > 0 && (

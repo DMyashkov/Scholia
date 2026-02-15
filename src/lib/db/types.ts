@@ -2,6 +2,7 @@ export interface Conversation {
   id: string;
   owner_id: string | null;
   title: string;
+  dynamic_mode: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -27,6 +28,8 @@ export interface Message {
   owner_id: string | null;
   quotes?: MessageQuote[] | null;
   was_multi_step?: boolean;
+  follows_message_id?: string | null;
+  indexed_page_display?: string | null;
 }
 
 export interface Source {
@@ -36,7 +39,7 @@ export interface Source {
   domain: string;
   source_label?: string | null; // Human-readable label from first page (e.g. "Joe Biden"). domain = hostname.
   favicon: string | null;
-  crawl_depth: 'shallow' | 'medium' | 'deep';
+  crawl_depth: 'shallow' | 'medium' | 'deep' | 'dynamic';
   include_subpages: boolean;
   include_pdfs: boolean;
   same_domain_only: boolean;

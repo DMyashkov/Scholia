@@ -44,8 +44,8 @@ export const useUpdateConversation = () => {
   const userId = user?.id || null;
 
   return useMutation({
-    mutationFn: ({ id, title }: { id: string; title: string }) =>
-      conversationsApi.update(id, { title }),
+    mutationFn: ({ id, title, dynamic_mode }: { id: string; title?: string; dynamic_mode?: boolean }) =>
+      conversationsApi.update(id, { ...(title !== undefined && { title }), ...(dynamic_mode !== undefined && { dynamic_mode }) }),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['conversations', userId] });
       queryClient.invalidateQueries({ queryKey: ['conversation', variables.id] });
@@ -65,6 +65,24 @@ export const useDeleteConversation = () => {
       queryClient.invalidateQueries({ queryKey: ['conversations', userId] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       queryClient.invalidateQueries({ queryKey: ['conversation'] });
+    },
+  });
+};
+
+export const DELETE_ALL_CONVERSATIONS_EVENT = 'scholia:conversations-deleted-all';
+
+export const useDeleteAllConversations = () => {
+  const queryClient = useQueryClient();
+  const { user } = useAuthContext();
+  const userId = user?.id || null;
+
+  return useMutation({
+    mutationFn: () => conversationsApi.deleteAll(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations', userId] });
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversation'] });
+      window.dispatchEvent(new CustomEvent(DELETE_ALL_CONVERSATIONS_EVENT));
     },
   });
 };

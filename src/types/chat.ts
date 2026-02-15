@@ -1,5 +1,16 @@
 import { Quote, Source } from './source';
 
+export interface SuggestedPage {
+  url: string;
+  title: string;
+  contextSnippet: string;
+  sourceId: string;
+  /** When present: "can't answer" flow - add page then re-ask this question */
+  promptedByQuestion?: string;
+  /** Title of the page this link was discovered from (for "branching out from X") */
+  fromPageTitle?: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -8,6 +19,11 @@ export interface Message {
   quotes?: Quote[];
   sourcesUsed?: string[];
   wasMultiStep?: boolean;
+  suggestedPages?: SuggestedPage[];
+  /** Points to the previous message this is a follow-up of (add page + re-answer) */
+  followsMessageId?: string;
+  /** Display text for divider: "Indexed American Horses - Wikipedia" */
+  indexedPageDisplay?: string;
 }
 
 export interface Conversation {
@@ -15,6 +31,7 @@ export interface Conversation {
   title: string;
   messages: Message[];
   sources: Source[];
+  dynamicMode?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

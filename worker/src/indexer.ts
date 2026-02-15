@@ -62,20 +62,7 @@ export async function indexConversationForRag(conversationId: string): Promise<{
     return { chunksCreated: 0 };
   }
 
-  // Encoding log: what was chunked per page (so we can see which chunk contains e.g. birth date)
-  const byPage = new Map<string, { content: string }[]>();
-  for (const c of chunkSpecs) {
-    if (!byPage.has(c.page_id)) byPage.set(c.page_id, []);
-    byPage.get(c.page_id)!.push({ content: c.content });
-  }
-  for (const [pageId, chunks] of byPage) {
-    console.log(`[RAG encoding] page ${pageId.slice(0, 8)}: ${chunks.length} chunks`);
-    chunks.forEach((chunk, i) => {
-      const preview = chunk.content.slice(0, 120).replace(/\s+/g, ' ').trim() + (chunk.content.length > 120 ? '...' : '');
-      console.log(`  chunk ${i}: ${preview}`);
-    });
-  }
-
+  console.log('[indexer] Indexing', chunkSpecs.length, 'chunks from', pages?.length ?? 0, 'pages');
   const rows = chunkSpecs.map((c, i) => ({
     page_id: c.page_id,
     content: c.content,

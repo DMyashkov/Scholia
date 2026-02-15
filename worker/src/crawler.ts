@@ -174,6 +174,9 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
     console.error(`❌ Source URL: ${source.url}`);
     return;
   }
+
+  const sourceShort = new URL(source.url).pathname?.replace(/^\/wiki\//, '') || source.url.slice(0, 40);
+  console.log(`[crawl] START source=${sourceShort} maxPages=${maxPages} depth=${source.crawl_depth}`);
   
   let loopIterations = 0;
   while (queue.length > 0 && visited.size < maxPages) {
@@ -245,15 +248,10 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       }
 
       // Extract links BEFORE updating progress (so we count discovered)
-      const startTime = Date.now();
       const links = extractLinks(html, normalizedUrl, source);
-      const extractionTime = Date.now() - startTime;
       const newLinks: string[] = [];
       const edgesToInsert: Array<{conversation_id: string; source_id: string; from_page_id: string; from_url: string; to_url: string; owner_id: string | null}> = [];
       
-      
-      // Links are already sorted with priority first (from extractLinks)
-      // Take first 200 links (which includes priority links first)
       const linksToProcess = links.slice(0, 200);
 
       for (const link of linksToProcess) {
@@ -298,8 +296,9 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
             }
           }
       }
-      
-      
+
+      console.log(`[crawl] page ${visited.size}/${maxPages} depth=${depth} links=${links.length} newToQueue=${newLinks.length} queue=${queue.length}`);
+
       // Insert edges immediately after page insertion for real-time UI updates
       // CRITICAL: Edge insertion errors must NOT stop the crawl - wrap in try-catch
       if (edgesToInsert.length > 0) {
@@ -344,8 +343,8 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
           }
           
           linksCount += successCount;
-          const edgeTime = Date.now() - edgeStart;
         } catch (edgeError: any) {
+          console.error(`[crawl] EDGE INSERT ERROR`, edgeError?.message || edgeError);
           // CRITICAL: Log error but continue crawling - edges are not critical
           // Estimate links count so crawl can continue
           linksCount += Math.floor(edgesToInsert.length * 0.8);
@@ -373,6 +372,13 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
     }
   }
 
+  // Run indexer BEFORE marking completed so when UI shows "ready", chunks exist
+  try {
+    await indexConversationForRag(conversationId);
+  } catch (_indexErr) {
+    console.warn('[crawl] RAG indexing failed:', _indexErr);
+  }
+
   // Final update
   await supabase
     .from('crawl_jobs')
@@ -387,12 +393,8 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
     })
     .eq('id', job.id);
 
-
-  try {
-    await indexConversationForRag(conversationId);
-  } catch (_indexErr) {
-    // Non-blocking; encoding logs are in indexer
-  }
+  const exitReason = queue.length === 0 ? 'queue empty' : `visited >= maxPages (${visited.size} >= ${maxPages})`;
+  console.log(`[crawl] END source=${sourceShort} visited=${visited.size} exit=${exitReason} linksCount=${linksCount} iterations=${loopIterations}`);
 
   if (loopIterations === 0) {
     console.error(`❌ CRITICAL: Crawl loop never ran! Loop iterations = 0`);
@@ -543,23 +545,7 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
 
 function extractLinks(html: string, pageUrl: string, source: Source): string[] {
   try {
-    const parseStart = Date.now();
     const $ = cheerio.load(html);
-    const parseTime = Date.now() - parseStart;
-    
-    // Find main content area (prioritize links in main content)
-    const mainContent = $('main, article, #content, #bodyContent, .mw-parser-output').first();
-    const hasMainContent = mainContent.length > 0;
-    const contentSelector = hasMainContent ? mainContent : $('body');
-    
-    // For proximity-based prioritization, get the first few paragraphs/sections
-    // Links that appear early in the content are more relevant
-    const firstContent = contentSelector.find('p, h1, h2, h3, .mw-parser-output > p, .mw-parser-output > h2').slice(0, 10);
-    const earlyContentSelector = firstContent.length > 0 ? firstContent : contentSelector;
-    
-    const links: string[] = [];
-    const priorityLinks: string[] = []; // Links in main content
-    const earlyLinks: string[] = []; // Links in first paragraphs (highest priority)
     const baseUrl = new URL(pageUrl);
     const seen = new Set<string>();
 
@@ -575,38 +561,20 @@ function extractLinks(html: string, pageUrl: string, source: Source): string[] {
     }
     const normalizedCurrentUrl = currentUrlObj.toString();
 
-    let totalLinksFound = 0;
-    let skippedAnchor = 0;
-    let skippedSamePage = 0;
-    let skippedDomain = 0;
-    let skippedPdf = 0;
-    let skippedProtocol = 0;
-    let added = 0;
+    const mainContent = $('main, article, #content, #bodyContent, .mw-parser-output').first();
+    const contentSelector = mainContent.length > 0 ? mainContent : $('body');
+    const linkElements = contentSelector.find('a[href]').length > 0
+      ? contentSelector.find('a[href]')
+      : $('a[href]');
 
-    // Extract links from early content first (highest priority), then main content, then all
-    const earlyContentLinks = earlyContentSelector.find('a[href]');
-    const mainContentLinks = contentSelector.find('a[href]');
-    const allLinks = $('a[href]');
-    
-    // Process early content links first for proximity-based prioritization
-    const linkElements = earlyContentLinks.length > 0 ? earlyContentLinks : (mainContentLinks.length > 0 ? mainContentLinks : allLinks);
-    let processedCount = 0;
-    const logInterval = 500; // Log every 500 links to reduce spam
-    
+    const links: string[] = [];
+
     linkElements.each((_, element) => {
-      processedCount++;
-      if (processedCount % logInterval === 0) {
-      }
       const href = $(element).attr('href');
       if (!href) return;
-      totalLinksFound++;
 
-      // Skip anchor-only links (just # or starting with #)
       const trimmedHref = href.trim();
-      if (trimmedHref === '#' || (trimmedHref.startsWith('#') && !trimmedHref.startsWith('http'))) {
-        skippedAnchor++;
-        return;
-      }
+      if (trimmedHref === '#' || (trimmedHref.startsWith('#') && !trimmedHref.startsWith('http'))) return;
 
       try {
         const linkUrl = new URL(href, pageUrl);
@@ -631,100 +599,45 @@ function extractLinks(html: string, pageUrl: string, source: Source): string[] {
         seen.add(normalizedUrl);
         
         // Skip if it's the same page (after normalization)
-        if (normalizedUrl === normalizedCurrentUrl) {
-          skippedSamePage++;
-          return;
-        }
-        
-        // Filter out Wikipedia meta pages (Wikipedia:, Wikipedia_talk:, Special:, Portal:, Help:, etc.)
+        if (normalizedUrl === normalizedCurrentUrl) return;
+
         if (linkUrl.hostname.includes('wikipedia.org')) {
-          // For Wikipedia, the pathname is like /wiki/Page_Name or /wiki/Wikipedia:Namespace
           const pathParts = linkUrl.pathname.split('/').filter(p => p);
           if (pathParts.length >= 2 && pathParts[0] === 'wiki') {
             const pageName = decodeURIComponent(pathParts[1] || '');
-            // Skip Wikipedia namespace pages and meta pages
-            if (pageName.startsWith('Wikipedia:') || 
-                pageName.startsWith('Wikipedia_talk:') ||
-                pageName.startsWith('Special:') ||
-                pageName.startsWith('Portal:') ||
-                pageName.startsWith('Help:') ||
-                pageName.startsWith('Template:') ||
-                pageName.startsWith('Category:') ||
-                pageName.startsWith('File:') ||
-                pageName.startsWith('Media:') ||
-                pageName.startsWith('Talk:') ||
-                pageName.startsWith('User:') ||
-                pageName.startsWith('User_talk:') ||
-                pageName === 'Main_Page') {
-              skippedDomain++; // Reuse counter for meta pages
-              return;
-            }
-          } else if (pathParts.length === 1 && pathParts[0] === 'Main_Page') {
-            skippedDomain++;
-            return;
-          }
+            if (pageName.startsWith('Wikipedia:') || pageName.startsWith('Wikipedia_talk:') ||
+                pageName.startsWith('Special:') || pageName.startsWith('Portal:') ||
+                pageName.startsWith('Help:') || pageName.startsWith('Template:') ||
+                pageName.startsWith('Category:') || pageName.startsWith('File:') ||
+                pageName.startsWith('Media:') || pageName.startsWith('Talk:') ||
+                pageName.startsWith('User:') || pageName.startsWith('User_talk:') ||
+                pageName === 'Main_Page') return;
+          } else if (pathParts.length === 1 && pathParts[0] === 'Main_Page') return;
         }
-        
-        // Apply filters
+
         if (source.same_domain_only) {
-          // Allow same domain and subdomains (e.g., en.wikipedia.org and wikipedia.org)
           const baseDomain = baseUrl.hostname.replace(/^www\./, '');
           const linkDomain = linkUrl.hostname.replace(/^www\./, '');
-          
-          // Check if it's the same base domain, a subdomain, or parent domain
-          // Examples:
-          // - en.wikipedia.org matches en.wikipedia.org (exact)
-          // - en.wikipedia.org matches wikipedia.org (parent)
-          // - wikipedia.org matches en.wikipedia.org (subdomain)
-          const isSameDomain = 
-            linkDomain === baseDomain || 
+          const isSameDomain =
+            linkDomain === baseDomain ||
             linkDomain.endsWith('.' + baseDomain) ||
             baseDomain.endsWith('.' + linkDomain);
-          
-          if (!isSameDomain) {
-            skippedDomain++;
-            return;
-          }
+          if (!isSameDomain) return;
         }
 
-        if (!source.include_pdfs && linkUrl.pathname.endsWith('.pdf')) {
-          skippedPdf++;
-          return;
-        }
+        if (!source.include_pdfs && linkUrl.pathname.endsWith('.pdf')) return;
+        if (linkUrl.protocol !== 'http:' && linkUrl.protocol !== 'https:') return;
 
-        // Only HTTP/HTTPS links
-        if (linkUrl.protocol === 'http:' || linkUrl.protocol === 'https:') {
-          // Highest priority: links in first paragraphs (proximity to source)
-          if (earlyContentSelector.find(element).length > 0 || $(element).closest('p, h1, h2, h3').length > 0 && $(element).closest('main, article, #content, #bodyContent, .mw-parser-output').length > 0) {
-            // Check if it's in the first few paragraphs
-            const isEarly = $(element).closest('p, h1, h2, h3').index() < 10 || 
-                           $(element).closest('.mw-parser-output > p, .mw-parser-output > h2').index() < 10;
-            if (isEarly) {
-              earlyLinks.push(normalizedUrl);
-            } else if (hasMainContent && $(element).closest('main, article, #content, #bodyContent, .mw-parser-output').length > 0) {
-              priorityLinks.push(normalizedUrl);
-            } else {
-              links.push(normalizedUrl);
-            }
-          } else if (hasMainContent && $(element).closest('main, article, #content, #bodyContent, .mw-parser-output').length > 0) {
-            priorityLinks.push(normalizedUrl);
-          } else {
-            links.push(normalizedUrl);
-          }
-          added++;
-        } else {
-          skippedProtocol++;
-        }
-      } catch (urlError) {
-        // Invalid URL, skip
+        links.push(normalizedUrl);
+      } catch {
+        // Invalid URL
       }
     });
 
-    // Return links in priority order: early content first (proximity), then main content, then others
-    // This ensures we crawl links "close to the source" first
-    const allValidLinks = [...earlyLinks, ...priorityLinks, ...links];
-    const summary = `📊 Link extraction summary: ${totalLinksFound} total, ${added} added (${earlyLinks.length} early, ${priorityLinks.length} main content), ${skippedAnchor} anchor-only, ${skippedSamePage} same-page, ${skippedDomain} filtered, ${skippedPdf} PDF, ${skippedProtocol} wrong-protocol`;
-    return allValidLinks;
+    if (links.length < 10) {
+      console.log(`[crawl] extractLinks WARNING: only ${links.length} links from page (${new URL(pageUrl).pathname?.slice(0, 50)})`);
+    }
+    return links;
   } catch (error) {
     console.error(`❌ Error extracting links:`, error);
     return [];

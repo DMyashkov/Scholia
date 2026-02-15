@@ -6,13 +6,19 @@ import type { CrawlJob, Page, PageEdge } from '@/lib/db/types';
 /**
  * Hook to subscribe to realtime updates for crawl progress
  * Updates React Query cache when data changes
+ *
+ * Edge events can flood (2000+ during crawl) -> ERR_INSUFFICIENT_RESOURCES.
+ * Debounce: one sync per 1.2s during burst, one final 800ms after last event.
  */
-const EDGES_REFETCH_DEBOUNCE_MS = 300;
+const EDGES_DEBOUNCE_MS = 1200;
+const EDGES_TRAILING_MS = 800;
 
 export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds: string[]) {
   const queryClient = useQueryClient();
   const channelsRef = useRef<Array<ReturnType<typeof supabase.channel>>>([]);
-  const edgesRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const edgesDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const edgesLastSyncRef = useRef<number>(0);
+  const pagesDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!conversationId) {
@@ -57,6 +63,16 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
       channelsRef.current.push(crawlJobsChannel);
     }
 
+    const syncAfterSubscribe = () => {
+      queryClient.invalidateQueries({ predicate: (query) => {
+        const key = query.queryKey;
+        return (
+          (Array.isArray(key) && key[0] === 'conversation-pages' && key[1] === conversationId) ||
+          (Array.isArray(key) && key[0] === 'conversation-page-edges' && key[1] === conversationId)
+        );
+      }});
+    };
+
     // Subscribe to pages INSERTs for this conversation only.
     // Use conversation_id=eq (single UUID) so we don't rely on source_id=in.(...) with UUIDs.
     const pagesChannel = supabase
@@ -70,20 +86,23 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          if (import.meta.env.DEV) console.log('[realtime] pages');
-          const page = payload.new as Page;
-
-          queryClient.invalidateQueries({ predicate: (query) => {
-            const key = query.queryKey;
-            return (
-              (Array.isArray(key) && key[0] === 'pages' && key[1] === page.source_id) ||
-              (Array.isArray(key) && key[0] === 'conversation-pages' && key[1] === conversationId)
-            );
-          }});
-          queryClient.invalidateQueries({ queryKey: ['conversation-sources', conversationId] });
+          if (pagesDebounceTimerRef.current) clearTimeout(pagesDebounceTimerRef.current);
+          pagesDebounceTimerRef.current = setTimeout(() => {
+            pagesDebounceTimerRef.current = null;
+            queryClient.invalidateQueries({ predicate: (query) => {
+              const key = query.queryKey;
+              return (
+                (Array.isArray(key) && key[0] === 'pages') ||
+                (Array.isArray(key) && key[0] === 'conversation-pages' && key[1] === conversationId)
+              );
+            }});
+            queryClient.invalidateQueries({ queryKey: ['conversation-sources', conversationId] });
+          }, 300);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') syncAfterSubscribe();
+      });
 
     channelsRef.current.push(pagesChannel);
 
@@ -99,41 +118,50 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
           table: 'page_edges',
           filter: `conversation_id=eq.${conversationId}`,
         },
-        (payload) => {
-          if (import.meta.env.DEV) console.log('[realtime] page_edges');
-          const edge = payload.new as PageEdge;
-
-          queryClient.invalidateQueries({ predicate: (query) => {
-            const key = query.queryKey;
-            return (
-              (Array.isArray(key) && key[0] === 'page-edges' && key[1] === edge.source_id) ||
-              (Array.isArray(key) && key[0] === 'conversation-page-edges' && key[1] === conversationId)
-            );
-          }});
-          queryClient.invalidateQueries({ queryKey: ['conversation-sources', conversationId] });
-
-          // Debounce refetch: many edge INSERTs fire in a burst; one refetch after the burst
-          // avoids cancelled/raced refetches and lets the UI get the full edge set.
-          if (edgesRefetchTimerRef.current) clearTimeout(edgesRefetchTimerRef.current);
-          edgesRefetchTimerRef.current = setTimeout(() => {
-            edgesRefetchTimerRef.current = null;
+        () => {
+          // Debounce: 2000+ edge INSERTs during crawl would exhaust browser connections.
+          // One sync per DEBOUNCE_MS during burst, one final after TRAILING_MS of silence.
+          const doSync = () => {
+            const t = Date.now();
+            if (import.meta.env.DEV) {
+              const since = edgesLastSyncRef.current ? t - edgesLastSyncRef.current : 0;
+              console.log('[realtime] edges sync', since ? `${since}ms since last` : 'initial');
+            }
+            edgesLastSyncRef.current = t;
+            queryClient.invalidateQueries({ predicate: (query) => {
+              const key = query.queryKey;
+              return Array.isArray(key) && key[0] === 'conversation-page-edges' && key[1] === conversationId;
+            }});
             queryClient.refetchQueries({ predicate: (query) => {
               const key = query.queryKey;
-              return (
-                Array.isArray(key) && key[0] === 'conversation-page-edges' && key[1] === conversationId
-              );
+              return Array.isArray(key) && key[0] === 'conversation-page-edges' && key[1] === conversationId;
             }});
-          }, EDGES_REFETCH_DEBOUNCE_MS);
+          };
+          const now = Date.now();
+          if (edgesLastSyncRef.current === 0 || now - edgesLastSyncRef.current >= EDGES_DEBOUNCE_MS) {
+            doSync();
+          }
+          if (edgesDebounceTimerRef.current) clearTimeout(edgesDebounceTimerRef.current);
+          edgesDebounceTimerRef.current = setTimeout(() => {
+            edgesDebounceTimerRef.current = null;
+            doSync();
+          }, EDGES_TRAILING_MS);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') syncAfterSubscribe();
+      });
 
     channelsRef.current.push(edgesChannel);
 
     return () => {
-      if (edgesRefetchTimerRef.current) {
-        clearTimeout(edgesRefetchTimerRef.current);
-        edgesRefetchTimerRef.current = null;
+      if (edgesDebounceTimerRef.current) {
+        clearTimeout(edgesDebounceTimerRef.current);
+        edgesDebounceTimerRef.current = null;
+      }
+      if (pagesDebounceTimerRef.current) {
+        clearTimeout(pagesDebounceTimerRef.current);
+        pagesDebounceTimerRef.current = null;
       }
       channelsRef.current.forEach(channel => {
         supabase.removeChannel(channel);

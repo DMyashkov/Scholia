@@ -128,13 +128,16 @@ const SourceChip = ({
           side="bottom" 
           className="bg-popover border-border p-3 max-w-xs"
         >
-          <div className="space-y-1.5 text-xs">
+            <div className="space-y-1.5 text-xs">
             <p className="font-medium text-foreground">{source.url}</p>
             <div className="flex items-center gap-2 text-muted-foreground">
               <span>Depth: {getDepthLabel(source.crawlDepth)}</span>
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <span>Pages indexed: {source.pagesIndexed}/{source.totalPages}</span>
+              {source.status === 'ready' && source.pagesIndexed < source.totalPages && (
+                <span className="italic">— no more linked pages found</span>
+              )}
             </div>
             <div className="text-muted-foreground">
               Last updated: {source.lastUpdated.toLocaleTimeString()}
@@ -158,7 +161,7 @@ export const SourcesBar = ({
   // Load crawl jobs for all sources to determine real status
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const { data: crawlJobsData = [] } = useQuery({
-    queryKey: ['crawl-jobs-for-sources-bar', sourceIds],
+    queryKey: ['crawl-jobs-for-sources', sourceIds],
     queryFn: async () => {
       const jobs = await Promise.all(
         sourceIds.map(sourceId => crawlJobsApi.listBySource(sourceId))

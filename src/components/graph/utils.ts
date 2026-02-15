@@ -96,8 +96,6 @@ export const createGraphData = (
     const visiblePageIds = new Set(visiblePages.map(p => p.id));
     const linkSet = new Set<string>();
 
-    const edgeDiagnostics: Array<{ edgeIdx: number; from_page_id: string | null; to_page_id: string | null; from_url: string | null; to_url: string | null; fromPageId: string | null; toPageId: string | null }> = [];
-
     edgesArray.forEach((edge, edgeIdx) => {
       // Match by page ID when present (worker sends from_page_id), else by URL
       let fromPageId: string | undefined = edge.from_page_id && visiblePageIds.has(edge.from_page_id) ? edge.from_page_id : undefined;
@@ -137,18 +135,6 @@ export const createGraphData = (
         }
       }
 
-      if (import.meta.env.DEV && edgeIdx < 5) {
-        edgeDiagnostics.push({
-          edgeIdx,
-          from_page_id: edge.from_page_id ?? null,
-          to_page_id: edge.to_page_id ?? null,
-          from_url: edge.from_url ?? null,
-          to_url: edge.to_url ?? null,
-          fromPageId: fromPageId ?? null,
-          toPageId: toPageId ?? null,
-        });
-      }
-
       if (fromPageId && toPageId &&
           visiblePageIds.has(fromPageId) &&
           visiblePageIds.has(toPageId) &&
@@ -163,31 +149,10 @@ export const createGraphData = (
         }
       }
     });
-
-    // Diagnostic: when we have edges + pages but 0 links, log why (DEV only)
-    if (import.meta.env.DEV && edgesArray.length > 0 && visiblePages.length > 0 && links.length === 0) {
-      const pageUrls = visiblePages.map((p) => {
-        const u = (p as any).url || (domain ? `https://${domain}${p.path}` : '');
-        return { id: p.id.slice(0, 8), url: u?.slice(0, 70), norm: normalizeUrlForMatching(u || '')?.slice(0, 70) };
-      });
-      const mapKeys = Array.from(urlToPageId.keys()).slice(0, 10);
-      console.log('[graph] 0 links matched — why', {
-        visiblePages: visiblePages.length,
-        pagesIndexed,
-        edgesCount: edgesArray.length,
-        pageUrls,
-        urlToPageIdKeysSample: mapKeys,
-        visiblePageIds: Array.from(visiblePageIds).map((id) => id.slice(0, 8)),
-        firstEdgesResolved: edgeDiagnostics,
-      });
-    }
   } else {
     links = [];
   }
 
-  if (import.meta.env.DEV) {
-    console.log('[graph]', { nodes: nodes.length, links: links.length, pages: pages.length, edges: edgesArray.length });
-  }
   return { nodes, links };
 };
 

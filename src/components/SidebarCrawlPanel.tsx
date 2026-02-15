@@ -22,15 +22,7 @@ interface SidebarCrawlPanelProps {
 
 export const SidebarCrawlPanel = ({ sources, className, conversationId }: SidebarCrawlPanelProps) => {
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
-  
-  // Load pages and edges from database
-  const { data: pages = [], isLoading: pagesLoading, error: pagesError } = useConversationPages(conversationId);
-  const { data: edges = [], isLoading: edgesLoading, error: edgesError } = useConversationPageEdges(conversationId);
 
-  // Load conversation sources
-  const { data: conversationSources = [] } = useConversationSources(conversationId);
-  
-  // Load crawl jobs for all sources
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const { data: crawlJobsData = [] } = useQuery({
     queryKey: ['crawl-jobs-for-sources', sourceIds],
@@ -42,7 +34,12 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
     },
     enabled: sourceIds.length > 0,
   });
-  
+
+  const { data: conversationSources = [] } = useConversationSources(conversationId);
+
+  const { data: pages = [], isLoading: pagesLoading, error: pagesError } = useConversationPages(conversationId);
+  const { data: edges = [], isLoading: edgesLoading, error: edgesError } = useConversationPageEdges(conversationId);
+
   // Create a map of sourceId -> crawlJob
   const crawlJobMap = useMemo(() => {
     const map = new Map<string, typeof crawlJobsData[0]>();
@@ -122,6 +119,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
   const totalConnections = edges.length;
   
   const isCrawling = crawlingSources.length > 0;
+  const isIndexing = crawlingSources.some(s => s.totalPages > 0 && s.pagesIndexed >= s.totalPages);
   const hasAnySources = sources.length > 0;
 
   // Get pages for current view - use pages directly from database (already filtered by conversation and status='indexed')
@@ -213,7 +211,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
           {isCrawling && (
             <span className="text-[10px] text-primary flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              Crawling
+              {isIndexing ? 'Indexing…' : 'Crawling'}
             </span>
           )}
         </div>
@@ -316,7 +314,11 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
             )}>
               {getSourceDisplayLabel(source)}
             </span>
-            <span className="ml-auto text-[10px] tabular-nums">
+            <span 
+              className="ml-auto text-[10px] tabular-nums"
+              title={source.status === 'ready' && source.pagesIndexed < source.totalPages 
+                ? 'No more linked pages found at depth ≤2' : undefined}
+            >
               {source.pagesIndexed}/{source.totalPages}
             </span>
           </button>

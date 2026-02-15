@@ -238,45 +238,38 @@ Deno.serve(async (req) => {
       .in('id', quotedPageIds);
     const pageContentById = new Map((pagesWithContent as { id: string; content: string | null }[]).map((p) => [p.id, p.content ?? '']));
 
-    const CHUNK_CONTEXT_CHARS = 120;
-    const PAGE_CONTEXT_CHARS = 280; // ~2–3 sentences for richer "in context" display
-    const findSnippetInText = (text: string, snippet: string): number => {
-      let idx = text.indexOf(snippet);
-      if (idx >= 0) return idx;
-      for (const prefix of [snippet.slice(0, 80), snippet.slice(0, 60), snippet.slice(0, 40)]) {
-        if (prefix.length < 15) break;
-        idx = text.indexOf(prefix);
-        if (idx >= 0) return idx;
+    const PAGE_CONTEXT_CHARS = 350; // ~2–3 sentences before and after
+    /** Find snippet in text; returns start index and length of actual match (for prefix matches, use matched length not snippet.length to avoid cutting mid-word) */
+    const findSnippetInText = (text: string, snippet: string): { start: number; matchLen: number } | null => {
+      const idx = text.indexOf(snippet);
+      if (idx >= 0) return { start: idx, matchLen: snippet.length };
+      for (const len of [80, 60, 40]) {
+        if (snippet.length < len) continue;
+        const prefix = snippet.slice(0, len);
+        const i = text.indexOf(prefix);
+        if (i >= 0) return { start: i, matchLen: prefix.length };
       }
-      return -1;
+      return null;
     };
-    const getContextAroundSnippet = (fullText: string, snippet: string, contextChars: number) => {
-      const idx = findSnippetInText(fullText, snippet);
-      if (idx < 0) return { contextBefore: '', contextAfter: '' };
-      const start = Math.max(0, idx - contextChars);
-      const end = Math.min(fullText.length, idx + snippet.length + contextChars);
-      return {
-        contextBefore: fullText.slice(start, idx).replace(/^\s+/, '').trim(),
-        contextAfter: fullText.slice(idx + snippet.length, end).replace(/\s+$/, '').trim(),
-      };
+    const getContextFromPage = (pageText: string, snippet: string, contextChars: number) => {
+      const found = findSnippetInText(pageText, snippet);
+      if (!found) return { contextBefore: '', contextAfter: '' };
+      const { start: idx, matchLen } = found;
+      const beforeStart = Math.max(0, idx - contextChars);
+      const afterEnd = Math.min(pageText.length, idx + matchLen + contextChars);
+      const before = pageText.slice(beforeStart, idx).replace(/^\s+/, '').trim();
+      const after = pageText.slice(idx + matchLen, afterEnd).replace(/\s+$/, '').trim();
+      return { contextBefore: before, contextAfter: after };
     };
 
     const quotesOut: QuoteOut[] = chatResult.quotes.map((q, i) => {
       const page = pageById.get(q.pageId);
       const source = page ? sourceById.get(page.source_id) : null;
-      const chunk = combined.find((c) => c.page_id === q.pageId && c.content.includes(q.snippet));
-      let { contextBefore, contextAfter } = chunk
-        ? getContextAroundSnippet(chunk.content, q.snippet, CHUNK_CONTEXT_CHARS)
-        : { contextBefore: '', contextAfter: '' };
       const pageContent = pageContentById.get(q.pageId);
-      const chunkContextWeak = (contextBefore.length + contextAfter.length) < 80;
-      if (pageContent && chunkContextWeak) {
-        const fromPage = getContextAroundSnippet(pageContent, q.snippet, PAGE_CONTEXT_CHARS);
-        if (fromPage.contextBefore.length > contextBefore.length || fromPage.contextAfter.length > contextAfter.length) {
-          contextBefore = fromPage.contextBefore;
-          contextAfter = fromPage.contextAfter;
-        }
-      }
+      // Always use page content for context—every quote originates from page text. Chunks are just windows into it.
+      const { contextBefore, contextAfter } = pageContent
+        ? getContextFromPage(pageContent, q.snippet, PAGE_CONTEXT_CHARS)
+        : { contextBefore: '', contextAfter: '' };
         const fullPageUrl = page?.url ?? null;
         let domain = '';
         if (fullPageUrl) {
@@ -322,13 +315,21 @@ Deno.serve(async (req) => {
           was_multi_step: didSecondRound,
         })
       .select('*');
-    const assistantRow = insertedMsg?.[0];
+    let assistantRow = insertedMsg?.[0];
     if (msgInsertErr || !assistantRow) {
         console.error('[RAG-2ROUND] message insert failed:', msgInsertErr);
         await emit({ error: msgInsertErr?.message ?? 'Failed to save message' });
         return;
     }
 
+    // Explicitly update was_multi_step in case insert didn't persist it (e.g. PostgREST schema cache)
+    const { data: updated } = await supabase
+      .from('messages')
+      .update({ was_multi_step: didSecondRound })
+      .eq('id', assistantRow.id)
+      .select('*')
+      .single();
+    if (updated) assistantRow = updated;
     console.log('[RAG-2ROUND] message inserted:', { id: assistantRow?.id, was_multi_step: (assistantRow as { was_multi_step?: boolean })?.was_multi_step });
 
     await supabase.from('rag_run_log').insert({
@@ -561,6 +562,7 @@ Rules:
 - Answer using ONLY the context above. Each context block has a first line "page_id: " followed by a UUID. Put that exact UUID in "pageId" when citing that block.
 - For "snippet": you MUST copy-paste a verbatim sentence or phrase from the context—do not paraphrase.
 - For every factual claim, add one entry to "quotes" with snippet = verbatim text and pageId = that block's UUID. You MUST include at least one quote when your answer comes from the context.
+- When the context contains BOTH overview/list info (e.g. list of roles, offices) AND detailed info (e.g. dates, achievements per role), you MUST cite BOTH. Add [n] after list items AND after each detailed claim. Every factual statement needs its own citation—do not skip citing the overview just because you also cite details.
 - Output only valid JSON.`;
 
   const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [

@@ -150,33 +150,6 @@ export const SourceDrawer = ({
 
   const connectionsFound = sourceEdges.length;
 
-  // Diagnostic: why edges might be 0 at graph (DEV only)
-  if (import.meta.env.DEV && source && sourcePages.length > 0) {
-    console.log('[SourceDrawer] edges pipeline', {
-      allEdgesCount: allEdges.length,
-      sourceEdgesCount: sourceEdges.length,
-      sourceId: source.id.slice(0, 8),
-      firstEdgeSourceId: allEdges[0]?.source_id?.slice(0, 8),
-    });
-  }
-
-  // Diagnostic: what we pass to the graph (DEV only, when drawer has source and we have edges)
-  if (import.meta.env.DEV && source && sourcePages.length > 0 && sourceEdges.length > 0) {
-    const firstPage = sourcePages[0];
-    const firstEdge = sourceEdges[0];
-    console.log('[SourceDrawer] graph inputs', {
-      sourceId: source.id.slice(0, 8),
-      displayPagesCount: sourcePages.length,
-      pagesIndexed,
-      sourceEdgesCount: sourceEdges.length,
-      firstPageUrl: firstPage?.url?.slice(0, 60),
-      firstEdgeFromUrl: firstEdge?.from_url?.slice(0, 60),
-      firstEdgeToUrl: firstEdge?.to_url?.slice(0, 60),
-      firstEdgeFromPageId: firstEdge?.from_page_id?.slice(0, 8),
-      firstEdgeToPageId: firstEdge?.to_page_id?.slice(0, 8),
-    });
-  }
-
   // Convert pages to DiscoveredPage format for ForceGraph
   const displayPages = useMemo(() => {
     return sourcePages.map(p => ({

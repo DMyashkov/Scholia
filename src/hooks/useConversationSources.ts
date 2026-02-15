@@ -60,6 +60,8 @@ export const useAddSourceToConversation = () => {
 
       if (!source) {
         source = await sourcesApi.create(sourceData);
+      } else {
+        source = await sourcesApi.update(source.id, sourceData);
       }
 
       await conversationSourcesApi.add(conversationId, source.id, false);

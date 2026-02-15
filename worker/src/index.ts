@@ -6,6 +6,7 @@ const MAX_CONCURRENT_JOBS = parseInt(process.env.MAX_CONCURRENT_JOBS || '3', 10)
 let activeJobs = new Set<string>();
 
 async function main() {
+  console.log('[worker] Started, polling for crawl jobs every', CRAWL_INTERVAL_MS / 1000, 's');
   while (true) {
     try {
       while (activeJobs.size < MAX_CONCURRENT_JOBS) {
@@ -13,6 +14,8 @@ async function main() {
 
         if (!job) break;
 
+        const sourceShort = (job as { source_id?: string }).source_id?.slice(0, 8) || '?';
+        console.log('[worker] Claimed job', job.id.slice(0, 8), 'source', sourceShort);
         activeJobs.add(job.id);
         processCrawlJob(job.id)
           .then(() => {

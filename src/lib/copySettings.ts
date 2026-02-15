@@ -1,4 +1,5 @@
 const KEY = 'scholia-copy-include-evidence';
+export const COPY_SETTING_CHANGED = 'scholia-copy-setting-changed';
 
 export function getCopyIncludeEvidence(): boolean {
   try {
@@ -14,6 +15,7 @@ export function getCopyIncludeEvidence(): boolean {
 export function setCopyIncludeEvidence(include: boolean): void {
   try {
     localStorage.setItem(KEY, String(include));
+    window.dispatchEvent(new CustomEvent(COPY_SETTING_CHANGED, { detail: include }));
   } catch {
     // ignore
   }

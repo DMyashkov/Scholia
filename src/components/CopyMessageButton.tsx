@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Message } from '@/types/chat';
 import { Quote } from '@/types/source';
-import { getCopyIncludeEvidence, setCopyIncludeEvidence } from '@/lib/copySettings';
+import { getCopyIncludeEvidence, setCopyIncludeEvidence, COPY_SETTING_CHANGED } from '@/lib/copySettings';
 
 const COPIED_DURATION_MS = 2000;
 
@@ -51,6 +51,12 @@ export const CopyMessageButton = ({ message, className }: CopyMessageButtonProps
     const t = setTimeout(() => setJustCopied(false), COPIED_DURATION_MS);
     return () => clearTimeout(t);
   }, [justCopied]);
+
+  useEffect(() => {
+    const handler = () => forceUpdate((n) => n + 1);
+    window.addEventListener(COPY_SETTING_CHANGED, handler);
+    return () => window.removeEventListener(COPY_SETTING_CHANGED, handler);
+  }, []);
 
   const isUser = message.role === 'user';
   const quotes = message.quotes ?? [];

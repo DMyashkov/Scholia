@@ -8,7 +8,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Settings } from 'lucide-react';
-import { getCopyIncludeEvidence, setCopyIncludeEvidence } from '@/lib/copySettings';
+import { getCopyIncludeEvidence, setCopyIncludeEvidence, COPY_SETTING_CHANGED } from '@/lib/copySettings';
 import { useState, useEffect } from 'react';
 
 export const SettingsSheet = ({
@@ -20,11 +20,17 @@ export const SettingsSheet = ({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) => {
-  const [includeEvidence, setIncludeEvidence] = useState(true);
+  const [includeEvidence, setIncludeEvidence] = useState(getCopyIncludeEvidence);
 
   useEffect(() => {
     setIncludeEvidence(getCopyIncludeEvidence());
   }, [open]);
+
+  useEffect(() => {
+    const handler = (e: CustomEvent<boolean>) => setIncludeEvidence(e.detail);
+    window.addEventListener(COPY_SETTING_CHANGED, handler as EventListener);
+    return () => window.removeEventListener(COPY_SETTING_CHANGED, handler as EventListener);
+  }, []);
 
   const handleWithEvidence = () => {
     setCopyIncludeEvidence(true);

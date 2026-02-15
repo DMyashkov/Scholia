@@ -132,6 +132,12 @@ Deno.serve(async (req) => {
       const { queries: searchQueries, needsSecondRound, round2 } = decomposeResult;
       const totalSteps = needsSecondRound && round2 ? 3 : 2;
 
+      console.log('[RAG-2ROUND] decomposition:', {
+        needsSecondRound,
+        hasRound2: !!round2,
+        queriesCount: searchQueries.length,
+      });
+
       await emit({ step: 1, totalSteps, label: 'Gathering context' });
 
       const doRetrieve = async (queries: string[], perQuery = MATCH_CHUNKS_PER_QUERY) => {
@@ -162,6 +168,7 @@ Deno.serve(async (req) => {
 
       if (needsSecondRound && round2 && combined.length > 0) {
         didSecondRound = true;
+        console.log('[RAG-2ROUND] entering round 2');
         await emit({ step: 2, totalSteps, label: 'Analyzing' });
 
         const contextStr = combined.map(chunkShape).join('\n\n---\n\n');
@@ -169,11 +176,15 @@ Deno.serve(async (req) => {
         try {
           extracted = await runExtraction(openaiKey, contextStr, round2.extractionPrompt);
         } catch (e) {
-          console.warn('[RAG extraction] failed, skipping round 2:', e);
+          console.warn('[RAG-2ROUND] extraction failed:', e);
         }
 
-        if (Object.keys(extracted).length > 0) {
+        const extractedKeys = Object.keys(extracted);
+        console.log('[RAG-2ROUND] extraction:', { keyCount: extractedKeys.length, keys: extractedKeys });
+
+        if (extractedKeys.length > 0) {
           const round2Queries = await buildRound2Queries(openaiKey, userMessage.trim(), extracted, round2.queryInstructions);
+          console.log('[RAG-2ROUND] round2Queries:', round2Queries.length, round2Queries);
           if (round2Queries.length > 0) {
             const round2Match = await doRetrieve(round2Queries, MATCH_CHUNKS_PER_QUERY_ROUND2);
             const existingIds = new Set(combined.map((c) => c.id));
@@ -184,8 +195,15 @@ Deno.serve(async (req) => {
               }
             }
           }
+        } else {
+          console.log('[RAG-2ROUND] skipped: extraction empty');
         }
+      } else {
+        if (needsSecondRound && !round2) console.log('[RAG-2ROUND] skipped: no round2 config');
+        if (needsSecondRound && combined.length === 0) console.log('[RAG-2ROUND] skipped: no chunks');
       }
+
+      console.log('[RAG-2ROUND] didSecondRound:', didSecondRound);
 
       await emit({ step: totalSteps, totalSteps, label: 'Answering' });
 
@@ -284,6 +302,15 @@ Deno.serve(async (req) => {
     });
 
     const { data: conv } = await supabase.from('conversations').select('owner_id').eq('id', conversationId).single();
+    const ownerId = conv?.owner_id ?? null;
+
+    let logReason = '1 round';
+    if (didSecondRound) logReason = '2 rounds (decomposition + extraction + round2 queries)';
+    else if (decomposeResult?.needsSecondRound && !decomposeResult?.round2) logReason = 'decomposition said needsSecondRound but no round2 config';
+    else if (decomposeResult?.needsSecondRound) logReason = 'decomposition said needsSecondRound but round 2 skipped (extraction empty or no queries)';
+
+    console.log('[RAG-2ROUND] inserting message:', { was_multi_step: didSecondRound, reason: logReason });
+
       const { data: insertedMsg, error: msgInsertErr } = await supabase
         .from('messages')
         .insert({
@@ -291,15 +318,27 @@ Deno.serve(async (req) => {
           role: 'assistant',
           content: chatResult.content,
           quotes: quotesOut,
-          owner_id: conv?.owner_id ?? null,
+          owner_id: ownerId,
           was_multi_step: didSecondRound,
         })
       .select('*');
     const assistantRow = insertedMsg?.[0];
     if (msgInsertErr || !assistantRow) {
+        console.error('[RAG-2ROUND] message insert failed:', msgInsertErr);
         await emit({ error: msgInsertErr?.message ?? 'Failed to save message' });
         return;
     }
+
+    console.log('[RAG-2ROUND] message inserted:', { id: assistantRow?.id, was_multi_step: (assistantRow as { was_multi_step?: boolean })?.was_multi_step });
+
+    await supabase.from('rag_run_log').insert({
+      conversation_id: conversationId,
+      message_id: assistantRow?.id ?? null,
+      owner_id: ownerId,
+      needs_second_round: decomposeResult?.needsSecondRound ?? false,
+      did_second_round: didSecondRound,
+      reason: logReason,
+    }).then(({ error }) => { if (error) console.warn('[RAG-2ROUND] rag_run_log insert failed:', error); });
 
     if (quotesOut.length > 0) {
       for (const q of quotesOut) {
@@ -351,30 +390,37 @@ async function decomposeAndReformulate(apiKey: string, userMessage: string): Pro
 
 You can run 1 or 2 rounds of search:
 - Round 1: search with the queries you specify.
-- Round 2 (optional): after seeing round 1 results, run more targeted searches. Use this when the question needs specific entities (names, lists, etc.) that we can only discover from round 1, then search for each entity or combination.
+- Round 2 (optional): after seeing round 1 results, extract entities/data from round 1, then run targeted searches. Use when the question requires discovering entities first, then searching for details about each.
 
-When to use 2 rounds:
-- "For each X, find Y" or "For each X and each Z, assess Y" → we need the list of X (and Z) from round 1 before we can search properly.
-- "Compare A, B, C across these criteria" → we need A, B, C from round 1.
-- "How does [thing we don't know yet] relate to [other thing]" → round 1 finds the things, round 2 relates them.
+Use 2 rounds when the question requires BOTH:
+1. Discovering a list or set of entities from the documents (offices, people, topics, events, etc.), AND
+2. Getting more specific information about each of those entities.
 
-When to use 1 round:
-- Single factual question.
-- Question is already specific (all entities mentioned).
-- No "for each" or cross-product logic.
+Examples that need 2 rounds:
+- "For each office X held, find when elected and main achievement" → round 1 finds the person and lists offices; round 2 searches each office + "elected when achievement".
+- "Compare A, B, C on criteria X, Y" when A,B,C are not fully known → round 1 finds them, round 2 gets comparison data per entity.
+- "What are the main themes and how does each relate to Z?" → round 1 finds themes, round 2 searches each theme + Z.
+- "List the key events, then for each find the cause" → round 1 finds events, round 2 searches each event + cause.
+- Any question that says "for each", "per", "respectively", "in turn" when the list comes from the documents.
+- Cross-product: "For each X and each Y, assess Z" → round 1 finds X and Y, round 2 combines them.
+
+Use 1 round when:
+- Single factual question (all entities already mentioned).
+- The question is specific enough that round 1 queries can retrieve everything needed.
+- The user is asking about one thing, not a list of things each requiring separate lookup.
 
 Output JSON:
 {
   "queries": ["search query 1", "search query 2", ...],
   "needsSecondRound": true or false,
   "round2": {
-    "extractionPrompt": "Instructions for extracting structured data from round 1 context. Be specific: what JSON shape? E.g. 'Extract: 1) list of X (one per line), 2) list of Y. Output: {\"x\": [...], \"y\": [...]}'",
-    "queryInstructions": "How to build round 2 search queries from the extracted data. E.g. 'For each x and each y, query: x + y + \"evidence or extent\"'"
+    "extractionPrompt": "Instructions for extracting structured data from round 1 context. Be specific: what JSON shape? E.g. 'Extract the list of offices/roles. Output: {\"items\": [\"office1\", \"office2\", ...]}'",
+    "queryInstructions": "How to build round 2 search queries from the extracted data. E.g. 'For each item, create a query: item + \"elected when main achievement\"'"
   }
 }
 
 If needsSecondRound is false, omit round2 or set to null.
-Round 1 queries should be broad enough to find the entities.`;
+Round 1 queries should be broad enough to find the entities or overview.`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -400,9 +446,22 @@ Round 1 queries should be broad enough to find the entities.`;
   const obj = parsed as Record<string, unknown>;
   const queries = Array.isArray(obj.queries) ? (obj.queries as unknown[]).filter((x): x is string => typeof x === 'string') : [userMessage];
   if (queries.length === 0) queries.push(userMessage);
-  const needsSecondRound = obj.needsSecondRound === true && obj.round2 && typeof obj.round2 === 'object';
-  const round2 = needsSecondRound && obj.round2 ? obj.round2 as { extractionPrompt?: string; queryInstructions?: string } : undefined;
-  return { queries, needsSecondRound: !!needsSecondRound, round2: round2?.extractionPrompt && round2?.queryInstructions ? round2 : undefined };
+  const r2 = obj.round2 as Record<string, unknown> | undefined;
+  const getStr = (o: Record<string, unknown> | undefined, ...keys: string[]) => {
+    if (!o) return undefined;
+    for (const k of keys) {
+      const v = o[k];
+      if (typeof v === 'string' && v.trim()) return v;
+    }
+    return undefined;
+  };
+  const extractionPrompt = getStr(r2, 'extractionPrompt', 'extraction_prompt');
+  const queryInstructions = getStr(r2, 'queryInstructions', 'query_instructions');
+  const hasRound2 = obj.round2 && typeof obj.round2 === 'object' && extractionPrompt && queryInstructions;
+  const needsSecondRound = obj.needsSecondRound === true && hasRound2;
+  const round2 = needsSecondRound ? { extractionPrompt: extractionPrompt!, queryInstructions: queryInstructions! } : undefined;
+  console.log('[RAG-2ROUND] decompose parsed:', { rawNeedsSecondRound: obj.needsSecondRound, hasRound2, needsSecondRound, hasExtractionPrompt: !!extractionPrompt, hasQueryInstructions: !!queryInstructions });
+  return { queries, needsSecondRound: !!needsSecondRound, round2 };
 }
 
 async function runExtraction(apiKey: string, context: string, extractionPrompt: string): Promise<Record<string, unknown>> {

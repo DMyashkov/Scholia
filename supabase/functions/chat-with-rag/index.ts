@@ -212,23 +212,53 @@ Deno.serve(async (req) => {
       .in('id', [...new Set(pages.map((p) => p.source_id))]);
     const sourceById = new Map((sources || []).map((s) => [s.id, s]));
 
-    const CONTEXT_CHARS = 120;
-      const getContextAroundSnippet = (chunkContent: string, snippet: string) => {
-      const idx = chunkContent.indexOf(snippet);
+    // Fetch full page content for quoted pages (to show richer context in sidebar)
+    const quotedPageIds = [...new Set(chatResult.quotes.map((q) => q.pageId))];
+    const { data: pagesWithContent = [] } = await supabase
+      .from('pages')
+      .select('id, content')
+      .in('id', quotedPageIds);
+    const pageContentById = new Map((pagesWithContent as { id: string; content: string | null }[]).map((p) => [p.id, p.content ?? '']));
+
+    const CHUNK_CONTEXT_CHARS = 120;
+    const PAGE_CONTEXT_CHARS = 280; // ~2–3 sentences for richer "in context" display
+    const findSnippetInText = (text: string, snippet: string): number => {
+      let idx = text.indexOf(snippet);
+      if (idx >= 0) return idx;
+      for (const prefix of [snippet.slice(0, 80), snippet.slice(0, 60), snippet.slice(0, 40)]) {
+        if (prefix.length < 15) break;
+        idx = text.indexOf(prefix);
+        if (idx >= 0) return idx;
+      }
+      return -1;
+    };
+    const getContextAroundSnippet = (fullText: string, snippet: string, contextChars: number) => {
+      const idx = findSnippetInText(fullText, snippet);
       if (idx < 0) return { contextBefore: '', contextAfter: '' };
-      const start = Math.max(0, idx - CONTEXT_CHARS);
-      const end = Math.min(chunkContent.length, idx + snippet.length + CONTEXT_CHARS);
-        return {
-          contextBefore: chunkContent.slice(start, idx).replace(/^\s+/, '').trim(),
-          contextAfter: chunkContent.slice(idx + snippet.length, end).replace(/\s+$/, '').trim(),
-        };
+      const start = Math.max(0, idx - contextChars);
+      const end = Math.min(fullText.length, idx + snippet.length + contextChars);
+      return {
+        contextBefore: fullText.slice(start, idx).replace(/^\s+/, '').trim(),
+        contextAfter: fullText.slice(idx + snippet.length, end).replace(/\s+$/, '').trim(),
+      };
     };
 
     const quotesOut: QuoteOut[] = chatResult.quotes.map((q, i) => {
       const page = pageById.get(q.pageId);
       const source = page ? sourceById.get(page.source_id) : null;
       const chunk = combined.find((c) => c.page_id === q.pageId && c.content.includes(q.snippet));
-      const { contextBefore, contextAfter } = chunk ? getContextAroundSnippet(chunk.content, q.snippet) : { contextBefore: '', contextAfter: '' };
+      let { contextBefore, contextAfter } = chunk
+        ? getContextAroundSnippet(chunk.content, q.snippet, CHUNK_CONTEXT_CHARS)
+        : { contextBefore: '', contextAfter: '' };
+      const pageContent = pageContentById.get(q.pageId);
+      const chunkContextWeak = (contextBefore.length + contextAfter.length) < 80;
+      if (pageContent && chunkContextWeak) {
+        const fromPage = getContextAroundSnippet(pageContent, q.snippet, PAGE_CONTEXT_CHARS);
+        if (fromPage.contextBefore.length > contextBefore.length || fromPage.contextAfter.length > contextAfter.length) {
+          contextBefore = fromPage.contextBefore;
+          contextAfter = fromPage.contextAfter;
+        }
+      }
         const fullPageUrl = page?.url ?? null;
         let domain = '';
         if (fullPageUrl) {

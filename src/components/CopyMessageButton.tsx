@@ -17,6 +17,7 @@ function stripCitations(content: string): string {
   return content
     .replace(/\s*\[\d+\]\s*/g, ' ')
     .replace(/  +/g, ' ')
+    .replace(/ +([.,;:!?])/g, '$1') // remove space before punctuation left after citation removal
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -98,7 +99,7 @@ export const CopyMessageButton = ({ message, className }: CopyMessageButtonProps
           {justCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
         </Button>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 px-0" aria-label="Copy format">
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 px-0 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0" aria-label="Copy format">
             <ChevronDown className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>

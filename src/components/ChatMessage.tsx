@@ -184,15 +184,16 @@ const MessageContent = ({
   return (
     <div className="space-y-2">
       {lines.map((line, i) => {
-        if (line.startsWith('**') && line.endsWith('**')) {
+        const trimmed = line.trimStart();
+        if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
           return (
             <p key={i} className="font-semibold text-foreground">
-              {renderInlineMarkdown(line.slice(2, -2))}
+              {renderInlineMarkdown(trimmed.slice(2, -2))}
             </p>
           );
         }
-        if (line.startsWith('- **')) {
-          const match = line.match(/- \*\*(.+?)\*\*: (.+)/);
+        if (trimmed.startsWith('- **')) {
+          const match = trimmed.match(/- \*\*(.+?)\*\*: (.+)/);
           if (match) {
             return (
               <div key={i} className="flex gap-2 pl-4">
@@ -204,16 +205,17 @@ const MessageContent = ({
             );
           }
         }
-        if (line.startsWith('- ')) {
+        if (trimmed.startsWith('- ')) {
+          const contentStart = line.length - trimmed.length + 2;
           return (
             <div key={i} className="flex gap-2 pl-4">
               <span className="text-primary shrink-0 -ml-2">•</span>
-              <span className="text-secondary-foreground">{renderLine(line.slice(2), i)}</span>
+              <span className="text-secondary-foreground">{renderLine(line.slice(contentStart), i)}</span>
             </div>
           );
         }
-        if (line.match(/^\d+\. \*\*/)) {
-          const match = line.match(/^(\d+)\. \*\*(.+?)\*\*: (.+)/);
+        if (trimmed.match(/^\d+\. \*\*/)) {
+          const match = trimmed.match(/^(\d+)\. \*\*(.+?)\*\*: (.+)/);
           if (match) {
             return (
               <p key={i} className="text-secondary-foreground">
@@ -222,7 +224,7 @@ const MessageContent = ({
             );
           }
         }
-        if (line.trim() === '') {
+        if (trimmed === '') {
           return <div key={i} className="h-2" />;
         }
         return (

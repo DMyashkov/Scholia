@@ -1,5 +1,6 @@
 import { Source } from '@/types/source';
 import { cn } from '@/lib/utils';
+import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import { Plus, Check, AlertTriangle, Clock, LogIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -53,7 +54,7 @@ const SourceChip = ({
   onClick: () => void;
   isRecentlyUsed: boolean;
 }) => {
-  const displayName = source.source_label ?? source.domain;
+  const displayName = getSourceDisplayLabel(source);
   const initial = displayName.charAt(0).toUpperCase();
   const progressPercent = (source.pagesIndexed / source.totalPages) * 100;
   

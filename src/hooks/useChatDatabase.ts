@@ -32,6 +32,7 @@ const dbMessageToUI = (db: DBMessage): Message => {
     timestamp: new Date(db.created_at),
     quotes: quotes as Message['quotes'],
     sourcesUsed: [...new Set(quotes.map((q) => q.sourceId))],
+    wasMultiStep: db.was_multi_step ?? false,
   };
 };
 
@@ -246,20 +247,88 @@ export const useChatDatabase = () => {
             userMessage: content.trim(),
           }),
         });
-        if (res.ok) {
-          queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-          setStreamingMessage('');
-          setIsLoading(false);
-          return;
+        if (!res.ok) {
+          ragFailed = true;
+          try {
+            const body = await res.json();
+            ragError = body?.error ?? body?.message ?? `HTTP ${res.status}`;
+          } catch {
+            ragError = `HTTP ${res.status}`;
+          }
+          console.error('[chat-with-rag]', res.status, ragError);
+        } else {
+          const reader = res.body?.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          const steps: { current: number; total: number; label: string }[] = [];
+          if (reader) {
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() ?? '';
+                for (const line of lines) {
+                  if (!line.trim()) continue;
+                  try {
+                    const event = JSON.parse(line) as Record<string, unknown>;
+                    if (event.step != null && event.label && event.totalSteps != null) {
+                      const current = Number(event.step);
+                      const total = Number(event.totalSteps);
+                      const label = String(event.label);
+                      const idx = steps.findIndex(s => s.current === current);
+                      if (idx >= 0) {
+                        steps[idx] = { current, total, label };
+                      } else {
+                        steps.push({ current, total, label });
+                        steps.sort((a, b) => a.current - b.current);
+                      }
+                      setRagStepProgress([...steps]);
+                    }
+                    if (event.done === true && event.message) {
+                      queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+                      setIsLoading(false);
+                      return;
+                    }
+                    if (event.error) {
+                      ragFailed = true;
+                      ragError = String(event.error);
+                      break;
+                    }
+                  } catch {
+                    // ignore parse errors for malformed lines
+                  }
+                }
+              }
+              if (buffer.trim()) {
+                try {
+                  const event = JSON.parse(buffer) as Record<string, unknown>;
+                  if (event.done === true && event.message) {
+                    queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+                    setIsLoading(false);
+                    return;
+                  }
+                  if (event.error) {
+                    ragFailed = true;
+                    ragError = String(event.error);
+                  }
+                } catch {
+                  /* ignore */
+                }
+              }
+            } finally {
+            }
+          } else {
+            queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+          }
+          if (ragFailed && ragError) {
+            // Fall through to fallback
+          } else {
+            setIsLoading(false);
+            return;
+          }
         }
-        ragFailed = true;
-        try {
-          const body = await res.json();
-          ragError = body?.error ?? body?.message ?? `HTTP ${res.status}`;
-        } catch {
-          ragError = `HTTP ${res.status}`;
-        }
-        console.error('[chat-with-rag]', res.status, ragError);
       } catch (e) {
         ragFailed = true;
         ragError = e instanceof Error ? e.message : 'Network or request failed';

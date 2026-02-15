@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Conversation } from '@/types/chat';
+import { PanelLeft } from 'lucide-react';
 import { Quote, Source, CrawlDepth } from '@/types/source';
 import { ChatMessage, TypingIndicator } from './ChatMessage';
 import { ChatInput } from './ChatInput';
@@ -10,7 +11,6 @@ import { SourceDrawer } from './SourceDrawer';
 import { SourcePreviewDrawer } from './SourcePreviewDrawer';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-import { PanelLeft } from 'lucide-react';
 
 interface ChatAreaProps {
   conversation: Conversation | null;

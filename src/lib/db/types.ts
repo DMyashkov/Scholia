@@ -26,6 +26,7 @@ export interface Message {
   created_at: string;
   owner_id: string | null;
   quotes?: MessageQuote[] | null;
+  was_multi_step?: boolean;
 }
 
 export interface Source {

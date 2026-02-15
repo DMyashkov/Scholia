@@ -1,4 +1,5 @@
 import { Source } from '@/types/source';
+import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import {
   Sheet,
   SheetContent,
@@ -73,7 +74,7 @@ export const SourceDrawer = ({
   onRecrawl,
   onRemove,
 }: SourceDrawerProps) => {
-  const displayName = source?.source_label ?? source?.domain ?? '';
+  const displayName = source ? getSourceDisplayLabel(source) : '';
   const initial = displayName.charAt(0).toUpperCase() || '';
 
   // Crawl job and status first so we can pass refetchInterval when crawling
@@ -202,7 +203,7 @@ export const SourceDrawer = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <SheetTitle className="text-lg font-serif truncate">
-                    {source.source_label ?? source.domain}
+                    {getSourceDisplayLabel(source)}
                   </SheetTitle>
                   <SheetDescription className="text-xs truncate">
                     {source.url}

@@ -7,6 +7,7 @@ export interface Message {
   timestamp: Date;
   quotes?: Quote[];
   sourcesUsed?: string[];
+  wasMultiStep?: boolean;
 }
 
 export interface Conversation {

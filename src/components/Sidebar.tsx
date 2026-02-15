@@ -1,4 +1,5 @@
 import { Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import { Conversation } from '@/types/chat';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -223,7 +224,7 @@ const ConversationItem = ({
                   <img src={source.favicon} alt="" className="w-3 h-3" />
                 ) : (
                   <span className="text-[8px] font-medium text-muted-foreground uppercase">
-                    {(source.source_label ?? source.domain).charAt(0)}
+                    {getSourceDisplayLabel(source).charAt(0)}
                   </span>
                 )}
               </div>

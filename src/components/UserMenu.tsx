@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Settings, LogOut, User, LogIn } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthContext } from '@/contexts/AuthContext';
@@ -11,11 +12,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
+import { SettingsSheet } from '@/components/SettingsSheet';
 
 export const UserMenu = () => {
   const { user, signOut } = useAuthContext();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleSignOut = async () => {
     const { error } = await signOut();
@@ -58,6 +61,13 @@ export const UserMenu = () => {
             </DropdownMenuLabel>
             <DropdownMenuSeparator className="bg-border" />
             <DropdownMenuItem
+              onClick={() => setSettingsOpen(true)}
+              className="cursor-pointer focus:bg-secondary"
+            >
+              <Settings className="mr-2 h-4 w-4" />
+              <span>Settings</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
               onClick={() => navigate('/auth')}
               className="cursor-pointer focus:bg-secondary"
             >
@@ -66,6 +76,7 @@ export const UserMenu = () => {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <SettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
       </div>
     );
   }
@@ -93,6 +104,13 @@ export const UserMenu = () => {
           </DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-border" />
           <DropdownMenuItem
+            onClick={() => setSettingsOpen(true)}
+            className="cursor-pointer focus:bg-secondary"
+          >
+            <Settings className="mr-2 h-4 w-4" />
+            <span>Settings</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem
             onClick={handleSwitchAccount}
             className="cursor-pointer focus:bg-secondary"
           >
@@ -108,6 +126,7 @@ export const UserMenu = () => {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <SettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 };

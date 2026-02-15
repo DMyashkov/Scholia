@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Source } from '@/types/source';
 import { ForceGraph } from './graph';
 import { cn } from '@/lib/utils';
+import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
 import { useConversationSources } from '@/hooks/useConversationSources';
 import { crawlJobsApi } from '@/lib/db/crawl-jobs';
@@ -176,7 +177,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
       const path = urlObj.pathname || '/';
       displayPages = [{
         id: `placeholder-${startingSource.id}`,
-        title: (startingSource.source_label ?? startingSource.domain) || urlObj.hostname,
+        title: getSourceDisplayLabel(startingSource) || urlObj.hostname,
         path: path,
         status: 'crawling' as const,
         url: sourceUrl,
@@ -196,7 +197,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
       return sum + jobIndexedCount;
     }, 0)
   );
-  const activeDisplayName = activeSource ? (activeSource.source_label ?? activeSource.domain) : null;
+  const activeDisplayName = activeSource ? getSourceDisplayLabel(activeSource) : null;
   const activeDomain = activeSource?.domain; // Hostname for URL construction (ForceGraph)
 
   if (!hasAnySources) return null;
@@ -242,7 +243,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
                     : 'bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary/70'
                 )}
               >
-                {source.source_label ?? source.domain}
+                {getSourceDisplayLabel(source)}
               </button>
             ))}
           </div>
@@ -313,7 +314,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId }: Sideba
               "truncate",
               activeSourceId === source.id ? "text-foreground" : "text-muted-foreground"
             )}>
-              {source.source_label ?? source.domain}
+              {getSourceDisplayLabel(source)}
             </span>
             <span className="ml-auto text-[10px] tabular-nums">
               {source.pagesIndexed}/{source.totalPages}

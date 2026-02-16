@@ -18,6 +18,8 @@ const getTotalPagesForDepth = (depth: CrawlDepth): number => {
     case 'shallow': return 5;
     case 'medium': return 15;
     case 'deep': return 35;
+    case 'singular':
+    case 'dynamic': return 1;
   }
 };
 

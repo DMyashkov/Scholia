@@ -67,6 +67,15 @@ export const useAddSourceToConversation = () => {
         source = await sourcesApi.update(source.id, sourceDataNorm);
       }
 
+      // Prevent adding the same source twice to the same conversation
+      const convSources = await conversationSourcesApi.list(conversationId);
+      const alreadyAdded = convSources.some(
+        (cs) => (cs.source as { url?: string }).url === normalizedUrl || cs.source_id === source.id
+      );
+      if (alreadyAdded) {
+        throw new Error('This source is already added to this conversation');
+      }
+
       console.log('[addSource] calling conversationSourcesApi.add', {
         conversationId: conversationId.slice(0, 8),
         sourceId: source.id.slice(0, 8),

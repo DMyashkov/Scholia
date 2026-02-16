@@ -39,7 +39,7 @@ export interface Source {
   domain: string;
   source_label?: string | null; // Human-readable label from first page (e.g. "Joe Biden"). domain = hostname.
   favicon: string | null;
-  crawl_depth: 'shallow' | 'medium' | 'deep' | 'dynamic';
+  crawl_depth: 'shallow' | 'medium' | 'deep' | 'singular' | 'dynamic';
   include_subpages: boolean;
   include_pdfs: boolean;
   same_domain_only: boolean;

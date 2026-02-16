@@ -89,7 +89,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         pagesIndexed = Math.max(jobIndexed, sourcePages.length);
         // For dynamic + add-page: target = current+1 until page is inserted. Once addPageJob is encoding/completed,
         // the new page is in DB so use sourcePages.length (avoids 2/3 when realtime delivers page before status update).
-        const maxPagesForDepth = source.crawlDepth === 'dynamic' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
+        const maxPagesForDepth = source.crawlDepth === 'dynamic' || source.crawlDepth === 'singular' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
         if (source.crawlDepth === 'dynamic') {
           if (addingPageSourceId === source.id) {
             const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
@@ -289,11 +289,11 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         
         {/* Source tabs - only show if multiple sources */}
         {sources.length > 1 && (
-          <div className="flex gap-1 flex-wrap">
+          <div className="flex gap-1 flex-wrap items-center">
             <button
               onClick={() => setActiveSourceId(null)}
               className={cn(
-                'px-2 py-1 text-[10px] rounded-full box-border h-6',
+                'px-2 py-1 text-[10px] rounded-full box-border h-6 shrink-0',
                 !activeSourceId 
                   ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-inset' 
                   : 'bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary/70'
@@ -301,20 +301,27 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
             >
               All
             </button>
-            {sources.map(source => (
-              <button
-                key={source.id}
-                onClick={() => setActiveSourceId(source.id)}
-                className={cn(
-                  'px-2 py-1 text-[10px] rounded-full truncate max-w-[80px] box-border h-6',
-                  activeSourceId === source.id 
-                    ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-inset' 
-                    : 'bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary/70'
-                )}
-              >
-                {getSourceDisplayLabel(source)}
-              </button>
-            ))}
+            {sources.map(source => {
+              const label = getSourceDisplayLabel(source);
+              const initial = label.charAt(0).toUpperCase() || '?';
+              const useCircleMode = sources.length >= 6;
+              return (
+                <button
+                  key={source.id}
+                  onClick={() => setActiveSourceId(source.id)}
+                  title={label}
+                  className={cn(
+                    'px-2 py-1 text-[10px] rounded-full box-border h-6 shrink-0 min-w-0 flex items-center justify-center',
+                    activeSourceId === source.id 
+                      ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-inset' 
+                      : 'bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary/70',
+                    useCircleMode ? 'w-6 px-0' : 'max-w-[180px] truncate'
+                  )}
+                >
+                  {useCircleMode ? initial : label}
+                </button>
+              );
+            })}
           </div>
         )}
         

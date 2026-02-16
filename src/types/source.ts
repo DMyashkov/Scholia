@@ -1,5 +1,5 @@
 export type SourceStatus = 'ready' | 'crawling' | 'error' | 'outdated';
-export type CrawlDepth = 'shallow' | 'medium' | 'deep' | 'dynamic';
+export type CrawlDepth = 'shallow' | 'medium' | 'deep' | 'singular' | 'dynamic';
 
 export interface DiscoveredPage {
   id: string;

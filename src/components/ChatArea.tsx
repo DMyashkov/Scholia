@@ -147,12 +147,13 @@ export const ChatArea = ({
   };
 
   const handleAddSource = async (url: string, depth: CrawlDepth, options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }) => {
-    setAddSourceOpen(false);
     const added = await onAddSource(url, depth, options);
     if (added) {
+      setAddSourceOpen(false);
       setSelectedSourceId(added.id);
       setSourceDrawerOpen(true);
     }
+    return added;
   };
 
   const handleRemoveSource = (sourceId: string) => {

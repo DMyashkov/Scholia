@@ -34,6 +34,7 @@ interface SourcesBarProps {
 const getDepthLabel = (depth: string) => {
   switch (depth) {
     case 'dynamic': return 'Dynamic (1 page)';
+    case 'singular': return 'Singular (1 page)';
     case 'shallow': return 'Shallow (5 pages)';
     case 'medium': return 'Medium (15 pages)';
     case 'deep': return 'Deep (35 pages)';
@@ -230,7 +231,7 @@ export const SourcesBar = ({
         // Use indexed_count if available, fallback to pages_indexed; prefer actual DB count when we have pages
         const jobIndexed = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? 0;
         pagesIndexed = Math.max(jobIndexed, sourcePages.length);
-        const maxPagesForDepth = source.crawlDepth === 'dynamic' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
+        const maxPagesForDepth = source.crawlDepth === 'dynamic' || source.crawlDepth === 'singular' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
         if (source.crawlDepth === 'dynamic') {
           if (addingPageSourceId === source.id) {
             const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';

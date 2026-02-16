@@ -9,6 +9,7 @@ const MAX_PAGES: Record<Source['crawl_depth'], number> = {
   shallow: 5,
   medium: 15,
   deep: 35,
+  singular: 1, // Seed page only, non-dynamic
   dynamic: 1, // Only the seed page; discovered links stored for RAG suggestion
 };
 

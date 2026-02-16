@@ -69,6 +69,7 @@ const getPageStatusIcon = (status: string) => {
 const getDepthLabel = (depth: string) => {
   switch (depth) {
     case 'dynamic': return 'Dynamic';
+    case 'singular': return 'Singular';
     case 'shallow': return 'Shallow';
     case 'medium': return 'Medium';
     case 'deep': return 'Deep';
@@ -193,7 +194,7 @@ export const SourceDrawer = ({
       }
       return Math.max(sourcePages.length, 1);
     }
-    return source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
+    return source.crawlDepth === 'singular' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
   }, [source?.crawlDepth, source?.id, sourcePages.length, addingPageSourceId, addPageJob?.status]);
 
   const connectionsFound = sourceEdges.length;

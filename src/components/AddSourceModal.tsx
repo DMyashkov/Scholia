@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { CrawlDepth } from '@/types/source';
 import {
   Dialog,
@@ -12,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { Globe, Layers, Database, Zap } from 'lucide-react';
+import { Globe, Layers, Database, Zap, FileText } from 'lucide-react';
 
 interface AddSourceModalProps {
   open: boolean;
@@ -21,7 +22,7 @@ interface AddSourceModalProps {
     url: string,
     depth: CrawlDepth,
     options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }
-  ) => void;
+  ) => void | Promise<unknown>;
   /** Optional message to show at top (e.g. "Add source first") */
   promptMessage?: string | null;
 }
@@ -32,6 +33,7 @@ const crawlDepthOptions: { value: CrawlDepth; label: string; description: string
   { value: 'deep', label: 'Deep', description: '~35 pages, thorough', icon: <Database className="h-4 w-4" /> },
 ];
 
+const singularOption = { value: 'singular' as const, label: 'Singular', description: '1 page only, no suggestions', icon: <FileText className="h-4 w-4" /> };
 const dynamicOption = { value: 'dynamic' as const, label: 'Dynamic', description: '1 page, suggest more on demand', icon: <Zap className="h-4 w-4" /> };
 
 export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage }: AddSourceModalProps) => {
@@ -39,21 +41,30 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
   const [depth, setDepth] = useState<CrawlDepth>('shallow');
   const [sameDomainOnly, setSameDomainOnly] = useState(true);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!url.trim()) return;
+    if (!url.trim() || isSubmitting) return;
 
-    onAddSource(url.trim(), depth, {
-      includeSubpages: true,
-      includePdfs: false,
-      sameDomainOnly,
-    });
-
-    // Reset form
-    setUrl('');
-    setDepth('shallow');
-    setSameDomainOnly(true);
-    onOpenChange(false);
+    setIsSubmitting(true);
+    try {
+      const result = onAddSource(url.trim(), depth, {
+        includeSubpages: true,
+        includePdfs: false,
+        sameDomainOnly,
+      });
+      await (typeof result?.then === 'function' ? result : Promise.resolve(result));
+      setUrl('');
+      setDepth('shallow');
+      setSameDomainOnly(true);
+      onOpenChange(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to add source';
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -112,6 +123,27 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
               </div>
               <button
                 type="button"
+                onClick={() => setDepth(singularOption.value)}
+                className={cn(
+                  'w-full flex items-center gap-3 p-3 rounded-lg border transition-all',
+                  depth === singularOption.value
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : 'border-border bg-background/50 text-muted-foreground hover:border-border/80 hover:bg-background'
+                )}
+              >
+                <div className={cn(
+                  'p-2 rounded-md shrink-0',
+                  depth === singularOption.value ? 'bg-primary/20 text-primary' : 'bg-secondary'
+                )}>
+                  {singularOption.icon}
+                </div>
+                <div className="text-left">
+                  <span className="text-sm font-medium">{singularOption.label}</span>
+                  <span className="text-[10px] text-muted-foreground block">{singularOption.description}</span>
+                </div>
+              </button>
+              <button
+                type="button"
                 onClick={() => setDepth(dynamicOption.value)}
                 className={cn(
                   'w-full flex items-center gap-3 p-3 rounded-lg border transition-all',
@@ -165,10 +197,10 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
             </Button>
             <Button
               type="submit"
-              disabled={!url.trim()}
+              disabled={!url.trim() || isSubmitting}
               className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
-              Add source
+              {isSubmitting ? 'Adding…' : 'Add source'}
             </Button>
           </div>
         </form>

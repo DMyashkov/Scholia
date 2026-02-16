@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
 import type { CrawlJob, Page, PageEdge } from '@/lib/db/types';
@@ -16,6 +16,7 @@ const DISCOVERED_LINKS_DEBOUNCE_MS = 500;
 
 export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds: string[]) {
   const queryClient = useQueryClient();
+  const sourceIdsKey = useMemo(() => sourceIds.join(','), [sourceIds]);
   const channelsRef = useRef<Array<ReturnType<typeof supabase.channel>>>([]);
   const edgesDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const edgesLastSyncRef = useRef<number>(0);
@@ -217,5 +218,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
       });
       channelsRef.current = [];
     };
-  }, [conversationId, sourceIds.join(','), queryClient]);
+    // sourceIdsKey is useMemo from sourceIds - stable representation for deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, sourceIdsKey, queryClient]);
 }

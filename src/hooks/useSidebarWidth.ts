@@ -52,7 +52,7 @@ export function useSidebarWidth() {
       // Anonymous: already initialized from localStorage in useState
       setLoaded(true);
     }
-  }, [user?.id]);
+  }, [user]);
 
   const saveWidth = useCallback(
     (width: number) => {

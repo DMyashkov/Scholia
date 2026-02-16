@@ -90,7 +90,7 @@ const Index = () => {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [isResizing, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, saveWidth]);
+  }, [isResizing, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, saveWidth, setSidebarWidth]);
 
   const handleAddSource = useCallback(async (
     url: string,

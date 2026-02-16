@@ -89,9 +89,10 @@ export const useGraphZoom = ({
 
   // Cleanup
   useEffect(() => {
+    const svgEl = svgRef.current;
     return () => {
-      if (svgRef.current) {
-        d3.select(svgRef.current).on('.zoom', null);
+      if (svgEl) {
+        d3.select(svgEl).on('.zoom', null);
       }
     };
   }, [svgRef]);

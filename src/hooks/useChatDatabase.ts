@@ -62,6 +62,7 @@ export const useChatDatabase = () => {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<string>('');
+  const [ragStepProgress, setRagStepProgress] = useState<Array<{ current: number; total: number; label: string }>>([]);
 
   // Database hooks
   const { data: dbConversations = [], isLoading: conversationsLoading } = useConversations();
@@ -130,7 +131,10 @@ export const useChatDatabase = () => {
   });
 
   const activeConversation = conversations.find(c => c.id === activeConversationId) || null;
-  const currentSources = activeConversation?.sources || [];
+  const currentSources = useMemo(
+    () => activeConversation?.sources || [],
+    [activeConversation?.sources]
+  );
 
   const createNewConversation = useCallback(() => {
     setActiveConversationId(null);
@@ -393,6 +397,7 @@ export const useChatDatabase = () => {
 
     setIsLoading(true);
     setStreamingMessage('');
+    setRagStepProgress([]);
 
     const readySources = conversationSources.filter(s => s.status === 'ready');
     const crawlingSources = conversationSources.filter(s => s.status === 'crawling');
@@ -564,6 +569,7 @@ export const useChatDatabase = () => {
     currentSources,
     isLoading: isLoading || conversationsLoading,
     streamingMessage,
+    ragStepProgress,
     createNewConversation,
     selectConversation,
     deleteConversation,

@@ -32,8 +32,9 @@ export const useSources = () => {
 
   // Cleanup intervals on unmount
   useEffect(() => {
+    const intervals = crawlIntervals.current;
     return () => {
-      crawlIntervals.current.forEach(interval => clearInterval(interval));
+      intervals.forEach(interval => clearInterval(interval));
     };
   }, []);
 

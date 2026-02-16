@@ -194,12 +194,12 @@ export const SourceDrawer = ({
   const sourcePages = useMemo(() => {
     if (!source) return [];
     return allPages.filter(p => p.source_id === source.id && p.status === 'indexed');
-  }, [allPages, source?.id]);
+  }, [allPages, source]);
 
   const sourceEdges = useMemo(() => {
     if (!source) return [];
     return allEdges.filter(e => e.source_id === source.id);
-  }, [allEdges, source?.id]);
+  }, [allEdges, source]);
 
   const pagesIndexed = useMemo(() => {
     if (crawlJob) {
@@ -229,7 +229,7 @@ export const SourceDrawer = ({
       return Math.max(sourcePages.length, 1);
     }
     return source.crawlDepth === 'singular' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
-  }, [source?.crawlDepth, source?.id, sourcePages.length, addingPageSourceId, addPageJob?.status]);
+  }, [source, sourcePages.length, addingPageSourceId, addPageJob?.status]);
 
   // Convert pages to DiscoveredPage format for ForceGraph
   const displayPages = useMemo(() => {

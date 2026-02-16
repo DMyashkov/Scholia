@@ -67,7 +67,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
       graphDataRef.current = data;
     }
     return graphDataRef.current;
-  }, [pages, pagesIndexed, dimensions.width, dimensions.height, domain, edges]);
+  }, [pages, pagesIndexed, dimensions, domain, edges]);
 
   const { nodes, links } = graphData;
 

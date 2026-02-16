@@ -24,8 +24,9 @@ export const useChat = () => {
 
   // Cleanup intervals on unmount
   useEffect(() => {
+    const intervals = crawlIntervals.current;
     return () => {
-      crawlIntervals.current.forEach(interval => clearInterval(interval));
+      intervals.forEach(interval => clearInterval(interval));
     };
   }, []);
 
@@ -37,35 +38,6 @@ export const useChat = () => {
     setActiveConversationId(null);
     setStreamingMessage('');
   }, []);
-
-  const selectConversation = useCallback((id: string) => {
-    // Clear intervals from previous conversation
-    crawlIntervals.current.forEach(interval => clearInterval(interval));
-    crawlIntervals.current.clear();
-    
-    setActiveConversationId(id);
-    setStreamingMessage('');
-    
-    // Restart crawl simulations for crawling sources in the selected conversation
-    const conversation = conversations.find(c => c.id === id);
-    if (conversation) {
-      conversation.sources
-        .filter(s => s.status === 'crawling')
-        .forEach(source => {
-          startCrawlSimulation(source.id, id);
-        });
-    }
-  }, [conversations]);
-
-  const deleteConversation = useCallback((id: string) => {
-    setConversations(prev => prev.filter(c => c.id !== id));
-    if (activeConversationId === id) {
-      // Clear intervals
-      crawlIntervals.current.forEach(interval => clearInterval(interval));
-      crawlIntervals.current.clear();
-      setActiveConversationId(null);
-    }
-  }, [activeConversationId]);
 
   const startCrawlSimulation = useCallback((sourceId: string, conversationId: string) => {
     const interval = setInterval(() => {
@@ -120,6 +92,35 @@ export const useChat = () => {
 
     crawlIntervals.current.set(sourceId, interval);
   }, []);
+
+  const selectConversation = useCallback((id: string) => {
+    // Clear intervals from previous conversation
+    crawlIntervals.current.forEach(interval => clearInterval(interval));
+    crawlIntervals.current.clear();
+    
+    setActiveConversationId(id);
+    setStreamingMessage('');
+    
+    // Restart crawl simulations for crawling sources in the selected conversation
+    const conversation = conversations.find(c => c.id === id);
+    if (conversation) {
+      conversation.sources
+        .filter(s => s.status === 'crawling')
+        .forEach(source => {
+          startCrawlSimulation(source.id, id);
+        });
+    }
+  }, [conversations, startCrawlSimulation]);
+
+  const deleteConversation = useCallback((id: string) => {
+    setConversations(prev => prev.filter(c => c.id !== id));
+    if (activeConversationId === id) {
+      // Clear intervals
+      crawlIntervals.current.forEach(interval => clearInterval(interval));
+      crawlIntervals.current.clear();
+      setActiveConversationId(null);
+    }
+  }, [activeConversationId]);
 
   const updateConversationSources = useCallback((sources: Source[]) => {
     if (!activeConversationId) return;

@@ -1,8 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { config } from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// Load environment variables from .env file
-config();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Load from project root .env (parent of worker/)
+config({ path: path.resolve(__dirname, '..', '..', '.env') });
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -21,4 +24,4 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
 
 // Log connection on load (helps debug "worker never claims jobs" - verify URL matches frontend)
 const urlDisplay = supabaseUrl ? supabaseUrl.replace(/^https?:\/\//, '').slice(0, 50) : 'NOT SET';
-console.log(`[worker] Supabase URL: ${urlDisplay}... (must match frontend/Vite .env)`);
+console.log(`[worker] Supabase URL: ${urlDisplay}... (must match frontend—check root .env)`);

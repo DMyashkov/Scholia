@@ -106,7 +106,7 @@ export const conversationSourcesApi = {
           sourceId: sourceId.slice(0, 8),
           conversationId: conversationId.slice(0, 8),
           status: job.status,
-          hint: 'Worker should claim within ~5s. If stuck at 1 discovered 0 indexed, worker may use different Supabase—check worker/.env matches Vite .env',
+          hint: 'Worker should claim within ~5s. If stuck at 1 discovered 0 indexed, worker may use different Supabase—check root .env',
         });
       } else {
         console.log('[crawl-job] skipped create (existing active job)', { sourceId: sourceId.slice(0, 8) });

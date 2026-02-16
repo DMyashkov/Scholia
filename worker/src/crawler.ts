@@ -358,16 +358,22 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
             discovered.add(normalizedLink);
             newLinks.push(normalizedLink);
             
-            // Hub-and-spoke: prioritize direct links from starting page
-            // If this is the starting page (depth 0, priority 0), save its links for priority processing
             if (priority === 0 && depth === 0) {
               directLinksFromStart.push(normalizedLink);
             }
             
-            // Add to queue if we haven't reached max pages
-            // Priority: 1 = direct links from start, 2 = links from depth 1, etc.
-            if (visited.size + queue.length < maxPages && depth < 2) {
-              const linkPriority = priority === 0 ? 1 : priority + 1; // Direct links from start get priority 1
+            // Strict BFS: exhaust layer N before layer N+1.
+            // Seed: add ALL direct links (no cap) so we process them before any depth-2.
+            // Depth ≥1: only add if we have room, and only when no higher-priority items remain
+            // (i.e. don't add depth-2 while depth-1 still in queue).
+            if (depth >= 2) continue; // Hard depth limit
+            const linkPriority = priority === 0 ? 1 : priority + 1;
+            const queueHasSameOrHigherPriority = queue.some((q) => q.priority <= linkPriority - 1);
+            if (priority === 0 && depth === 0) {
+              // Seed: add all direct links so we exhaust layer 1 before any layer 2
+              queue.push({ url: normalizedLink, depth: depth + 1, priority: linkPriority });
+            } else if (!queueHasSameOrHigherPriority && visited.size + queue.length < maxPages) {
+              // Only add from depth-1 when queue has no remaining same-layer items
               queue.push({ url: normalizedLink, depth: depth + 1, priority: linkPriority });
             }
           }

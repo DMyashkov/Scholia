@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Quote } from '@/types/source';
 import { cleanPageTitleForDisplay } from '@/lib/sourceDisplay';
+import { encodeTextForFragment } from '@/lib/utils';
 import {
   Sheet,
   SheetContent,
@@ -48,7 +49,7 @@ export const SourcePreviewDrawer = ({
     return lastSpace > maxChars * 0.5 ? truncated.slice(0, lastSpace) : truncated;
   })();
   const openPageUrl = quote && textForFragment && baseNoHash
-    ? `${baseNoHash}#:~:text=${encodeURIComponent(textForFragment)}`
+    ? `${baseNoHash}#:~:text=${encodeTextForFragment(textForFragment)}`
     : baseUrl;
 
   const handleCopy = async () => {

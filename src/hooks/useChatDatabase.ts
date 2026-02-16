@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import type { Conversation as DBConversation, Message as DBMessage } from '@/lib/db/types';
 import type { Conversation, Message } from '@/types/chat';
 import type { Source } from '@/types/source';
+import { deriveTitleFromUrl } from '@/lib/utils';
 import { generateTitle } from '@/data/mockResponses';
 import { generateQuotesForMessage, generateSourcedResponse } from '@/data/mockSourceContent';
 
@@ -163,8 +164,9 @@ export const useChatDatabase = () => {
     let finalConvId = targetConvId;
     
     if (!finalConvId) {
-      // Create conversation first
-      const newConv = await createConversationMutation.mutateAsync();
+      // Create conversation first with title from first source
+      const title = deriveTitleFromUrl(source.url) || 'New Research';
+      const newConv = await createConversationMutation.mutateAsync(title);
       finalConvId = newConv.id;
       setActiveConversationId(newConv.id);
     }
@@ -437,7 +439,14 @@ export const useChatDatabase = () => {
                       setRagStepProgress([...steps]);
                     }
                     if (event.done === true && event.message) {
+                      const ev = event as { suggestedTitle?: string };
                       queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+                      if (ev.suggestedTitle) {
+                        console.log('[chat] RAG returned suggestedTitle:', JSON.stringify(ev.suggestedTitle), '| invalidating conversations to refresh sidebar');
+                        queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                      } else {
+                        console.log('[chat] RAG done event received with no suggestedTitle (first-message title update skipped or not first message)');
+                      }
                       setIsLoading(false);
                       return;
                     }
@@ -453,9 +462,15 @@ export const useChatDatabase = () => {
               }
               if (buffer.trim()) {
                 try {
-                  const event = JSON.parse(buffer) as Record<string, unknown>;
+                  const event = JSON.parse(buffer) as Record<string, unknown> & { suggestedTitle?: string };
                   if (event.done === true && event.message) {
                     queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+                    if (event.suggestedTitle) {
+                      console.log('[chat] RAG returned suggestedTitle (buffer):', JSON.stringify(event.suggestedTitle), '| invalidating conversations to refresh sidebar');
+                      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                    } else {
+                      console.log('[chat] RAG done event (buffer) with no suggestedTitle');
+                    }
                     setIsLoading(false);
                     return;
                   }

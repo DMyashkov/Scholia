@@ -184,19 +184,25 @@ const ConversationItem = ({
   onDelete,
 }: ConversationItemProps) => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     setShowDeleteDialog(true);
   };
 
-  const handleDeleteConfirm = async () => {
+  const handleDeleteConfirm = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (isDeleting) return;
+    setIsDeleting(true);
     try {
       await onDelete();
       setShowDeleteDialog(false);
     } catch (error) {
       console.error('Failed to delete conversation:', error);
       // Keep dialog open on error so user can try again
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -253,8 +259,11 @@ const ConversationItem = ({
         </Button>
       </div>
 
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
+      <AlertDialog open={showDeleteDialog} onOpenChange={(open) => !isDeleting && setShowDeleteDialog(open)}>
+        <AlertDialogContent
+          onInteractOutside={() => !isDeleting && setShowDeleteDialog(false)}
+          onEscapeKeyDown={() => !isDeleting && setShowDeleteDialog(false)}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>Delete conversation?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -262,12 +271,12 @@ const ConversationItem = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteConfirm}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              {isDeleting ? 'Deleting…' : 'Delete'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

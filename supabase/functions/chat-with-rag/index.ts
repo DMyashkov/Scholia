@@ -26,6 +26,7 @@ interface QuotePayload {
 interface ChatResponse {
   content: string;
   quotes: QuotePayload[];
+  title?: string;
 }
 
 interface QuoteOut {
@@ -224,7 +225,9 @@ Deno.serve(async (req) => {
 
     const context = combined.map(chunkShape).join('\n\n---\n\n');
     const lastMessages = await getLastMessages(supabase, conversationId);
-    const chatResult = await chat(openaiKey, context, lastMessages, userMessage.trim(), combined);
+    const isFirstMessage = !appendToMessageId && lastMessages.length === 1;
+    console.log('[RAG-TITLE] isFirstMessage=', isFirstMessage, 'lastMessages.length=', lastMessages.length, 'appendToMessageId=', appendToMessageId);
+    const chatResult = await chat(openaiKey, context, lastMessages, userMessage.trim(), combined, isFirstMessage);
 
     const pageById = new Map(pages.map((p) => [p.id, p]));
     const { data: sources } = await supabase
@@ -469,7 +472,23 @@ Deno.serve(async (req) => {
         .eq('id', assistantRow.id);
     }
 
-      await emit({ done: true, message: assistantRow, quotes: quotesOut, suggestedPages });
+    let suggestedTitle: string | undefined;
+    if (isFirstMessage && chatResult.title && typeof chatResult.title === 'string') {
+      const t = String(chatResult.title).trim().slice(0, 80);
+      if (t.length > 0) {
+        suggestedTitle = t;
+        const { data: convBefore } = await supabase.from('conversations').select('title').eq('id', conversationId).single();
+        const previousTitle = (convBefore as { title?: string } | null)?.title ?? '(unknown)';
+        const { error: updateErr } = await supabase.from('conversations').update({ title: suggestedTitle }).eq('id', conversationId);
+        console.log('[RAG-TITLE] AI suggested title:', JSON.stringify(suggestedTitle), '| previous:', JSON.stringify(previousTitle), '| swapped:', previousTitle !== suggestedTitle, '| updateErr:', updateErr?.message ?? 'none');
+      }
+    } else {
+      if (isFirstMessage) {
+        console.log('[RAG-TITLE] First message but no title from AI; chatResult.title=', chatResult.title, '(type:', typeof chatResult.title, ')');
+      }
+    }
+
+      await emit({ done: true, message: assistantRow, quotes: quotesOut, suggestedPages, ...(suggestedTitle ? { suggestedTitle } : {}) });
   } catch (e) {
     console.error(e);
       await emit({ error: (e as Error).message });
@@ -715,7 +734,11 @@ async function chat(
   lastMessages: { role: string; content: string }[],
   userMessage: string,
   chunks: ChunkRow[],
+  requestTitle = false,
 ): Promise<ChatResponse> {
+  const titleInstruction = requestTitle
+    ? '\n- Include a "title" field: a 3-6 word phrase summarizing this conversation topic (e.g. "Quarter Horse Racing History", "Miss Meyers Career").'
+    : '';
   const systemPrompt = `You answer the user's question using ONLY the provided source context below. The context is from the user's indexed pages (e.g. Wikipedia).
 
 CRITICAL: Do NOT infer, extrapolate, or assume. Only state facts that are EXPLICITLY written in the context. If the user asks "does X have a museum" and the context only mentions "Hall of Fame" or "inducted into X" without explicitly stating there is a museum, you MUST say "The context does not include information about whether..." or "The provided context does not mention a museum." Do not guess or use external knowledge—stick strictly to what the text says.
@@ -727,7 +750,7 @@ ${context}
 ---
 
 Output a JSON object with this structure only (no other text):
-{"content":"your answer in markdown with inline citations","quotes":[{"snippet":"verbatim passage","pageId":"uuid","ref":1}]}
+{"content":"your answer in markdown with inline citations","quotes":[{"snippet":"verbatim passage","pageId":"uuid","ref":1}]}${requestTitle ? ',"title":"3-6 word summary"' : ''}
 
 Rules:
 - Use INLINE numbered citations: place [1], [2], [3] etc. immediately after EACH claim. Format: "Statement [1]. Another fact [2]." You MUST add a citation marker after every factual claim. If you have 4 quotes, the content must include [1], [2], [3], [4]—one after each claim, not just [1] at the end. Never cite only once for multiple claims.
@@ -738,7 +761,7 @@ Rules:
 - Answer using ONLY the context above. Each context block has a first line "page_id: " followed by a UUID. Put that exact UUID in "pageId" when citing that block.
 - For "snippet": you MUST copy-paste a verbatim sentence or phrase from the context—do not paraphrase.
 - For every factual claim, add one entry to "quotes" with snippet = verbatim text and pageId = that block's UUID. You MUST include at least one quote when your answer comes from the context.
-- When the context contains BOTH overview/list info (e.g. list of roles, offices) AND detailed info (e.g. dates, achievements per role), you MUST cite BOTH. Add [n] after list items AND after each detailed claim. Every factual statement needs its own citation—do not skip citing the overview just because you also cite details.
+- When the context contains BOTH overview/list info (e.g. list of roles, offices) AND detailed info (e.g. dates, achievements per role), you MUST cite BOTH. Add [n] after list items AND after each detailed claim. Every factual statement needs its own citation—do not skip citing the overview just because you also cite details.${titleInstruction}
 - Output only valid JSON.`;
 
   const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
@@ -757,15 +780,15 @@ Rules:
   let raw = data.choices?.[0]?.message?.content ?? '{}';
   if (typeof raw === 'string' && raw.trim().startsWith('{')) {
     try {
-      const inner = JSON.parse(raw) as { content?: string; quotes?: unknown[] };
+      const inner = JSON.parse(raw) as { content?: string; quotes?: unknown[]; title?: string };
       if (typeof inner?.content === 'string') {
-        raw = JSON.stringify({ content: inner.content, quotes: inner.quotes ?? [] });
+        raw = JSON.stringify({ content: inner.content, quotes: inner.quotes ?? [], title: inner.title });
       }
     } catch {
       /* no-op */
     }
   }
-  const parsed = JSON.parse(raw) as ChatResponse;
+  const parsed = JSON.parse(raw) as ChatResponse & { title?: string };
   if (!parsed.quotes || !Array.isArray(parsed.quotes)) parsed.quotes = [];
   if (!parsed.content) parsed.content = 'I could not generate a response.';
   const pageIds = new Set(chunks.map((c) => c.page_id));

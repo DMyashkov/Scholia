@@ -120,7 +120,7 @@ const SourceChip = ({
             </div>
             
             {/* Display name (source_label or domain) */}
-            <span className="text-xs text-foreground/80 group-hover:text-foreground max-w-[100px] truncate">
+            <span className="text-xs text-foreground/80 group-hover:text-foreground max-w-[160px] truncate">
               {displayName}
             </span>
             {/* Dynamic source indicator - lightning bolt */}
@@ -271,7 +271,7 @@ export const SourcesBar = ({
   
   if (sources.length === 0) {
     return (
-      <div className={cn("sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border/30 flex items-center justify-between p-4 flex-1", className)}>
+      <div className={cn("sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border/30 flex items-center justify-between h-16 px-4 flex-1", className)}>
         {/* Sources section - centered content */}
         <div className="flex-1 flex items-center gap-3">
           <span className="text-xs text-muted-foreground font-medium">Sources:</span>
@@ -304,7 +304,7 @@ export const SourcesBar = ({
   }
 
   return (
-    <div className={cn("sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border/30 flex items-center justify-between p-4 flex-1", className)}>
+    <div className={cn("sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border/30 flex items-center justify-between h-16 px-4 flex-1", className)}>
       {/* Sources section */}
       <div className="flex-1 flex items-center gap-3 overflow-x-auto scrollbar-thin">
         <span className="text-xs text-muted-foreground font-medium shrink-0">Sources:</span>

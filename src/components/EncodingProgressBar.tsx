@@ -105,12 +105,12 @@ export function EncodingProgressBar({
           )}
           style={{ width: `${chunksWidth * 100}%` }}
         />
-        {/* Layer 3: Encoding discovered – distinct darker color (dynamic only) */}
+        {/* Layer 3: Encoding discovered – distinct darker orange (dynamic only) */}
         <div
           className={cn(
             'absolute inset-y-0 left-0 rounded-full transition-all duration-500',
-            'bg-amber-600',
-            showDiscoveredIndeterminate && 'animate-pulse opacity-80'
+            'bg-orange-700',
+            showDiscoveredIndeterminate && 'animate-pulse opacity-90'
           )}
           style={{ width: `${discoveredWidth * 100}%` }}
         />

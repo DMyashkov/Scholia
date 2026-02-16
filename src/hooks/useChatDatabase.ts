@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useConversations, useCreateConversation, useDeleteConversation, useUpdateConversation, useDeleteAllConversations, DELETE_ALL_CONVERSATIONS_EVENT } from './useConversations';
 import { useMessages, useCreateMessage, useUpdateMessage } from './useMessages';
 import { useConversationSources, useAddSourceToConversation, useRemoveSourceFromConversation, useCheckExistingSource } from './useConversationSources';
+import { recrawlSource as recrawlSourceApi } from '@/lib/db/recrawl';
 import { useSourceWithData } from './useSourceWithData';
 import { useRealtimeCrawlUpdates } from './useRealtimeCrawlUpdates';
 import { useAuthContext } from '@/contexts/AuthContext';
@@ -211,12 +212,27 @@ export const useChatDatabase = () => {
   }, [activeConversationId, removeSourceMutation]);
 
   const recrawlSource = useCallback(async (sourceId: string) => {
-    // This will be handled by creating a new crawl job
-    // For now, we'll just trigger a re-crawl by updating the source
-    // The worker will handle the actual crawling
     if (!activeConversationId) return;
-    // TODO: Implement recrawl logic (create new crawl job)
-  }, [activeConversationId]);
+    console.log('[recrawl] useChatDatabase: calling recrawl API', { activeConversationId: activeConversationId.slice(0, 8), sourceId: sourceId.slice(0, 8) });
+    await recrawlSourceApi(activeConversationId, sourceId);
+    console.log('[recrawl] useChatDatabase: API done, invalidating + refetching queries');
+    queryClient.invalidateQueries({ queryKey: ['conversation-sources', activeConversationId] });
+    queryClient.invalidateQueries({ queryKey: ['conversation-pages', activeConversationId] });
+    queryClient.invalidateQueries({ queryKey: ['conversation-page-edges', activeConversationId] });
+    queryClient.invalidateQueries({ queryKey: ['crawl-jobs-for-sources'] });
+    queryClient.invalidateQueries({ queryKey: ['crawl-job', sourceId] });
+    queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', activeConversationId] });
+    queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', activeConversationId] });
+    queryClient.invalidateQueries({
+      predicate: (q) =>
+        Array.isArray(q.queryKey) &&
+        (q.queryKey[0] === 'discovered-links-count' || q.queryKey[0] === 'discovered-links-encoded-count'),
+    });
+    // Force immediate refetch of crawl jobs so UI updates right away
+    await queryClient.refetchQueries({ queryKey: ['crawl-jobs-for-sources'] });
+    await queryClient.refetchQueries({ queryKey: ['crawl-job', sourceId] });
+    console.log('[recrawl] useChatDatabase: refetch complete');
+  }, [activeConversationId, queryClient]);
 
   const updateDynamicMode = useCallback(async (conversationId: string, dynamicMode: boolean) => {
     await updateConversationMutation.mutateAsync({ id: conversationId, dynamic_mode: dynamicMode });

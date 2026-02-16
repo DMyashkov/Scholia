@@ -4,6 +4,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { ChatArea } from '@/components/ChatArea';
 import { useChatDatabase } from '@/hooks/useChatDatabase';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { useSidebarWidth } from '@/hooks/useSidebarWidth';
 import { Loader2 } from 'lucide-react';
 import { Source, CrawlDepth } from '@/types/source';
 import { cn } from '@/lib/utils';
@@ -18,18 +19,14 @@ const extractDomain = (url: string): string => {
   }
 };
 
-const MIN_SIDEBAR_WIDTH = 200;
-const MAX_SIDEBAR_WIDTH = 900; // Can stretch further right for more space
-const DEFAULT_SIDEBAR_WIDTH = 600; // Previous max is now default
-
 const Index = () => {
   const { user, loading } = useAuthContext();
   const navigate = useNavigate();
+  const { sidebarWidth, setSidebarWidth, saveWidth, loaded: sidebarWidthLoaded, min: MIN_SIDEBAR_WIDTH, max: MAX_SIDEBAR_WIDTH } = useSidebarWidth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
   const [addingPageSourceId, setAddingPageSourceId] = useState<string | null>(null);
-  const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const resizeRef = useRef<{ startX: number; startWidth: number; lastWidth?: number } | null>(null);
   
   const {
     conversations,
@@ -69,10 +66,15 @@ const Index = () => {
       if (!resizeRef.current) return;
       const delta = e.clientX - resizeRef.current.startX;
       const newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, resizeRef.current.startWidth + delta));
+      resizeRef.current.lastWidth = newWidth;
       setSidebarWidth(newWidth);
     };
 
     const handleMouseUp = () => {
+      if (resizeRef.current) {
+        const w = resizeRef.current.lastWidth ?? resizeRef.current.startWidth;
+        saveWidth(w);
+      }
       setIsResizing(false);
       resizeRef.current = null;
     };
@@ -88,7 +90,7 @@ const Index = () => {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [isResizing]);
+  }, [isResizing, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, saveWidth]);
 
   const handleAddSource = useCallback(async (
     url: string,
@@ -160,7 +162,7 @@ const Index = () => {
       <div 
         className={cn(
           "shrink-0 border-r border-border overflow-hidden relative",
-          !isResizing && "transition-[width] duration-300 ease-out"
+          sidebarWidthLoaded && !isResizing && "transition-[width] duration-300 ease-out"
         )}
         style={{ width: sidebarOpen ? sidebarWidth : 0 }}
       >

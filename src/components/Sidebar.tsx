@@ -1,4 +1,4 @@
-import { Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, PanelLeftClose } from 'lucide-react';
 import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import { Conversation } from '@/types/chat';
 import { Button } from '@/components/ui/button';
@@ -60,19 +60,6 @@ export const Sidebar = ({
 
   return (
     <>
-      {/* Toggle button when sidebar is closed - simple immediate transition */}
-      {!isOpen && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onToggle}
-          className="fixed left-4 top-[18px] z-50 text-muted-foreground hover:text-foreground hover:bg-secondary"
-          aria-label="Open sidebar"
-        >
-          <PanelLeft className="h-5 w-5" />
-        </Button>
-      )}
-
       {/* Sidebar content - uses opacity/visibility for smooth transitions */}
       <aside
         className={cn(
@@ -80,8 +67,8 @@ export const Sidebar = ({
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
         )}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
+        {/* Header - match SourcesBar height (h-16) for visual alignment */}
+        <div className="flex items-center justify-between h-16 px-4 border-b border-border shrink-0">
           <Button
             variant="ghost"
             size="icon"

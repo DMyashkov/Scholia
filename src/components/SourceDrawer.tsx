@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Source } from '@/types/source';
 import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
+import { RecrawlConfirmModal } from './RecrawlConfirmModal';
 import {
   Sheet,
   SheetContent,
@@ -30,7 +32,7 @@ interface SourceDrawerProps {
   conversationId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onRecrawl: (sourceId: string) => void;
+  onRecrawl: (sourceId: string) => void | Promise<void>;
   onRemove: (sourceId: string) => void;
   addingPageSourceId?: string | null;
 }
@@ -91,6 +93,8 @@ export const SourceDrawer = ({
   onRemove,
   addingPageSourceId,
 }: SourceDrawerProps) => {
+  const [recrawlModalOpen, setRecrawlModalOpen] = useState(false);
+  const [isRecrawling, setIsRecrawling] = useState(false);
   const displayName = source ? getSourceDisplayLabel(source) : '';
   const initial = displayName.charAt(0).toUpperCase() || '';
 
@@ -117,10 +121,15 @@ export const SourceDrawer = ({
 
   const crawlJob = useMemo(() => {
     if (!crawlJobsData.length) return null;
-    return crawlJobsData.sort((a, b) =>
+    const sorted = [...crawlJobsData].sort((a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    )[0];
-  }, [crawlJobsData]);
+    );
+    const job = sorted[0];
+    if (source?.id && import.meta.env.DEV) {
+      console.log('[recrawl] SourceDrawer crawlJob', source.id.slice(0, 8), 'job=', job?.id?.slice(0, 8), 'status=', job?.status, 'discovered=', (job as CrawlJob)?.discovered_count, 'indexed=', (job as CrawlJob)?.indexed_count);
+    }
+    return job;
+  }, [crawlJobsData, source?.id]);
 
   const realStatus: Source['status'] = useMemo(() => {
     if (!source) return 'crawling';
@@ -164,12 +173,20 @@ export const SourceDrawer = ({
   const { data: allEdges = [], isLoading: edgesLoading } = useConversationPageEdges(graphConversationId);
   const { data: discoveredCount = 0 } = useQuery({
     queryKey: ['discovered-links-count', graphConversationId, source?.id],
-    queryFn: () => (graphConversationId && source?.id ? discoveredLinksApi.countBySource(graphConversationId, source.id) : 0),
+    queryFn: async () => {
+      const count = graphConversationId && source?.id ? await discoveredLinksApi.countBySource(graphConversationId, source.id) : 0;
+      if (import.meta.env.DEV) console.log('[recrawl] discovered-links-count', count);
+      return count;
+    },
     enabled: !!graphConversationId && !!source?.id,
   });
   const { data: encodedDiscoveredCount = 0 } = useQuery({
     queryKey: ['discovered-links-encoded-count', graphConversationId, source?.id],
-    queryFn: () => (graphConversationId && source?.id ? discoveredLinksApi.countEncodedBySource(graphConversationId, source.id) : 0),
+    queryFn: async () => {
+      const count = graphConversationId && source?.id ? await discoveredLinksApi.countEncodedBySource(graphConversationId, source.id) : 0;
+      if (import.meta.env.DEV) console.log('[recrawl] discovered-links-encoded-count', count);
+      return count;
+    },
     enabled: !!graphConversationId && !!source?.id && source?.crawlDepth === 'dynamic',
   });
 
@@ -313,13 +330,13 @@ export const SourceDrawer = ({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onRecrawl(source.id)}
-                  disabled={realStatus === 'crawling'}
+                  onClick={() => setRecrawlModalOpen(true)}
+                  disabled={realStatus === 'crawling' || isRecrawling}
                   className="flex-1 gap-2"
                 >
                   <RefreshCw className={cn(
                     "h-4 w-4",
-                    realStatus === 'crawling' && 'animate-spin'
+                    (realStatus === 'crawling' || isRecrawling) && 'animate-spin'
                   )} />
                   Recrawl
                 </Button>
@@ -385,6 +402,22 @@ export const SourceDrawer = ({
           </div>
         )}
       </SheetContent>
+
+      <RecrawlConfirmModal
+        open={recrawlModalOpen}
+        onOpenChange={setRecrawlModalOpen}
+        onConfirm={async () => {
+          if (!source || !conversationId) return;
+          setIsRecrawling(true);
+          try {
+            await onRecrawl(source.id);
+          } finally {
+            setIsRecrawling(false);
+          }
+        }}
+        sourceLabel={displayName || source?.url}
+        isRecrawling={isRecrawling}
+      />
     </Sheet>
   );
 };

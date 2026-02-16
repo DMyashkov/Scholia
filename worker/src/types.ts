@@ -12,6 +12,7 @@ export interface CrawlJob {
   started_at: string | null;
   completed_at: string | null;
   last_activity_at?: string | null;
+  seed_urls?: string[] | null;
   created_at: string;
   updated_at: string;
   owner_id: string | null;

@@ -174,30 +174,44 @@ function normalizeUrlForCrawl(input: string): string {
 }
 
 async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conversationId: string) {
-  const seedUrl = normalizeUrlForCrawl(source.url);
-
   const rawDepth = (source as { crawl_depth?: string }).crawl_depth;
-  const maxPages: number =
+  let maxPages: number =
     (rawDepth ? MAX_PAGES[rawDepth as Source['crawl_depth']] : undefined) ??
     (rawDepth === 'dynamic' ? 1 : 15);
+
+  // For recrawl of dynamic sources, job.seed_urls contains all page URLs to re-crawl
+  const seedUrls: string[] =
+    job.seed_urls && job.seed_urls.length > 0
+      ? job.seed_urls.map((u) => normalizeUrlForCrawl(u))
+      : [normalizeUrlForCrawl(source.url)];
+
+  if (seedUrls.length > maxPages) {
+    maxPages = seedUrls.length;
+  }
+
   const visited = new Set<string>();
   const discovered = new Set<string>(); // All discovered URLs (including queued)
   // Hub-and-spoke: prioritize direct links from starting page
   // Queue structure: { url, depth, priority }
-  // Priority: 0 = starting page, 1 = direct links from starting page, 2 = links from depth 1 pages, etc.
-  const queue: Array<{ url: string; depth: number; priority: number }> = [{ url: seedUrl, depth: 0, priority: 0 }];
+  // Priority: 0 = seed pages, 1 = direct links from seeds, 2 = links from depth 1 pages, etc.
+  const queue: Array<{ url: string; depth: number; priority: number }> = seedUrls.map((url) => ({
+    url,
+    depth: 0,
+    priority: 0,
+  }));
+  seedUrls.forEach((u) => discovered.add(u));
   const directLinksFromStart: string[] = []; // Links directly from the starting page
-  discovered.add(seedUrl);
   let linksCount = 0;
 
 
   // Update source title from first page crawled
   let sourceTitleUpdated = false;
 
-  // Fetch robots.txt
+  // Fetch robots.txt (use first seed URL for domain)
+  const firstSeedUrl = seedUrls[0];
   let robotsParser: ReturnType<typeof RobotsParser> | null = null;
   try {
-    const robotsUrl = new URL('/robots.txt', seedUrl).toString();
+    const robotsUrl = new URL('/robots.txt', firstSeedUrl).toString();
     const robotsResponse = await fetch(robotsUrl);
     if (robotsResponse.ok) {
       const robotsText = await robotsResponse.text();
@@ -210,12 +224,12 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
   
   if (queue.length === 0) {
     console.error(`❌ CRITICAL: Queue is empty before starting crawl! This should never happen.`);
-    console.error(`❌ Source URL: ${seedUrl}`);
+    console.error(`❌ Source URL: ${firstSeedUrl}`);
     return;
   }
 
-  const sourceShort = new URL(seedUrl).pathname?.replace(/^\/wiki\//, '') || seedUrl.slice(0, 40);
-  console.log(`[crawl] START source=${sourceShort} url=${seedUrl} maxPages=${maxPages} depth=${source.crawl_depth} jobId=${job.id?.slice(0, 8)}`);
+  const sourceShort = new URL(firstSeedUrl).pathname?.replace(/^\/wiki\//, '') || firstSeedUrl.slice(0, 40);
+  console.log(`[crawl] START source=${sourceShort} seeds=${seedUrls.length} url=${firstSeedUrl} maxPages=${maxPages} depth=${source.crawl_depth} jobId=${job.id?.slice(0, 8)}`);
   console.log(`[D/I] INIT discovered=${discovered.size} visited=${visited.size} (seed in discovered, no pages yet; job NOT updated until first page succeeds)`);
 
   let loopIterations = 0;

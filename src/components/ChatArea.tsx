@@ -145,8 +145,7 @@ export const ChatArea = ({
     const added = await onAddSource(url, depth, options);
     if (added) {
       setAddSourceOpen(false);
-      setSelectedSourceId(added.id);
-      setSourceDrawerOpen(true);
+      // Keep SourceDrawer closed when starting crawl
     }
     return added;
   };

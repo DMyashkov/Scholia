@@ -72,6 +72,7 @@ export interface CrawlJob {
   encoding_chunks_total?: number | null;
   encoding_discovered_done?: number | null;
   encoding_discovered_total?: number | null;
+  seed_urls?: string[] | null;
   created_at: string;
   updated_at: string;
   owner_id: string | null;

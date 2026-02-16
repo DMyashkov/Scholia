@@ -10,6 +10,13 @@ import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import type { CrawlJob } from '@/lib/db/types';
 import { useQuery } from '@tanstack/react-query';
 import { Zap } from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { EncodingProgressBar, getEncodingPhase, getEncodingStatusLabel } from './EncodingProgressBar';
 
 interface SidebarCrawlPanelProps {
   sources: Source[];
@@ -42,6 +49,11 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     queryKey: ['discovered-links-counts', conversationId],
     queryFn: () => (conversationId ? discoveredLinksApi.countsByConversation(conversationId) : {}),
     enabled: !!conversationId,
+  });
+  const { data: encodedDiscoveredCountsMap = {} } = useQuery({
+    queryKey: ['discovered-links-encoded-counts', conversationId],
+    queryFn: () => (conversationId ? discoveredLinksApi.countsEncodedByConversation(conversationId) : {}),
+    enabled: !!conversationId && sources.some(s => s.crawlDepth === 'dynamic'),
   });
 
   // Create a map of sourceId -> crawlJob
@@ -145,7 +157,10 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     return sum + jobDiscovered;
   }, 0);
   const totalIndexed = displaySources.reduce((sum, s) => sum + s.pagesIndexed, 0);
-  const totalConnections = edges.length;
+  const totalEncodedDiscovered = displaySources.reduce(
+    (sum, s) => sum + (encodedDiscoveredCountsMap[s.id] ?? 0),
+    0
+  );
   
   const isCrawling = crawlingSources.length > 0 || !!addingPageSourceId;
   const isIndexingFromJob = displaySources.some(s => crawlJobMap.get(s.id)?.status === 'indexing');
@@ -164,26 +179,21 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const encChunksTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_chunks_total ?? 0;
   const encDiscoveredDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_done ?? 0;
   const encDiscoveredTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_total ?? 0;
-  const isIndexingCrawledPages = (isIndexingFromJob || isAddPageEncoding) && encChunksTotal > 0 && encChunksDone < encChunksTotal;
-  const isEncodingDiscoveredPages = (isIndexingFromJob || isAddPageEncoding) && encDiscoveredTotal > 0 && (encChunksDone >= encChunksTotal || encChunksTotal === 0);
-  const combinedEncDone = encChunksDone + encDiscoveredDone;
-  const combinedEncTotal = encChunksTotal + encDiscoveredTotal;
-
-  const statusLabel = (() => {
-    if (isAddPageResponding) return 'Responding…';
-    if (isAddPageIndexing) return 'Adding page…';
-    if (isAddPageEncoding) {
-      if (isIndexingCrawledPages) return 'Indexing Crawled Pages';
-      if (isEncodingDiscoveredPages) return 'Encoding Discovered Pages';
-      return 'Encoding Discovered Pages'; // fallback
-    }
-    if (isIndexingFromJob) {
-      if (isIndexingCrawledPages) return 'Indexing Crawled Pages';
-      if (isEncodingDiscoveredPages) return 'Encoding Discovered Pages';
-      return 'Indexing Crawled Pages'; // fallback
-    }
-    return isDynamic ? 'Scraping Page' : 'Crawling';
-  })();
+  const encodingPhase = getEncodingPhase(
+    isCrawling && !activeSource,
+    isIndexingFromJob || isAddPageEncoding,
+    encChunksTotal,
+    encChunksDone,
+    encDiscoveredTotal
+  );
+  const statusLabel = getEncodingStatusLabel(
+    encodingPhase,
+    isAddPageResponding,
+    isAddPageIndexing,
+    isAddPageEncoding,
+    isIndexingFromJob,
+    isDynamic
+  );
   // When adding a page, show progress for ONLY the adding source (avoid 2/3 from multi-source aggregation)
   const progressSources = isAddingPageFlow && addingPageSourceId
     ? sourcesWithStatus.filter(s => s.id === addingPageSourceId)
@@ -322,54 +332,44 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         )}
         
         {/* Stats grid */}
-        <div className="grid grid-cols-3 gap-2">
-          <StatItem 
-            label="Discovered" 
-            value={totalDiscovered}
-            highlight={isCrawling && !activeSource}
-          />
-          <StatItem 
-            label="Indexed" 
-            value={isAddingPageFlow ? progressSources.reduce((s, x) => s + x.pagesIndexed, 0) : totalIndexed}
-            highlight={isCrawling && !activeSource}
-          />
-          <StatItem 
-            label="Links" 
-            value={totalConnections}
-          />
-        </div>
-        
-        {/* Single layered progress bar: crawl fill → encoding fill on top. Same behavior as first dynamic page (crawl job indexing). */}
-        {(isCrawling && !activeSource) || isAddingPageFlow ? (
-          <div className="space-y-1">
-            <div className="relative h-1.5 bg-border/30 rounded-full overflow-hidden">
-              {/* Crawl fill: 100% when indexing/encoding phases, else pages progress */}
-              <div
-                className="absolute inset-y-0 left-0 bg-primary/50 rounded-full transition-all duration-300"
-                style={{
-                  width: `${(isIndexingFromJob || isAddPageEncoding) ? 100 : Math.min(100, ((isAddingPageFlow ? progressSources.reduce((s, x) => s + x.pagesIndexed, 0) : totalIndexed) / (progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1)) * 100)}%`,
-                }}
+        <TooltipProvider>
+          <div className={cn('grid gap-2', isDynamic ? 'grid-cols-3' : 'grid-cols-2')}>
+            <StatItem
+              label="Discovered"
+              value={totalDiscovered}
+              highlight={isCrawling && !activeSource}
+              tooltip="Links found during crawl; for dynamic sources, grows when you add suggested pages (e.g. 27→34)."
+            />
+            <StatItem
+              label="Indexed"
+              value={isAddingPageFlow ? progressSources.reduce((s, x) => s + x.pagesIndexed, 0) : totalIndexed}
+              highlight={isCrawling && !activeSource}
+              tooltip="Pages in the graph with searchable content."
+            />
+            {isDynamic && (
+              <StatItem
+                label="Encoded Discovered"
+                value={Math.max(totalEncodedDiscovered, encDiscoveredDone)}
+                highlight={encodingPhase === 'encoding-discovered' || ((isIndexingFromJob || isAddPageEncoding) && encDiscoveredTotal > 0)}
+                tooltip="Links with embedded context; used for AI suggestions when adding pages."
               />
-              {/* Indexing fill: page chunks + discovered links (combined progress) */}
-              {(isIndexingFromJob || isAddPageEncoding) && (() => {
-                const hasEncData = combinedEncTotal > 0;
-                const encPct = hasEncData ? Math.min(100, (combinedEncDone / combinedEncTotal) * 100) : 100;
-                return (
-                  <div
-                    className={cn(
-                      'absolute inset-y-0 left-0 bg-primary rounded-full transition-all duration-500',
-                      !hasEncData && 'animate-pulse opacity-80'
-                    )}
-                    style={{ width: `${encPct}%` }}
-                  />
-                );
-              })()}
-              {/* Shimmer only during fetch phases (crawl/add page), not during indexing */}
-              {!isIndexingFromJob && !isAddPageEncoding && (isCrawling || isAddingPageFlow) && (
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent animate-shimmer" />
-              )}
-            </div>
+            )}
           </div>
+        </TooltipProvider>
+        
+        {/* Three-phase progress bar: crawl | indexing chunks | encoding discovered */}
+        {((isCrawling && !activeSource) || isAddingPageFlow) && (progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1) > 0 ? (
+          <EncodingProgressBar
+            crawlDone={isAddingPageFlow ? progressSources.reduce((s, x) => s + x.pagesIndexed, 0) : totalIndexed}
+            crawlTotal={progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1}
+            chunksDone={encChunksDone}
+            chunksTotal={encChunksTotal}
+            discoveredDone={encDiscoveredDone}
+            discoveredTotal={encDiscoveredTotal}
+            phase={encodingPhase}
+            isDynamic={isDynamic}
+            isCrawling={(isCrawling || isAddingPageFlow) && !isIndexingFromJob && !isAddPageEncoding}
+          />
         ) : null}
       </div>
       
@@ -434,10 +434,11 @@ interface StatItemProps {
   label: string;
   value: number;
   highlight?: boolean;
+  tooltip?: string;
 }
 
-const StatItem = ({ label, value, highlight }: StatItemProps) => {
-  return (
+const StatItem = ({ label, value, highlight, tooltip }: StatItemProps) => {
+  const content = (
     <div className="text-center p-1.5 rounded bg-background/30 border border-border/30">
       <div className={cn(
         'text-xs font-mono font-semibold transition-colors duration-300',
@@ -450,4 +451,15 @@ const StatItem = ({ label, value, highlight }: StatItemProps) => {
       </div>
     </div>
   );
+  if (tooltip) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{content}</TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[240px] text-xs">
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+  return content;
 };

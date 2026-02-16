@@ -5,14 +5,16 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { EncodingProgressBar, getEncodingPhase } from './EncodingProgressBar';
 
 interface CrawlStatsProps {
   pagesDiscovered: number;
   pagesIndexed: number;
   targetPages: number;
-  connectionsFound: number;
   isCrawling: boolean;
   isIndexing?: boolean;
+  isDynamic?: boolean;
+  encodedDiscoveredCount?: number;
   encodingChunksDone?: number;
   encodingChunksTotal?: number;
   encodingDiscoveredDone?: number;
@@ -23,24 +25,23 @@ export const CrawlStats = ({
   pagesDiscovered,
   pagesIndexed,
   targetPages,
-  connectionsFound,
   isCrawling,
   isIndexing = false,
+  isDynamic = false,
+  encodedDiscoveredCount = 0,
   encodingChunksDone = 0,
   encodingChunksTotal = 0,
   encodingDiscoveredDone = 0,
   encodingDiscoveredTotal = 0,
 }: CrawlStatsProps) => {
-  const crawlProgressPercent = targetPages > 0 ? Math.min(100, (pagesIndexed / targetPages) * 100) : 0;
-  const combinedEncDone = encodingChunksDone + encodingDiscoveredDone;
-  const combinedEncTotal = encodingChunksTotal + encodingDiscoveredTotal;
-  const encodingPercent = combinedEncTotal > 0 ? Math.min(100, (combinedEncDone / combinedEncTotal) * 100) : 0;
+  const phase = getEncodingPhase(isCrawling, isIndexing, encodingChunksTotal, encodingChunksDone, encodingDiscoveredTotal);
+  const isEncodingDiscoveredPhase = phase === 'encoding-discovered';
 
   return (
     <div className="space-y-3">
       {/* Stats grid */}
       <TooltipProvider delayDuration={300}>
-        <div className="grid grid-cols-3 gap-2">
+        <div className={cn('grid gap-2', isDynamic ? 'grid-cols-3' : 'grid-cols-2')}>
           <Tooltip>
             <TooltipTrigger asChild>
               <div>
@@ -51,7 +52,7 @@ export const CrawlStats = ({
                 />
               </div>
             </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-[200px]">
+            <TooltipContent side="top" className="max-w-[240px]">
               <p className="text-xs">Links found during crawl; for dynamic sources, grows when you add suggested pages (e.g. 27→34).</p>
             </TooltipContent>
           </Tooltip>
@@ -69,47 +70,38 @@ export const CrawlStats = ({
               <p className="text-xs">Pages in the graph with searchable content</p>
             </TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div>
-                <StatItem
-                  label="Connections"
-                  value={connectionsFound}
-                />
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-[200px]">
-              <p className="text-xs">Links between indexed pages in the graph</p>
-            </TooltipContent>
-          </Tooltip>
+          {isDynamic && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div>
+                  <StatItem
+                    label="Encoded Discovered"
+                    value={Math.max(encodedDiscoveredCount, encodingDiscoveredDone)}
+                    highlight={isEncodingDiscoveredPhase || (isIndexing && encodingDiscoveredTotal > 0)}
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[200px]">
+                <p className="text-xs">Links with embedded context; used for AI suggestions when adding pages.</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </TooltipProvider>
 
-      {/* Single layered progress bar: crawl fill (primary) → encoding fill (darker) on top */}
+      {/* Three-phase progress bar: crawl | indexing chunks | encoding discovered */}
       {(isCrawling || isIndexing) && targetPages > 0 && (
-        <div className="space-y-1">
-          <div className="relative h-1.5 bg-border/30 rounded-full overflow-hidden">
-            {/* Crawl fill - primary, becomes baseline when encoding starts */}
-            <div
-              className="absolute inset-y-0 left-0 bg-primary/50 rounded-full transition-all duration-300"
-              style={{ width: `${isIndexing ? 100 : crawlProgressPercent}%` }}
-            />
-            {/* Encoding fill - page chunks + discovered links (combined). Indeterminate when no data. */}
-            {isIndexing && (
-              <div
-                className={cn(
-                  'absolute inset-y-0 left-0 bg-primary rounded-full transition-all duration-500',
-                  combinedEncTotal === 0 && 'animate-pulse opacity-80'
-                )}
-                style={{ width: `${combinedEncTotal > 0 ? encodingPercent : 100}%` }}
-              />
-            )}
-            {/* Shimmer only during crawl */}
-            {isCrawling && !isIndexing && (
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent animate-shimmer" />
-            )}
-          </div>
-        </div>
+        <EncodingProgressBar
+          crawlDone={pagesIndexed}
+          crawlTotal={targetPages}
+          chunksDone={encodingChunksDone}
+          chunksTotal={encodingChunksTotal}
+          discoveredDone={encodingDiscoveredDone}
+          discoveredTotal={encodingDiscoveredTotal}
+          phase={phase}
+          isDynamic={isDynamic}
+          isCrawling={isCrawling && !isIndexing}
+        />
       )}
     </div>
   );

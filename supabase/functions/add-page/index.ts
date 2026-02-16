@@ -4,10 +4,12 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as cheerio from 'npm:cheerio@1.0.0-rc.12';
 
+// Align with worker/src/indexer.ts: same chunk params and progress batch sizes
 const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 const CHUNK_MAX_CHARS = 600;
 const CHUNK_OVERLAP_CHARS = 100;
-const EMBED_BATCH_SIZE = 25;
+const EMBED_BATCH_SIZE = 50;
+const DISCOVERED_PROGRESS_BATCH = 25;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -284,7 +286,6 @@ Deno.serve(async (req) => {
           await updateJobStatus('encoding', undefined, undefined, undefined, 0, total);
           const snippets = linksToEmbed.map((l) => l.context_snippet);
           const linkEmbs = await embedBatch(openaiKey, snippets);
-          const DISCOVERED_BATCH = 25;
           let done = 0;
           for (let i = 0; i < linksToEmbed.length && i < linkEmbs.length; i++) {
             await supabase
@@ -292,7 +293,7 @@ Deno.serve(async (req) => {
               .update({ embedding: linkEmbs[i] })
               .eq('id', linksToEmbed[i].id);
             done++;
-            if (done % DISCOVERED_BATCH === 0) {
+            if (done % DISCOVERED_PROGRESS_BATCH === 0) {
               await updateJobStatus('encoding', undefined, undefined, undefined, done, total);
             }
           }

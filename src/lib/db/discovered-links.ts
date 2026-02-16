@@ -11,11 +11,38 @@ export const discoveredLinksApi = {
     return count ?? 0;
   },
 
+  async countEncodedBySource(conversationId: string, sourceId: string): Promise<number> {
+    const { count, error } = await supabase
+      .from('discovered_links')
+      .select('*', { count: 'exact', head: true })
+      .eq('conversation_id', conversationId)
+      .eq('source_id', sourceId)
+      .not('embedding', 'is', null);
+    if (error) return 0;
+    return count ?? 0;
+  },
+
   async countsByConversation(conversationId: string): Promise<Record<string, number>> {
     const { data, error } = await supabase
       .from('discovered_links')
       .select('source_id')
       .eq('conversation_id', conversationId);
+    if (error) return {};
+    const map: Record<string, number> = {};
+    for (const row of data ?? []) {
+      const sid = (row as { source_id: string }).source_id;
+      map[sid] = (map[sid] ?? 0) + 1;
+    }
+    return map;
+  },
+
+  /** Count discovered_links with embeddings (encoded) - these can be suggested by RAG */
+  async countsEncodedByConversation(conversationId: string): Promise<Record<string, number>> {
+    const { data, error } = await supabase
+      .from('discovered_links')
+      .select('source_id')
+      .eq('conversation_id', conversationId)
+      .not('embedding', 'is', null);
     if (error) return {};
     const map: Record<string, number> = {};
     for (const row of data ?? []) {

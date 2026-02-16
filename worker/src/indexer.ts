@@ -4,6 +4,7 @@
  */
 import { supabase } from './db';
 
+// Align with supabase/functions/add-page: same chunk params and progress batch sizes
 const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 const CHUNK_MAX_CHARS = 600;
 const CHUNK_OVERLAP_CHARS = 100;

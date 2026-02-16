@@ -1,27 +1,70 @@
+import { supabase } from './db';
 import { claimJob, processCrawlJob } from './crawler';
 
-const CRAWL_INTERVAL_MS = parseInt(process.env.CRAWL_INTERVAL_MS || '5000', 10);
+const FALLBACK_POLL_MS = parseInt(process.env.CRAWL_FALLBACK_POLL_MS || '60000', 10); // 60s – catch missed Realtime, stuck jobs
 const MAX_CONCURRENT_JOBS = parseInt(process.env.MAX_CONCURRENT_JOBS || '3', 10);
 
 const activeJobs = new Set<string>();
-let idlePollCount = 0;
+let wakeResolver: (() => void) | null = null;
+const wakePromise = () => new Promise<void>(resolve => { wakeResolver = resolve; });
+const wake = () => {
+  if (wakeResolver) {
+    wakeResolver();
+    wakeResolver = null;
+  }
+};
 
 async function main() {
-  console.log('[worker] Started, polling for crawl jobs every', CRAWL_INTERVAL_MS / 1000, 's');
+  console.log('[worker] Started, using Realtime for job discovery (fallback poll every', FALLBACK_POLL_MS / 1000, 's)');
+
+  // Subscribe to new crawl jobs – wake immediately when a queued job appears
+  supabase
+    .channel('worker-crawl-jobs')
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'crawl_jobs' },
+      (payload: { new?: { status?: string } }) => {
+        if (payload.new?.status === 'queued') wake();
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('[worker] Realtime subscribed to crawl_jobs');
+      } else if (status === 'CHANNEL_ERROR') {
+        console.warn('[worker] Realtime channel error – relying on fallback poll');
+      }
+    });
+
+  let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleFallback = () => {
+    if (fallbackTimer) clearTimeout(fallbackTimer);
+    fallbackTimer = setTimeout(() => {
+      fallbackTimer = null;
+      wake();
+    }, FALLBACK_POLL_MS);
+  };
+
+  let hasLoggedIdle = false;
+
   while (true) {
     try {
       while (activeJobs.size < MAX_CONCURRENT_JOBS) {
         const job = await claimJob();
 
         if (!job) {
-          idlePollCount++;
-          // Log every 20th idle (less spam), and always first few
-          if (idlePollCount <= 3 || idlePollCount % 20 === 1) {
-            console.log('[worker] idle', { pollCount: idlePollCount, activeJobs: activeJobs.size, hint: idlePollCount === 1 ? 'Add a source to create a crawl job' : undefined });
+          if (!hasLoggedIdle) {
+            console.log('[worker] Idle (Add a source to create a crawl job)');
+            hasLoggedIdle = true;
           }
-          break;
+          scheduleFallback();
+          await wakePromise();
+          continue;
         }
-        idlePollCount = 0;
+        hasLoggedIdle = false;
+        if (fallbackTimer) {
+          clearTimeout(fallbackTimer);
+          fallbackTimer = null;
+        }
 
         const sourceShort = (job as { source_id?: string }).source_id?.slice(0, 8) || '?';
         const convShort = (job as { conversation_id?: string }).conversation_id?.slice(0, 8) || '?';
@@ -30,18 +73,21 @@ async function main() {
         processCrawlJob(job.id)
           .then(() => {
             activeJobs.delete(job.id);
+            wake(); // Free slot – try to claim next job
           })
           .catch((error) => {
             activeJobs.delete(job.id);
+            wake();
             console.error(`❌ Job ${job.id.substring(0, 8)}... failed:`, error);
           });
       }
-      // Wait before next poll
-      await new Promise(resolve => setTimeout(resolve, CRAWL_INTERVAL_MS));
+      // At capacity – wait for a slot before checking again
+      scheduleFallback();
+      await wakePromise();
     } catch (error) {
       console.error('❌ Error in main loop:', error);
-      // Wait a bit longer on error
-      await new Promise(resolve => setTimeout(resolve, CRAWL_INTERVAL_MS * 2));
+      scheduleFallback();
+      await wakePromise();
     }
   }
 }

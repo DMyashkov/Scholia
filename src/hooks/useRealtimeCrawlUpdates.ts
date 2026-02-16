@@ -156,7 +156,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
 
     channelsRef.current.push(edgesChannel);
 
-    // Subscribe to discovered_links INSERTs for this conversation (dynamic mode, add-page flow)
+    // Subscribe to discovered_links INSERTs (new links) and UPDATEs (embedding set during encoding)
     const dlChannel = supabase
       .channel(`discovered-links:${conversationId}`)
       .on(
@@ -173,6 +173,25 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
             discoveredLinksDebounceRef.current = null;
             queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
             queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-count' });
+          }, DISCOVERED_LINKS_DEBOUNCE_MS);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'discovered_links',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          if (discoveredLinksDebounceRef.current) clearTimeout(discoveredLinksDebounceRef.current);
+          discoveredLinksDebounceRef.current = setTimeout(() => {
+            discoveredLinksDebounceRef.current = null;
+            queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
+            queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] });
+            queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-count' });
+            queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-encoded-count' });
           }, DISCOVERED_LINKS_DEBOUNCE_MS);
         }
       )

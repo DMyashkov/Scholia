@@ -14,6 +14,7 @@ import { RefreshCw, Trash2, Check, Loader2, Clock, AlertTriangle, ExternalLink }
 import { cn } from '@/lib/utils';
 import { ForceGraph } from './graph';
 import { CrawlStats } from './CrawlStats';
+import { getEncodingStatusLabel, getEncodingPhase } from './EncodingProgressBar';
 import { useMemo } from 'react';
 import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
@@ -140,11 +141,21 @@ export const SourceDrawer = ({
   const encChunksTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob?.encoding_chunks_total ?? 0);
   const encDiscoveredDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob?.encoding_discovered_done ?? 0);
   const encDiscoveredTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob?.encoding_discovered_total ?? 0);
-  const isIndexingCrawled = encChunksTotal > 0 && encChunksDone < encChunksTotal;
-  const isEncodingDiscovered = encDiscoveredTotal > 0 && (encChunksDone >= encChunksTotal || encChunksTotal === 0);
-  const statusLabel = isAddPageResponding ? 'Responding…' : isAddPageIndexing ? 'Adding page…' : isAddPageEncoding || isIndexing
-    ? (isIndexingCrawled ? 'Indexing Crawled Pages' : isEncodingDiscovered ? 'Encoding Discovered Pages' : 'Indexing Crawled Pages')
-    : (source?.crawlDepth === 'dynamic' ? 'Scraping Page' : 'Crawling');
+  const encodingPhase = getEncodingPhase(
+    realStatus === 'crawling',
+    isIndexing,
+    encChunksTotal,
+    encChunksDone,
+    encDiscoveredTotal
+  );
+  const statusLabel = getEncodingStatusLabel(
+    encodingPhase,
+    isAddPageResponding,
+    isAddPageIndexing,
+    isAddPageEncoding,
+    crawlJob?.status === 'indexing',
+    source?.crawlDepth === 'dynamic'
+  );
 
   // Use the conversation that ran the crawl so we get the right pages/edges (can differ from active conversation)
   const graphConversationId = crawlJob?.conversation_id ?? conversationId;
@@ -155,6 +166,11 @@ export const SourceDrawer = ({
     queryKey: ['discovered-links-count', graphConversationId, source?.id],
     queryFn: () => (graphConversationId && source?.id ? discoveredLinksApi.countBySource(graphConversationId, source.id) : 0),
     enabled: !!graphConversationId && !!source?.id,
+  });
+  const { data: encodedDiscoveredCount = 0 } = useQuery({
+    queryKey: ['discovered-links-encoded-count', graphConversationId, source?.id],
+    queryFn: () => (graphConversationId && source?.id ? discoveredLinksApi.countEncodedBySource(graphConversationId, source.id) : 0),
+    enabled: !!graphConversationId && !!source?.id && source?.crawlDepth === 'dynamic',
   });
 
   // Filter pages and edges for the selected source only (no inference fallback)
@@ -197,8 +213,6 @@ export const SourceDrawer = ({
     }
     return source.crawlDepth === 'singular' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
   }, [source?.crawlDepth, source?.id, sourcePages.length, addingPageSourceId, addPageJob?.status]);
-
-  const connectionsFound = sourceEdges.length;
 
   // Convert pages to DiscoveredPage format for ForceGraph
   const displayPages = useMemo(() => {
@@ -247,9 +261,10 @@ export const SourceDrawer = ({
                 pagesDiscovered={pagesDiscovered}
                 pagesIndexed={pagesIndexed}
                 targetPages={maxPagesForDepth}
-                connectionsFound={connectionsFound}
                 isCrawling={realStatus === 'crawling'}
                 isIndexing={isIndexing}
+                isDynamic={source.crawlDepth === 'dynamic'}
+                encodedDiscoveredCount={encodedDiscoveredCount}
                 encodingChunksDone={encChunksDone}
                 encodingChunksTotal={encChunksTotal}
                 encodingDiscoveredDone={encDiscoveredDone}

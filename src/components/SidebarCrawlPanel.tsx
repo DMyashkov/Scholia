@@ -32,9 +32,10 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     },
     enabled: sourceIds.length > 0,
     refetchInterval: (query) => {
+      if (typeof document !== 'undefined' && document.hidden) return false;
       const jobs = (query.state.data ?? []) as { status?: string }[];
       const isActive = jobs.some((j) => j.status === 'queued' || j.status === 'running' || j.status === 'indexing');
-      return isActive ? 2000 : false;
+      return isActive ? 5000 : false;
     },
   });
 

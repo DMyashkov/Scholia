@@ -13,8 +13,8 @@ export const usePages = (sourceId: string | null) => {
 };
 
 export type UseConversationPagesOptions = {
-  /** When set, refetch on this interval (ms). Use while crawling so graph updates without relying on realtime. */
-  refetchInterval?: number | false;
+  /** When set, refetch on this interval (ms). Use while crawling so graph updates without relying on realtime. Can be a function for dynamic intervals (e.g. pause when tab hidden). */
+  refetchInterval?: number | false | (() => number | false);
 };
 
 export const useConversationPages = (
@@ -44,8 +44,8 @@ export const usePageEdges = (sourceId: string | null) => {
 };
 
 export type UseConversationPageEdgesOptions = {
-  /** When set, refetch on this interval (ms). Use while crawling so graph updates without relying on realtime. */
-  refetchInterval?: number | false;
+  /** When set, refetch on this interval (ms). Use while crawling so graph updates without relying on realtime. Can be a function for dynamic intervals (e.g. pause when tab hidden). */
+  refetchInterval?: number | false | (() => number | false);
 };
 
 export const useConversationPageEdges = (

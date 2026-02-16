@@ -62,9 +62,10 @@ export const ChatArea = ({
     },
     enabled: sourceIds.length > 0,
     refetchInterval: (q) => {
+      if (typeof document !== 'undefined' && document.hidden) return false;
       const jobs = (q.state.data ?? []) as { status?: string }[];
       const anyActive = jobs.some(j => ['queued', 'running', 'indexing'].includes(j?.status ?? ''));
-      return anyActive ? 2000 : false;
+      return anyActive ? 5000 : false;
     },
   });
 
@@ -269,6 +270,7 @@ export const ChatArea = ({
 
       <SourceDrawer
         source={selectedSource}
+        allSourceIds={sourceIds}
         conversationId={conversation?.id || null}
         open={sourceDrawerOpen}
         onOpenChange={setSourceDrawerOpen}

@@ -20,10 +20,11 @@ export function useAddPageJob(conversationId: string | null, sourceId: string | 
         : Promise.resolve(null),
     enabled: !!conversationId && !!sourceId,
     refetchInterval: (q) => {
+      if (typeof document !== 'undefined' && document.hidden) return false;
       const job = q.state.data as AddPageJob | null | undefined;
-      if (!job) return 1500;
+      if (!job) return 3000;
       if (job.status === 'completed' || job.status === 'failed') return false;
-      return 1000;
+      return 2500;
     },
   });
 

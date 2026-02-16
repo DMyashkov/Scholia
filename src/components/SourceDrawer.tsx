@@ -24,6 +24,8 @@ import { useQuery } from '@tanstack/react-query';
 
 interface SourceDrawerProps {
   source: Source | null;
+  /** All source IDs in the conversation - used for cache sharing with other crawl-job queries */
+  allSourceIds?: string[];
   conversationId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -80,6 +82,7 @@ const getDepthLabel = (depth: string) => {
 
 export const SourceDrawer = ({
   source,
+  allSourceIds,
   conversationId,
   open,
   onOpenChange,
@@ -90,21 +93,30 @@ export const SourceDrawer = ({
   const displayName = source ? getSourceDisplayLabel(source) : '';
   const initial = displayName.charAt(0).toUpperCase() || '';
 
-  // Crawl job - same query key as SidebarCrawlPanel for cache sharing, poll when crawling
-  const sourceIds = useMemo(() => (source?.id ? [source.id] : []), [source?.id]);
-  const { data: crawlJobsData = [] } = useQuery({
+  // Use allSourceIds for cache sharing with ChatArea/SidebarCrawlPanel; fallback to [source.id]
+  const sourceIds = useMemo(
+    () => (allSourceIds?.length ? allSourceIds : source?.id ? [source.id] : []),
+    [allSourceIds, source?.id]
+  );
+  const { data: allCrawlJobs = [] } = useQuery({
     queryKey: ['crawl-jobs-for-sources', sourceIds],
     queryFn: async () => {
-      if (!source?.id) return [];
-      return crawlJobsApi.listBySource(source.id);
+      if (sourceIds.length === 0) return [];
+      const jobs = await Promise.all(sourceIds.map(id => crawlJobsApi.listBySource(id)));
+      return jobs.flat();
     },
-    enabled: !!source?.id,
+    enabled: sourceIds.length > 0,
     refetchInterval: (query) => {
+      if (typeof document !== 'undefined' && document.hidden) return false;
       const jobs = (query.state.data ?? []) as { status?: string }[];
       const isActive = jobs.some((j) => j.status === 'queued' || j.status === 'running' || j.status === 'indexing');
-      return isActive ? 2000 : false;
+      return isActive ? 5000 : false;
     },
   });
+  const crawlJobsData = useMemo(
+    () => (source?.id ? allCrawlJobs.filter(j => j.source_id === source.id) : []),
+    [allCrawlJobs, source?.id]
+  );
 
   const { data: addPageJob } = useAddPageJob(conversationId ?? null, addingPageSourceId === source?.id ? source?.id ?? null : null);
 
@@ -144,18 +156,21 @@ export const SourceDrawer = ({
   const graphConversationId = crawlJob?.conversation_id ?? conversationId;
 
   // Poll pages and edges while crawling so the graph updates even if realtime doesn't deliver
-  const pollInterval = realStatus === 'crawling' ? 2000 : false;
+  const pollInterval = realStatus === 'crawling' ? 5000 : false;
+  const refetchPagesAndEdges = pollInterval
+    ? () => (typeof document !== 'undefined' && document.hidden ? false : pollInterval)
+    : false;
   const { data: allPages = [], isLoading: pagesLoading } = useConversationPages(graphConversationId, {
-    refetchInterval: pollInterval,
+    refetchInterval: refetchPagesAndEdges,
   });
   const { data: allEdges = [], isLoading: edgesLoading } = useConversationPageEdges(graphConversationId, {
-    refetchInterval: pollInterval,
+    refetchInterval: refetchPagesAndEdges,
   });
   const { data: discoveredCount = 0 } = useQuery({
     queryKey: ['discovered-links-count', graphConversationId, source?.id],
     queryFn: () => (graphConversationId && source?.id ? discoveredLinksApi.countBySource(graphConversationId, source.id) : 0),
     enabled: !!graphConversationId && !!source?.id,
-    refetchInterval: addingPageSourceId === source?.id ? 1000 : false,
+    refetchInterval: addingPageSourceId === source?.id ? 2500 : false,
   });
 
   // Filter pages and edges for the selected source only (no inference fallback)

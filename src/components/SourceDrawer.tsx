@@ -106,12 +106,6 @@ export const SourceDrawer = ({
       return jobs.flat();
     },
     enabled: sourceIds.length > 0,
-    refetchInterval: (query) => {
-      if (typeof document !== 'undefined' && document.hidden) return false;
-      const jobs = (query.state.data ?? []) as { status?: string }[];
-      const isActive = jobs.some((j) => j.status === 'queued' || j.status === 'running' || j.status === 'indexing');
-      return isActive ? 5000 : false;
-    },
   });
   const crawlJobsData = useMemo(
     () => (source?.id ? allCrawlJobs.filter(j => j.source_id === source.id) : []),
@@ -155,22 +149,12 @@ export const SourceDrawer = ({
   // Use the conversation that ran the crawl so we get the right pages/edges (can differ from active conversation)
   const graphConversationId = crawlJob?.conversation_id ?? conversationId;
 
-  // Poll pages and edges while crawling so the graph updates even if realtime doesn't deliver
-  const pollInterval = realStatus === 'crawling' ? 5000 : false;
-  const refetchPagesAndEdges = pollInterval
-    ? () => (typeof document !== 'undefined' && document.hidden ? false : pollInterval)
-    : false;
-  const { data: allPages = [], isLoading: pagesLoading } = useConversationPages(graphConversationId, {
-    refetchInterval: refetchPagesAndEdges,
-  });
-  const { data: allEdges = [], isLoading: edgesLoading } = useConversationPageEdges(graphConversationId, {
-    refetchInterval: refetchPagesAndEdges,
-  });
+  const { data: allPages = [], isLoading: pagesLoading } = useConversationPages(graphConversationId);
+  const { data: allEdges = [], isLoading: edgesLoading } = useConversationPageEdges(graphConversationId);
   const { data: discoveredCount = 0 } = useQuery({
     queryKey: ['discovered-links-count', graphConversationId, source?.id],
     queryFn: () => (graphConversationId && source?.id ? discoveredLinksApi.countBySource(graphConversationId, source.id) : 0),
     enabled: !!graphConversationId && !!source?.id,
-    refetchInterval: addingPageSourceId === source?.id ? 2500 : false,
   });
 
   // Filter pages and edges for the selected source only (no inference fallback)

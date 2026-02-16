@@ -12,6 +12,7 @@ import type { CrawlJob, Page, PageEdge } from '@/lib/db/types';
  */
 const EDGES_DEBOUNCE_MS = 1200;
 const EDGES_TRAILING_MS = 800;
+const DISCOVERED_LINKS_DEBOUNCE_MS = 500;
 
 export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds: string[]) {
   const queryClient = useQueryClient();
@@ -19,6 +20,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
   const edgesDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const edgesLastSyncRef = useRef<number>(0);
   const pagesDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const discoveredLinksDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!conversationId) {
@@ -154,6 +156,30 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
 
     channelsRef.current.push(edgesChannel);
 
+    // Subscribe to discovered_links INSERTs for this conversation (dynamic mode, add-page flow)
+    const dlChannel = supabase
+      .channel(`discovered-links:${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'discovered_links',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          if (discoveredLinksDebounceRef.current) clearTimeout(discoveredLinksDebounceRef.current);
+          discoveredLinksDebounceRef.current = setTimeout(() => {
+            discoveredLinksDebounceRef.current = null;
+            queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
+            queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-count' });
+          }, DISCOVERED_LINKS_DEBOUNCE_MS);
+        }
+      )
+      .subscribe();
+
+    channelsRef.current.push(dlChannel);
+
     return () => {
       if (edgesDebounceTimerRef.current) {
         clearTimeout(edgesDebounceTimerRef.current);
@@ -162,6 +188,10 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
       if (pagesDebounceTimerRef.current) {
         clearTimeout(pagesDebounceTimerRef.current);
         pagesDebounceTimerRef.current = null;
+      }
+      if (discoveredLinksDebounceRef.current) {
+        clearTimeout(discoveredLinksDebounceRef.current);
+        discoveredLinksDebounceRef.current = null;
       }
       channelsRef.current.forEach(channel => {
         supabase.removeChannel(channel);

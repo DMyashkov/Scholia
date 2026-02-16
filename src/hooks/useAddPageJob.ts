@@ -19,13 +19,6 @@ export function useAddPageJob(conversationId: string | null, sourceId: string | 
         ? addPageJobsApi.getLatestBySource(conversationId, sourceId)
         : Promise.resolve(null),
     enabled: !!conversationId && !!sourceId,
-    refetchInterval: (q) => {
-      if (typeof document !== 'undefined' && document.hidden) return false;
-      const job = q.state.data as AddPageJob | null | undefined;
-      if (!job) return 3000;
-      if (job.status === 'completed' || job.status === 'failed') return false;
-      return 2500;
-    },
   });
 
   useEffect(() => {

@@ -31,12 +31,6 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
       return jobs.flat();
     },
     enabled: sourceIds.length > 0,
-    refetchInterval: (query) => {
-      if (typeof document !== 'undefined' && document.hidden) return false;
-      const jobs = (query.state.data ?? []) as { status?: string }[];
-      const isActive = jobs.some((j) => j.status === 'queued' || j.status === 'running' || j.status === 'indexing');
-      return isActive ? 5000 : false;
-    },
   });
 
   const { data: conversationSources = [] } = useConversationSources(conversationId);

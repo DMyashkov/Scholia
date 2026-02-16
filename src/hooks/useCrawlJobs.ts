@@ -41,7 +41,6 @@ export const useCrawlJob = (sourceId: string | null) => {
       return jobs.find(j => j.status === 'queued' || j.status === 'running') || jobs[0] || null;
     },
     enabled: !!sourceId,
-    refetchInterval: () => (typeof document !== 'undefined' && document.hidden ? false : 10000), // Realtime is primary; poll rarely as fallback
   });
 };
 

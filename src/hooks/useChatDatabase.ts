@@ -250,7 +250,9 @@ export const useChatDatabase = () => {
       throw new Error(err?.error ?? `Failed to add page: ${res.status}`);
     }
     const data = await res.json();
-    console.log('[addPageToSource] success', data);
+    const dl = data?.discoveredLinks;
+    console.log('[addPageToSource] success', data?.page ? { pageId: data.page.id?.slice(0, 8), discoveredLinks: dl ?? 'N/A' } : data);
+    if (dl) console.log('[addPageToSource] discovered_links:', dl.extracted, 'extracted,', dl.new, 'new (overlap =', dl.extracted - dl.new, 'already in graph)');
     queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
     queryClient.invalidateQueries({ queryKey: ['conversation-pages', conversationId] });
     queryClient.invalidateQueries({ queryKey: ['conversation-page-edges', conversationId] });

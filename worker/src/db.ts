@@ -18,3 +18,7 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
     persistSession: false,
   },
 });
+
+// Log connection on load (helps debug "worker never claims jobs" - verify URL matches frontend)
+const urlDisplay = supabaseUrl ? supabaseUrl.replace(/^https?:\/\//, '').slice(0, 50) : 'NOT SET';
+console.log(`[worker] Supabase URL: ${urlDisplay}... (must match frontend/Vite .env)`);

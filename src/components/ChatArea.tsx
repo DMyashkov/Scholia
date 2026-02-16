@@ -172,15 +172,28 @@ export const ChatArea = ({
                   isStreaming
                 />
               )}
-              {isLoading && !streamingMessage && <TypingIndicator />}
+              {(isLoading && !streamingMessage) || addingPageSourceId ? <TypingIndicator /> : null}
             </div>
           </ScrollArea>
-          <ChatInput onSendMessage={onSendMessage} isLoading={isLoading} />
+          <ChatInput
+            onSendMessage={onSendMessage}
+            isLoading={isLoading}
+            isDisabled={isLoading || !!addingPageSourceId || sources.length === 0}
+          />
         </>
       ) : (
         <>
           <WelcomeScreen onAddSource={() => setAddSourceOpen(true)} hasSources={sources.length > 0} />
-          <ChatInput onSendMessage={onSendMessage} isLoading={isLoading} />
+          {addingPageSourceId && (
+            <div className="px-4">
+              <TypingIndicator />
+            </div>
+          )}
+          <ChatInput
+            onSendMessage={onSendMessage}
+            isLoading={isLoading}
+            isDisabled={isLoading || !!addingPageSourceId || sources.length === 0}
+          />
         </>
       )}
 

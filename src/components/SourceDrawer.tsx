@@ -91,8 +91,8 @@ export const SourceDrawer = ({
     enabled: !!source?.id,
     refetchInterval: (query) => {
       const jobs = (query.state.data ?? []) as { status?: string }[];
-      const isCrawling = jobs.some((j) => j.status === 'queued' || j.status === 'running');
-      return isCrawling ? 2000 : false;
+      const isActive = jobs.some((j) => j.status === 'queued' || j.status === 'running' || j.status === 'indexing');
+      return isActive ? 2000 : false;
     },
   });
 
@@ -107,12 +107,14 @@ export const SourceDrawer = ({
     if (!source) return 'crawling';
     if (addingPageSourceId === source.id) return 'crawling';
     if (crawlJob) {
-      if (crawlJob.status === 'queued' || crawlJob.status === 'running') return 'crawling';
+      if (crawlJob.status === 'queued' || crawlJob.status === 'running' || crawlJob.status === 'indexing') return 'crawling';
       if (crawlJob.status === 'failed') return 'error';
       if (crawlJob.status === 'completed') return 'ready';
     }
     return source.status || 'crawling';
   }, [source, crawlJob, addingPageSourceId]);
+
+  const isIndexing = crawlJob?.status === 'indexing';
 
   // Use the conversation that ran the crawl so we get the right pages/edges (can differ from active conversation)
   const graphConversationId = crawlJob?.conversation_id ?? conversationId;
@@ -217,6 +219,7 @@ export const SourceDrawer = ({
                 targetPages={maxPagesForDepth}
                 connectionsFound={connectionsFound}
                 isCrawling={realStatus === 'crawling'}
+                isIndexing={isIndexing}
               />
 
               <div className="space-y-2">

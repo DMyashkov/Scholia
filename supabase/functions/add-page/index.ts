@@ -197,14 +197,23 @@ Deno.serve(async (req) => {
     }
 
     // Populate discovered_links from new page (for future suggestions)
+    // Note: We upsert with onConflict (conversation_id, source_id, to_url). The total discovered
+    // count only increases by links that don't already exist—overlap with existing pages = fewer new rows.
     console.log('[add-page] extracting discovered_links...');
     const linksWithContext = extractLinksWithContext(html, normalizedUrl, {
       same_domain_only: source.same_domain_only ?? true,
       include_pdfs: source.include_pdfs ?? false,
     });
-    console.log('[add-page] discovered_links count:', linksWithContext.length);
-    if (linksWithContext.length > 0) {
-      const toInsert = linksWithContext.slice(0, 500).map((l) => ({
+    const { data: existingRows } = await supabase
+      .from('discovered_links')
+      .select('to_url')
+      .eq('conversation_id', conversationId)
+      .eq('source_id', sourceId);
+    const existingUrls = new Set((existingRows ?? []).map((r) => r.to_url));
+    const newLinks = linksWithContext.filter((l) => !existingUrls.has(l.url));
+    console.log('[add-page] extracted', linksWithContext.length, 'links;', newLinks.length, 'new (not already discovered),', linksWithContext.length - newLinks.length, 'duplicates');
+    if (newLinks.length > 0) {
+      const toInsert = newLinks.slice(0, 500).map((l) => ({
         conversation_id: conversationId,
         source_id: sourceId,
         from_page_id: newPage.id,
@@ -239,7 +248,10 @@ Deno.serve(async (req) => {
 
     console.log('[add-page] success, page id:', newPage.id);
     return new Response(
-      JSON.stringify({ page: newPage }),
+      JSON.stringify({
+        page: newPage,
+        discoveredLinks: { extracted: linksWithContext.length, new: newLinks.length },
+      }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (e) {
@@ -303,8 +315,28 @@ function extractLinksWithContext(
       let ctxEl = $(el).closest('p, li, td, .mw-parser-output > div');
       if (!ctxEl.length) ctxEl = $(el).parent();
       const raw = ctxEl.first().text().trim().replace(/\s+/g, ' ');
-      const contextSnippet = raw.substring(0, CONTEXT_LEN);
-      if (contextSnippet.length < 20) return;
+      const half = Math.floor(CONTEXT_LEN / 2);
+      let contextSnippet: string;
+      const pos = anchorText ? raw.indexOf(anchorText) : -1;
+      if (pos >= 0) {
+        if (pos < 50) contextSnippet = raw.slice(pos, Math.min(raw.length, pos + CONTEXT_LEN)).trim();
+        else if (pos + anchorText.length > raw.length - 50) contextSnippet = raw.slice(Math.max(0, raw.length - CONTEXT_LEN), raw.length).trim();
+        else contextSnippet = raw.slice(Math.max(0, pos - half), Math.min(raw.length, pos + anchorText.length + half)).trim();
+      } else {
+        contextSnippet = raw.substring(0, CONTEXT_LEN);
+      }
+      // Don't skip links with short context—use anchor or URL title as fallback so we capture all links
+      if (contextSnippet.length < 20) {
+        if (anchorText && anchorText.length >= 5) {
+          contextSnippet = anchorText.substring(0, CONTEXT_LEN);
+        } else {
+          const pathParts = linkUrl.pathname.split('/').filter(Boolean);
+          const wikiTitle = pathParts[0] === 'wiki' && pathParts[1]
+            ? decodeURIComponent(pathParts[1].replace(/_/g, ' '))
+            : linkUrl.pathname;
+          contextSnippet = wikiTitle ? `Link to ${wikiTitle}`.substring(0, CONTEXT_LEN) : 'Link from page';
+        }
+      }
       out.push({ url: urlStr, contextSnippet, anchorText });
     } catch {
       /* skip invalid */

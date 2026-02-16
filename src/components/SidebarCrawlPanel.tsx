@@ -7,6 +7,7 @@ import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages
 import { useConversationSources } from '@/hooks/useConversationSources';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import { useQuery } from '@tanstack/react-query';
+import { Zap } from 'lucide-react';
 
 interface SidebarCrawlPanelProps {
   sources: Source[];
@@ -28,6 +29,11 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
       return jobs.flat();
     },
     enabled: sourceIds.length > 0,
+    refetchInterval: (query) => {
+      const jobs = (query.state.data ?? []) as { status?: string }[];
+      const isActive = jobs.some((j) => j.status === 'queued' || j.status === 'running' || j.status === 'indexing');
+      return isActive ? 2000 : false;
+    },
   });
 
   const { data: conversationSources = [] } = useConversationSources(conversationId);
@@ -68,7 +74,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
       if (crawlJob) {
         if (addingPageSourceId === source.id) {
           status = 'crawling';
-        } else if (crawlJob.status === 'queued' || crawlJob.status === 'running') {
+        } else if (crawlJob.status === 'queued' || crawlJob.status === 'running' || crawlJob.status === 'indexing') {
           status = 'crawling';
         } else if (crawlJob.status === 'failed') {
           status = 'error';
@@ -129,7 +135,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const totalConnections = edges.length;
   
   const isCrawling = crawlingSources.length > 0 || !!addingPageSourceId;
-  const isIndexing = crawlingSources.some(s => s.totalPages > 0 && s.pagesIndexed >= s.totalPages);
+  const isIndexingFromJob = displaySources.some(s => crawlJobMap.get(s.id)?.status === 'indexing');
   const hasAnySources = sources.length > 0;
 
   // Get pages for current view - use pages directly from database (already filtered by conversation and status='indexed')
@@ -221,7 +227,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           {isCrawling && (
             <span className="text-[10px] text-primary flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              {isIndexing ? 'Indexing…' : 'Crawling'}
+              {isIndexingFromJob ? 'Indexing…' : 'Crawling'}
             </span>
           )}
         </div>
@@ -277,12 +283,20 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         
         {/* Progress bar - use totalPages (target) instead of totalDiscovered */}
         {isCrawling && !activeSource && (
-          <div className="relative h-0.5 bg-border/30 rounded-full overflow-hidden">
-            <div 
-              className="absolute inset-y-0 left-0 bg-primary/60 rounded-full transition-all duration-300"
-              style={{ width: `${Math.min(100, (totalIndexed / (displaySources.reduce((sum, s) => sum + s.totalPages, 0) || 1)) * 100)}%` }}
-            />
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent animate-shimmer" />
+          <div className="space-y-1.5">
+            <div className="relative h-0.5 bg-border/30 rounded-full overflow-hidden">
+              <div 
+                className="absolute inset-y-0 left-0 bg-primary/60 rounded-full transition-all duration-300"
+                style={{ width: `${Math.min(100, (totalIndexed / (displaySources.reduce((sum, s) => sum + s.totalPages, 0) || 1)) * 100)}%` }}
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent animate-shimmer" />
+            </div>
+            {isIndexingFromJob && (
+              <div className="relative h-0.5 bg-border/30 rounded-full overflow-hidden">
+                <div className="absolute inset-y-0 left-0 right-0 bg-amber-500/50 rounded-full animate-pulse" />
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-400/40 to-transparent animate-shimmer" />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -325,7 +339,8 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
               {getSourceDisplayLabel(source)}
             </span>
             {source.crawlDepth === 'dynamic' && (
-              <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-medium bg-primary/15 text-primary border border-primary/20">
+              <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-primary/15 text-primary border border-primary/20">
+                <Zap className="h-2.5 w-2.5" />
                 dynamic
               </span>
             )}

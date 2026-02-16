@@ -258,8 +258,11 @@ Deno.serve(async (req) => {
       const found = findSnippetInText(pageText, snippet);
       if (!found) return { contextBefore: '', contextAfter: '' };
       const { start: idx, matchLen } = found;
-      const beforeStart = Math.max(0, idx - contextChars);
-      const afterEnd = Math.min(pageText.length, idx + matchLen + contextChars);
+      // Omit "before" when snippet is at start (would be template/coordinate junk); omit "after" when at end
+      const nearStart = idx < 80;
+      const nearEnd = idx + matchLen > pageText.length - 80;
+      const beforeStart = nearStart ? idx : Math.max(0, idx - contextChars);
+      const afterEnd = nearEnd ? idx + matchLen : Math.min(pageText.length, idx + matchLen + contextChars);
       const before = pageText.slice(beforeStart, idx).replace(/^\s+/, '').trim();
       const after = pageText.slice(idx + matchLen, afterEnd).replace(/\s+$/, '').trim();
       return { contextBefore: before, contextAfter: after };
@@ -727,9 +730,10 @@ Output a JSON object with this structure only (no other text):
 {"content":"your answer in markdown with inline citations","quotes":[{"snippet":"verbatim passage","pageId":"uuid","ref":1}]}
 
 Rules:
-- Use INLINE numbered citations: place [1], [2], [3] etc. immediately after each claim. Format: "Statement [1]. Another fact [2]."
+- Use INLINE numbered citations: place [1], [2], [3] etc. immediately after each claim. Format: "Statement [1]. Another fact [2]." Every quote MUST have a matching [n] in the content—if you have 4 quotes, the content must include [1], [2], [3], [4].
 - Each quote MUST include "ref" (1-based number) matching its citation: the quote that supports [3] in the text must have "ref":3.
 - The snippet you cite MUST DIRECTLY support the claim. If you state "there is a museum," the snippet must explicitly mention a museum—not just a related term like "Hall of Fame" unless the context clearly equates them.
+- NEVER cite meta-statements as evidence. Do NOT add a quote when your answer is "The context does not include...", "The provided context does not mention...", or similar—these are YOUR words, not from the source. Only cite verbatim passages from the context. When the context lacks information, say so clearly but leave "quotes" empty or omit that part.
 - Only use citation numbers for which you have a quote.
 - Answer using ONLY the context above. Each context block has a first line "page_id: " followed by a UUID. Put that exact UUID in "pageId" when citing that block.
 - For "snippet": you MUST copy-paste a verbatim sentence or phrase from the context—do not paraphrase.
@@ -765,8 +769,9 @@ Rules:
   if (!parsed.quotes || !Array.isArray(parsed.quotes)) parsed.quotes = [];
   if (!parsed.content) parsed.content = 'I could not generate a response.';
   const pageIds = new Set(chunks.map((c) => c.page_id));
+  const isMetaStatement = (s: string) => /^(The context does not include|The provided context does not|context does not include|provided context does not)/i.test(s.trim());
   const normalized = parsed.quotes
-    .filter((q: unknown) => q && typeof (q as Record<string, unknown>).snippet === 'string')
+    .filter((q: unknown) => q && typeof (q as Record<string, unknown>).snippet === 'string' && !isMetaStatement(String((q as Record<string, unknown>).snippet)))
     .map((q: unknown) => ({
       snippet: String((q as Record<string, unknown>).snippet).trim(),
       pageId: String((q as Record<string, unknown>).pageId ?? (q as Record<string, unknown>).page_id ?? '').trim(),
@@ -785,5 +790,13 @@ Rules:
     resolved.sort((a, b) => (a.ref ?? 999) - (b.ref ?? 999));
   }
   parsed.quotes = resolved.map(({ snippet, pageId }) => ({ snippet, pageId }));
+  // If we have quotes but content lacks citation markers, append them so evidence cards are linkable
+  if (resolved.length > 0 && parsed.content) {
+    const hasAnyRef = /\[\d+\]/.test(parsed.content);
+    if (!hasAnyRef) {
+      const markers = resolved.map((_, i) => `[${i + 1}]`).join(' ');
+      parsed.content = parsed.content.trimEnd() + ' ' + markers;
+    }
+  }
   return parsed;
 }

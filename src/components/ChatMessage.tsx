@@ -110,13 +110,13 @@ export const ChatMessage = ({
           {!isUser && !isStreaming && followUp && (
             <>
               <div className="my-4 h-px bg-border" />
-              <p className="text-xs text-muted-foreground mb-3">
-                Indexed {followUp.indexedPageDisplay || 'new page'}
-              </p>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <p className="text-sm text-muted-foreground">
+                  Indexed {followUp.indexedPageDisplay || 'new page'}
+                </p>
+                <CopyMessageButton message={followUp} className="h-8 w-8 shrink-0 opacity-70 hover:opacity-100" />
+              </div>
               <div className="space-y-2">
-                <div className="flex items-center justify-end">
-                  <CopyMessageButton message={followUp} className="h-8 w-8 shrink-0 opacity-70 hover:opacity-100" />
-                </div>
                 <div className="prose prose-invert prose-sm max-w-none">
                   <MessageContent 
                     content={followUp.content} 

@@ -15,15 +15,17 @@ async function main() {
 
         if (!job) {
           idlePollCount++;
-          if (idlePollCount % 10 === 1 && idlePollCount > 1) {
-            console.log('[worker] idle', { pollCount: idlePollCount, activeJobs: activeJobs.size });
+          // Log every 20th idle (less spam), and always first few
+          if (idlePollCount <= 3 || idlePollCount % 20 === 1) {
+            console.log('[worker] idle', { pollCount: idlePollCount, activeJobs: activeJobs.size, hint: idlePollCount === 1 ? 'Add a source to create a crawl job' : undefined });
           }
           break;
         }
         idlePollCount = 0;
 
         const sourceShort = (job as { source_id?: string }).source_id?.slice(0, 8) || '?';
-        console.log('[worker] Claimed job', job.id.slice(0, 8), 'source', sourceShort);
+        const convShort = (job as { conversation_id?: string }).conversation_id?.slice(0, 8) || '?';
+        console.log('[worker] Claimed job', job.id.slice(0, 8), 'source', sourceShort, 'conv', convShort, '(discovered/indexed logs will follow with [D/I] prefix)');
         activeJobs.add(job.id);
         processCrawlJob(job.id)
           .then(() => {

@@ -34,7 +34,7 @@ const dynamicOption = { value: 'dynamic' as const, label: 'Dynamic', description
 
 export const AddSourceModal = ({ open, onOpenChange, onAddSource }: AddSourceModalProps) => {
   const [url, setUrl] = useState('');
-  const [depth, setDepth] = useState<CrawlDepth>('dynamic');
+  const [depth, setDepth] = useState<CrawlDepth>('shallow');
   const [sameDomainOnly, setSameDomainOnly] = useState(true);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -49,7 +49,7 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource }: AddSourceMod
 
     // Reset form
     setUrl('');
-    setDepth('dynamic');
+    setDepth('shallow');
     setSameDomainOnly(true);
     onOpenChange(false);
   };

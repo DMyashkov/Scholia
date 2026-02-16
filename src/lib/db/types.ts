@@ -58,7 +58,7 @@ export interface CrawlJob {
   id: string;
   source_id: string;
   conversation_id: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'indexing' | 'completed' | 'failed' | 'cancelled';
   pages_indexed: number;
   indexed_count?: number;
   discovered_count?: number;

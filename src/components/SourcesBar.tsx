@@ -311,17 +311,26 @@ export const SourcesBar = ({
       
       {/* Dynamic mode toggle - only when we have dynamic sources */}
       {hasDynamicSources && onDynamicModeChange && conversationId && (
-        <div className="flex items-center gap-2 shrink-0 ml-2 pl-2 border-l border-border">
-          <Zap className="h-3.5 w-3.5 text-primary" />
-          <Label htmlFor="dynamic-mode" className="text-xs text-muted-foreground cursor-pointer">
-            Dynamic Mode (Suggest New Pages)
-          </Label>
-          <Switch
-            id="dynamic-mode"
-            checked={dynamicMode}
-            onCheckedChange={onDynamicModeChange}
-          />
-        </div>
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-2 shrink-0 ml-2 pl-2 border-l border-border">
+                <Zap className="h-3.5 w-3.5 text-primary" />
+                <Label htmlFor="dynamic-mode" className="text-xs text-muted-foreground cursor-pointer">
+                  Dynamic Mode (Suggest New Pages)
+                </Label>
+                <Switch
+                  id="dynamic-mode"
+                  checked={dynamicMode}
+                  onCheckedChange={onDynamicModeChange}
+                />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-[260px]">
+              <p className="text-xs">Guide the crawler step by step; pages are suggested from the graph. Only sources created as dynamic can be branched from.</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       )}
 
       {/* Sign in button - right edge of screen, matching New chat button style */}

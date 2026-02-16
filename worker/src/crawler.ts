@@ -12,6 +12,8 @@ const MAX_PAGES: Record<Source['crawl_depth'], number> = {
   dynamic: 1, // Only the seed page; discovered links stored for RAG suggestion
 };
 
+let _noQueuedLogCounter = 0;
+
 export async function processCrawlJob(jobId: string) {
   console.log('[crawl] processCrawlJob start', { jobId: jobId.slice(0, 8) });
 
@@ -33,6 +35,7 @@ export async function processCrawlJob(jobId: string) {
       sourceId: job.source_id?.slice(0, 8),
       conversationId: job.conversation_id?.slice(0, 8),
     });
+    console.log(`[D/I] job from DB: discovered_count=${(job as any).discovered_count ?? '?'} indexed_count=${(job as any).indexed_count ?? job.pages_indexed ?? '?'} pages_indexed=${job.pages_indexed}`);
 
     // Check if job is still queued or running (might have been claimed)
     if (job.status !== 'queued' && job.status !== 'running') {
@@ -210,7 +213,8 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
 
   const sourceShort = new URL(seedUrl).pathname?.replace(/^\/wiki\//, '') || seedUrl.slice(0, 40);
   console.log(`[crawl] START source=${sourceShort} url=${seedUrl} maxPages=${maxPages} depth=${source.crawl_depth} jobId=${job.id?.slice(0, 8)}`);
-  
+  console.log(`[D/I] INIT discovered=${discovered.size} visited=${visited.size} (seed in discovered, no pages yet; job NOT updated until first page succeeds)`);
+
   let loopIterations = 0;
   while (queue.length > 0 && visited.size < maxPages) {
     loopIterations++;
@@ -248,8 +252,10 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       if (!conversationId) {
         throw new Error(`conversationId is null before calling crawlPage!`);
       }
+      console.log(`[D/I] crawlPage START url=${normalizedUrl.slice(0, 60)} depth=${depth} isSeed=${depth === 0} conv=${conversationId?.slice(0, 8)}`);
       const result = await crawlPage(normalizedUrl, source, job, conversationId);
       if (!result) {
+        console.error(`[D/I] crawlPage FAILED - page insert/fetch failed; we will NOT update job (discovered/indexed stay stale)`);
         console.error(`❌ Failed to crawl page ${normalizedUrl} - skipping and continuing`, {
           depth,
           isSeedPage: depth === 0,
@@ -267,6 +273,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       
       const { page, html } = result;
       visited.add(normalizedUrl);
+      console.log(`[D/I] crawlPage OK pageId=${page?.id?.slice(0, 8)} visited=${visited.size} (will extract links then update job)`);
       
       // Update source_label from first page (human-readable label for UI). domain stays as hostname.
       if (!sourceTitleUpdated && page.title) {
@@ -319,7 +326,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
         if (dlError) {
           console.warn('[crawl] discovered_links insert error:', dlError.message);
         } else {
-          console.log(`[crawl] inserted ${toInsert.length} discovered_links`);
+          console.log(`[D/I] discovered_links inserted=${toInsert.length} conv=${conversationId?.slice(0, 8)} source=${source.id?.slice(0, 8)}`);
         }
       }
 
@@ -421,27 +428,37 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       }
 
       // Update job progress with all counters
+      const updatePayload = {
+        discovered_count: discovered.size,
+        indexed_count: visited.size,
+        links_count: linksCount,
+        last_activity_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      console.log(`[D/I] JOB UPDATE writing discovered=${updatePayload.discovered_count} indexed=${updatePayload.indexed_count} links=${updatePayload.links_count} jobId=${job.id?.slice(0, 8)}`);
       await supabase
         .from('crawl_jobs')
-        .update({ 
-          discovered_count: discovered.size,
-          indexed_count: visited.size,
-          links_count: linksCount,
-          last_activity_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', job.id);
 
 
       // Small delay to be respectful
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error) {
+      // Rethrow conversation-deleted so job fails fast
+      if (error instanceof Error && error.message.includes('was deleted')) throw error;
       console.error(`❌ Error crawling ${url}:`, error);
       // Continue with next page
     }
   }
 
   // Run indexer BEFORE marking completed so when UI shows "ready", chunks exist
+  console.log(`[D/I] Transitioning to indexing: discovered=${discovered.size} indexed=${visited.size} jobId=${job.id?.slice(0, 8)}`);
+  await supabase
+    .from('crawl_jobs')
+    .update({ status: 'indexing', updated_at: new Date().toISOString() })
+    .eq('id', job.id);
+
   try {
     await indexConversationForRag(conversationId);
   } catch (_indexErr) {
@@ -464,6 +481,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
 
   const exitReason = queue.length === 0 ? 'queue empty' : `visited >= maxPages (${visited.size} >= ${maxPages})`;
   console.log(`[crawl] END source=${sourceShort} visited=${visited.size} exit=${exitReason} linksCount=${linksCount} iterations=${loopIterations}`);
+  console.log(`[D/I] FINAL discovered=${discovered.size} indexed=${visited.size} (this is what job will have after final update)`);
 
   if (loopIterations === 0) {
     console.error(`❌ CRITICAL: Crawl loop never ran! Loop iterations = 0`);
@@ -561,6 +579,13 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
       .single();
 
     if (error) {
+      // FK violation on conversation_id = conversation was deleted; fail job immediately
+      const detailsStr = typeof error.details === 'string' ? error.details : JSON.stringify(error.details || '');
+      const isConvFk = error.code === '23503' && (detailsStr.includes('conversations') || (error.message || '').includes('conversations'));
+      if (isConvFk) {
+        console.error(`[D/I] conversation_id FK violation - conversation was deleted, failing job`);
+        throw new Error(`Conversation ${conversationId} was deleted. Cannot index pages.`);
+      }
       console.error(`\n❌ ========== PAGE INSERTION FAILED ==========`);
       console.error(`❌ URL: ${url}`);
       console.error(`❌ Error code: ${error.code}`);
@@ -585,6 +610,7 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
         .single();
 
       if (existing) {
+        console.log(`[D/I] PAGE duplicate - using existing pageId=${existing?.id?.slice(0, 8)}`);
         return { page: existing as Page, html };
       }
       const errorDetails = {
@@ -600,15 +626,18 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
           status: insertData.status,
         },
       };
+      console.error(`[D/I] PAGE INSERT FAILED - returning null (crawler will not update job for this URL)`);
       console.error(`❌ No existing page found, error details:`, JSON.stringify(errorDetails, null, 2));
       // Don't throw - return null so crawler can continue
       return null;
     }
 
+    console.log(`[D/I] PAGE INSERT OK pageId=${(page as Page)?.id?.slice(0, 8)} conv=${conversationId?.slice(0, 8)} url=${url.slice(0, 50)}`);
     return { page: page as Page, html };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     const isFetch = msg.includes('HTTP') || msg.includes('fetch') || msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT');
+    console.error(`[D/I] crawlPage EXCEPTION - no page inserted url=${url.slice(0, 50)}`, { error: msg, isFetchError: isFetch });
     console.error(`[crawl] crawlPage failed url=${url}`, {
       error: msg,
       isFetchError: isFetch,
@@ -713,9 +742,29 @@ function extractLinksWithContext(
           contextEl = $(element).parent();
         }
         const rawText = contextEl.first().text().trim().replace(/\s+/g, ' ');
-        const contextSnippet = rawText.substring(0, CONTEXT_SNIPPET_LENGTH);
-
-        if (contextSnippet.length < 20) return; // Skip very short context
+        // Center on link text; omit leading junk when link at start, trailing when at end
+        const pos = anchorText ? rawText.indexOf(anchorText) : -1;
+        const half = Math.floor(CONTEXT_SNIPPET_LENGTH / 2);
+        let contextSnippet: string;
+        if (pos >= 0) {
+          if (pos < 50) contextSnippet = rawText.slice(pos, Math.min(rawText.length, pos + CONTEXT_SNIPPET_LENGTH)).trim();
+          else if (pos + anchorText.length > rawText.length - 50) contextSnippet = rawText.slice(Math.max(0, rawText.length - CONTEXT_SNIPPET_LENGTH), rawText.length).trim();
+          else contextSnippet = rawText.slice(Math.max(0, pos - half), Math.min(rawText.length, pos + anchorText.length + half)).trim();
+        } else {
+          contextSnippet = rawText.substring(0, CONTEXT_SNIPPET_LENGTH);
+        }
+        // Don't skip links with short context—use anchor or URL title as fallback to capture all links
+        if (contextSnippet.length < 20) {
+          if (anchorText && anchorText.length >= 5) {
+            contextSnippet = anchorText.substring(0, CONTEXT_SNIPPET_LENGTH);
+          } else {
+            const pathParts = linkUrl.pathname.split('/').filter((p) => p);
+            const wikiTitle = pathParts[0] === 'wiki' && pathParts[1]
+              ? decodeURIComponent(pathParts[1].replace(/_/g, ' '))
+              : linkUrl.pathname;
+            contextSnippet = wikiTitle ? `Link to ${wikiTitle}`.substring(0, CONTEXT_SNIPPET_LENGTH) : 'Link from page';
+          }
+        }
 
         result.push({
           url: normalizedUrl,
@@ -902,24 +951,32 @@ export async function claimJob(): Promise<CrawlJob | null> {
     return null;
   }
 
-  // Log when no queued jobs (helps debug "crawl never started")
+  // Log when no queued jobs (helps debug "crawl never started") - throttle to avoid spam
   if (!jobs || jobs.length === 0) {
-    const { data: allJobs } = await supabase
-      .from('crawl_jobs')
-      .select('id, status, source_id, conversation_id, created_at')
-      .order('created_at', { ascending: false })
-      .limit(10);
-    console.log('[worker] no queued jobs', {
-      recentCount: allJobs?.length ?? 0,
-      recent: (allJobs ?? []).map((j: any) => ({
-        id: j.id?.slice(0, 8),
-        status: j.status,
-        source: j.source_id?.slice(0, 8),
-        created: j.created_at,
-      })),
-    });
+    _noQueuedLogCounter++;
+    const shouldLog = _noQueuedLogCounter <= 2 || _noQueuedLogCounter % 12 === 0;
+    if (shouldLog) {
+      const { data: allJobs, error: allError } = await supabase
+        .from('crawl_jobs')
+        .select('id, status, source_id, conversation_id, created_at')
+        .order('created_at', { ascending: false })
+        .limit(10);
+    if (allError) {
+      console.log(`[worker] no queued jobs, fetch error (check DB connection):`, allError.message);
+    } else if (!allJobs || allJobs.length === 0) {
+      console.log(`[worker] no queued jobs, DB has 0 crawl_jobs (add a source to create one)`);
+    } else {
+      const summary = allJobs.map((j: any) => ({ id: j.id?.slice(0, 8), status: j.status, created: j.created_at?.slice(11, 19) }));
+      console.log(`[worker] no queued jobs but ${allJobs.length} recent:`, summary);
+      const queued = allJobs.filter((j: any) => j.status === 'queued');
+      if (queued.length > 0) {
+        console.log(`[worker] BUG: ${queued.length} queued in recent but claimJob missed them!`, queued.map((j: any) => j.id));
+      }
+    }
+    }
     return null;
   }
+  _noQueuedLogCounter = 0; // reset when we find a job
     
   // Log job details for debugging
   const jobToClaim = jobs[0];

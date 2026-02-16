@@ -7,9 +7,11 @@ import { cn } from '@/lib/utils';
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
   isLoading: boolean;
+  /** When true, send is disabled (e.g. no sources, add-page in progress) */
+  isDisabled?: boolean;
 }
 
-export const ChatInput = ({ onSendMessage, isLoading }: ChatInputProps) => {
+export const ChatInput = ({ onSendMessage, isLoading, isDisabled = false }: ChatInputProps) => {
   const [message, setMessage] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -20,8 +22,9 @@ export const ChatInput = ({ onSendMessage, isLoading }: ChatInputProps) => {
     }
   }, [message]);
 
+  const disabled = isLoading || isDisabled;
   const handleSubmit = () => {
-    if (message.trim() && !isLoading) {
+    if (message.trim() && !disabled) {
       onSendMessage(message);
       setMessage('');
     }
@@ -37,7 +40,7 @@ export const ChatInput = ({ onSendMessage, isLoading }: ChatInputProps) => {
   return (
     <div className="border-t border-border bg-background p-4">
       <div className="max-w-3xl mx-auto">
-        <div className="relative flex items-end gap-2 bg-secondary rounded-2xl p-2 shadow-soft">
+        <div className="relative flex items-center gap-2 bg-secondary rounded-2xl p-2 shadow-soft">
           <Textarea
             ref={textareaRef}
             value={message}
@@ -54,11 +57,11 @@ export const ChatInput = ({ onSendMessage, isLoading }: ChatInputProps) => {
           />
           <Button
             onClick={handleSubmit}
-            disabled={!message.trim() || isLoading}
+            disabled={!message.trim() || disabled}
             size="icon"
             className={cn(
               'shrink-0 h-10 w-10 rounded-xl transition-all',
-              message.trim() && !isLoading
+              message.trim() && !disabled
                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                 : 'bg-muted text-muted-foreground cursor-not-allowed'
             )}

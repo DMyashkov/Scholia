@@ -36,7 +36,7 @@ export async function processCrawlJob(jobId: string) {
       sourceId: job.source_id?.slice(0, 8),
       conversationId: job.conversation_id?.slice(0, 8),
     });
-    console.log(`[D/I] job from DB: discovered_count=${(job as any).discovered_count ?? '?'} indexed_count=${(job as any).indexed_count ?? job.pages_indexed ?? '?'} pages_indexed=${job.pages_indexed}`);
+    console.log(`[D/I] job from DB: discovered_count=${(job as CrawlJob).discovered_count ?? '?'} indexed_count=${(job as CrawlJob).indexed_count ?? job.pages_indexed ?? '?'} pages_indexed=${job.pages_indexed}`);
 
     // Check if job is still queued or running (might have been claimed)
     if (job.status !== 'queued' && job.status !== 'running') {
@@ -147,8 +147,9 @@ async function crawlSource(job: CrawlJob, source: Source) {
   
   // Double-check: verify the conversation_id matches what's in the job
   if (job.conversation_id && job.conversation_id !== conversationId) {
+    /* mismatch acceptable; no-op */
   }
-  
+
   return crawlSourceWithConversationId(job, source, conversationId);
 }
 
@@ -176,8 +177,8 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
   const seedUrl = normalizeUrlForCrawl(source.url);
 
   const rawDepth = (source as { crawl_depth?: string }).crawl_depth;
-  const maxPages =
-    (rawDepth && MAX_PAGES[rawDepth as Source['crawl_depth']]) ??
+  const maxPages: number =
+    (rawDepth ? MAX_PAGES[rawDepth as Source['crawl_depth']] : undefined) ??
     (rawDepth === 'dynamic' ? 1 : 15);
   const visited = new Set<string>();
   const discovered = new Set<string>(); // All discovered URLs (including queued)
@@ -194,7 +195,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
   let sourceTitleUpdated = false;
 
   // Fetch robots.txt
-  let robotsParser: any = null;
+  let robotsParser: ReturnType<typeof RobotsParser> | null = null;
   try {
     const robotsUrl = new URL('/robots.txt', seedUrl).toString();
     const robotsResponse = await fetch(robotsUrl);
@@ -202,7 +203,8 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       const robotsText = await robotsResponse.text();
       robotsParser = RobotsParser(robotsUrl, robotsText);
     }
-  } catch (error) {
+  } catch {
+    // Ignore robots.txt fetch/parse errors
   }
 
   
@@ -413,7 +415,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
               } else {
                 successCount += chunk.length;
               }
-            } catch (chunkError: any) {
+            } catch (chunkError: unknown) {
               // CRITICAL: Log but don't throw - continue with next chunk
               // Estimate success for this chunk so crawl continues
               successCount += Math.floor(chunk.length * 0.5);
@@ -426,8 +428,9 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
           }
           
           linksCount += successCount;
-        } catch (edgeError: any) {
-          console.error(`[crawl] EDGE INSERT ERROR`, edgeError?.message || edgeError);
+        } catch (edgeError: unknown) {
+          const err = edgeError as { message?: string };
+          console.error(`[crawl] EDGE INSERT ERROR`, err?.message || edgeError);
           // CRITICAL: Log error but continue crawling - edges are not critical
           // Estimate links count so crawl can continue
           linksCount += Math.floor(edgesToInsert.length * 0.8);
@@ -898,7 +901,7 @@ async function updateJobStatus(
   startedAt: string | null = null,
   completedAt: string | null = null
 ) {
-  const updates: any = {
+  const updates: Record<string, string | null> = {
     status,
     updated_at: new Date().toISOString(),
     last_activity_at: new Date().toISOString(),
@@ -973,11 +976,12 @@ export async function claimJob(): Promise<CrawlJob | null> {
     } else if (!allJobs || allJobs.length === 0) {
       console.log(`[worker] no queued jobs, DB has 0 crawl_jobs (add a source to create one)`);
     } else {
-      const summary = allJobs.map((j: any) => ({ id: j.id?.slice(0, 8), status: j.status, created: j.created_at?.slice(11, 19) }));
+      type JobRow = { id?: string; status?: string; created_at?: string };
+      const summary = (allJobs as JobRow[]).map((j) => ({ id: j.id?.slice(0, 8), status: j.status, created: j.created_at?.slice(11, 19) }));
       console.log(`[worker] no queued jobs but ${allJobs.length} recent:`, summary);
-      const queued = allJobs.filter((j: any) => j.status === 'queued');
+      const queued = (allJobs as JobRow[]).filter((j) => j.status === 'queued');
       if (queued.length > 0) {
-        console.log(`[worker] BUG: ${queued.length} queued in recent but claimJob missed them!`, queued.map((j: any) => j.id));
+        console.log(`[worker] BUG: ${queued.length} queued in recent but claimJob missed them!`, queued.map((j) => j.id));
       }
     }
     }

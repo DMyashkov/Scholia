@@ -166,8 +166,8 @@ Deno.serve(async (req) => {
         return matchedList.slice(0, MATCH_CHUNKS_MERGED_CAP);
       };
 
-      let cappedMatch = await doRetrieve(searchQueries);
-      let combined: ChunkRow[] = [...leadList, ...cappedMatch.filter((c) => !leadIds.has(c.id))];
+      const cappedMatch = await doRetrieve(searchQueries);
+      const combined: ChunkRow[] = [...leadList, ...cappedMatch.filter((c) => !leadIds.has(c.id))];
       let didSecondRound = false;
 
       if (needsSecondRound && round2 && combined.length > 0) {
@@ -605,8 +605,8 @@ Output JSON:
   "queries": ["search query 1", "search query 2", ...],
   "needsSecondRound": true or false,
   "round2": {
-    "extractionPrompt": "Instructions for extracting structured data from round 1 context. Be specific: what JSON shape? E.g. 'Extract the list of offices/roles. Output: {\"items\": [\"office1\", \"office2\", ...]}'",
-    "queryInstructions": "How to build round 2 search queries from the extracted data. E.g. 'For each item, create a query: item + \"elected when main achievement\"'"
+    "extractionPrompt": "Instructions for extracting structured data from round 1 context. Be specific: what JSON shape? E.g. 'Extract the list of offices/roles. Output: {"items": ["office1", "office2", ...]}'",
+    "queryInstructions": "How to build round 2 search queries from the extracted data. E.g. 'For each item, create a query: item + "elected when main achievement"'"
   }
 }
 

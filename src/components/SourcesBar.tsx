@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/tooltip';
 import { useQuery } from '@tanstack/react-query';
 import { crawlJobsApi } from '@/lib/db/crawl-jobs';
+import type { CrawlJob } from '@/lib/db/types';
 import { useConversationPages } from '@/hooks/usePages';
 import { useAddPageJob } from '@/hooks/useAddPageJob';
 import { useMemo } from 'react';
@@ -229,7 +230,8 @@ export const SourcesBar = ({
         }
         
         // Use indexed_count if available, fallback to pages_indexed; prefer actual DB count when we have pages
-        const jobIndexed = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? 0;
+        const job = crawlJob as CrawlJob;
+        const jobIndexed = job.indexed_count ?? job.pages_indexed ?? 0;
         pagesIndexed = Math.max(jobIndexed, sourcePages.length);
         const maxPagesForDepth = source.crawlDepth === 'dynamic' || source.crawlDepth === 'singular' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
         if (source.crawlDepth === 'dynamic') {

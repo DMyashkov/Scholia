@@ -7,6 +7,7 @@ import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages
 import { useConversationSources } from '@/hooks/useConversationSources';
 import { useAddPageJob } from '@/hooks/useAddPageJob';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
+import type { CrawlJob } from '@/lib/db/types';
 import { useQuery } from '@tanstack/react-query';
 import { Zap } from 'lucide-react';
 
@@ -85,7 +86,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         }
         
         // Use indexed_count if available, fallback to pages_indexed; prefer actual DB count when we have pages
-        const jobIndexed = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? 0;
+        const jobIndexed = (crawlJob as CrawlJob).indexed_count ?? crawlJob.pages_indexed ?? 0;
         pagesIndexed = Math.max(jobIndexed, sourcePages.length);
         // For dynamic + add-page: target = current+1 until page is inserted. Once addPageJob is encoding/completed,
         // the new page is in DB so use sourcePages.length (avoids 2/3 when realtime delivers page before status update).
@@ -142,7 +143,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const totalDiscovered = displaySources.reduce((sum, s) => {
     const dlCount = discoveredCountsMap[s.id] ?? 0;
     const crawlJob = crawlJobMap.get(s.id);
-    const jobDiscovered = crawlJob ? ((crawlJob as any).discovered_count ?? 0) : 0;
+    const jobDiscovered = crawlJob ? ((crawlJob as CrawlJob).discovered_count ?? 0) : 0;
     if (s.crawlDepth === 'dynamic') {
       return sum + Math.max(jobDiscovered, dlCount);
     }
@@ -164,10 +165,10 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const indexingJob = displaySources.find(s => crawlJobMap.get(s.id)?.status === 'indexing');
   const crawlJob = indexingJob ? crawlJobMap.get(indexingJob.id) : null;
   const isDynamic = displaySources.some(s => s.crawlDepth === 'dynamic');
-  const encChunksDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_done ?? 0) : (crawlJob as any)?.encoding_chunks_done ?? 0;
-  const encChunksTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob as any)?.encoding_chunks_total ?? 0;
-  const encDiscoveredDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob as any)?.encoding_discovered_done ?? 0;
-  const encDiscoveredTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob as any)?.encoding_discovered_total ?? 0;
+  const encChunksDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_done ?? 0) : (crawlJob as CrawlJob | null)?.encoding_chunks_done ?? 0;
+  const encChunksTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_chunks_total ?? 0;
+  const encDiscoveredDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_done ?? 0;
+  const encDiscoveredTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_total ?? 0;
   const isIndexingCrawledPages = (isIndexingFromJob || isAddPageEncoding) && encChunksTotal > 0 && encChunksDone < encChunksTotal;
   const isEncodingDiscoveredPages = (isIndexingFromJob || isAddPageEncoding) && encDiscoveredTotal > 0 && (encChunksDone >= encChunksTotal || encChunksTotal === 0);
   const combinedEncDone = encChunksDone + encDiscoveredDone;
@@ -262,7 +263,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     displayPages.length,
     displaySources.reduce((sum, s) => {
       const crawlJob = crawlJobMap.get(s.id);
-      const jobIndexedCount = crawlJob ? ((crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? 0) : 0;
+      const jobIndexedCount = crawlJob ? ((crawlJob as CrawlJob).indexed_count ?? crawlJob.pages_indexed ?? 0) : 0;
       return sum + jobIndexedCount;
     }, 0)
   );

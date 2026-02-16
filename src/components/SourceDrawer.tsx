@@ -17,6 +17,7 @@ import { CrawlStats } from './CrawlStats';
 import { useMemo } from 'react';
 import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
+import type { CrawlJob } from '@/lib/db/types';
 import { useAddPageJob } from '@/hooks/useAddPageJob';
 import { useQuery } from '@tanstack/react-query';
 // MAX_PAGES defined inline
@@ -129,10 +130,10 @@ export const SourceDrawer = ({
   const isAddPageIndexing = addingPageSourceId === source?.id && addPageJob?.status === 'indexing';
   const isAddPageEncoding = addingPageSourceId === source?.id && addPageJob?.status === 'encoding';
   const isAddPageResponding = addingPageSourceId === source?.id && addPageJob?.status === 'completed';
-  const encChunksDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_done ?? 0) : ((crawlJob as any)?.encoding_chunks_done ?? 0);
-  const encChunksTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_total ?? 0) : ((crawlJob as any)?.encoding_chunks_total ?? 0);
-  const encDiscoveredDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_done ?? 0) : ((crawlJob as any)?.encoding_discovered_done ?? 0);
-  const encDiscoveredTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_total ?? 0) : ((crawlJob as any)?.encoding_discovered_total ?? 0);
+  const encChunksDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_done ?? 0) : (crawlJob?.encoding_chunks_done ?? 0);
+  const encChunksTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob?.encoding_chunks_total ?? 0);
+  const encDiscoveredDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob?.encoding_discovered_done ?? 0);
+  const encDiscoveredTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob?.encoding_discovered_total ?? 0);
   const isIndexingCrawled = encChunksTotal > 0 && encChunksDone < encChunksTotal;
   const isEncodingDiscovered = encDiscoveredTotal > 0 && (encChunksDone >= encChunksTotal || encChunksTotal === 0);
   const statusLabel = isAddPageResponding ? 'Responding…' : isAddPageIndexing ? 'Adding page…' : isAddPageEncoding || isIndexing
@@ -170,7 +171,8 @@ export const SourceDrawer = ({
 
   const pagesIndexed = useMemo(() => {
     if (crawlJob) {
-      const fromJob = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? sourcePages.length;
+      const job = crawlJob as CrawlJob;
+      const fromJob = job.indexed_count ?? job.pages_indexed ?? sourcePages.length;
       // Job can report 0 before first update; never show fewer nodes than pages we have
       return Math.max(fromJob, sourcePages.length);
     }
@@ -178,7 +180,7 @@ export const SourceDrawer = ({
   }, [crawlJob, sourcePages.length]);
   
   const pagesDiscovered = useMemo(() => {
-    const jobCount = crawlJob ? ((crawlJob as any).discovered_count ?? 0) : 0;
+    const jobCount = crawlJob ? ((crawlJob as CrawlJob).discovered_count ?? 0) : 0;
     if (source?.crawlDepth === 'dynamic') {
       return Math.max(jobCount, discoveredCount);
     }

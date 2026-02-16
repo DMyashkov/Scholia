@@ -483,6 +483,7 @@ export const useChatDatabase = () => {
                 }
               }
             } finally {
+              // No cleanup needed
             }
           } else {
             queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });

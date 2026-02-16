@@ -45,7 +45,7 @@ export const createGraphData = (
   visiblePages.forEach(page => {
     // Try to extract URL from page data
     // If page has a url field, use it; otherwise construct from domain + path
-    const pageUrl = (page as any).url || (domain ? `https://${domain}${page.path}` : `https://example.com${page.path}`);
+    const pageUrl = (page as DiscoveredPage & { url?: string }).url || (domain ? `https://${domain}${page.path}` : `https://example.com${page.path}`);
     // Normalize URL for matching (remove trailing slash, fragment, query params)
     const normalizedUrl = normalizeUrlForMatching(pageUrl);
     
@@ -69,7 +69,7 @@ export const createGraphData = (
   });
   
   const nodes: GraphNode[] = visiblePages.map((page, i) => {
-    const pageUrl = (page as any).url || (domain ? `https://${domain}${page.path}` : `https://example.com${page.path}`);
+    const pageUrl = (page as DiscoveredPage & { url?: string }).url || (domain ? `https://${domain}${page.path}` : `https://example.com${page.path}`);
     // First page (starting page) should be at center, others spread around
     const isStartingPage = i === 0;
     return {

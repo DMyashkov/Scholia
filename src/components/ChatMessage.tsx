@@ -152,7 +152,7 @@ export const ChatMessage = ({
 function renderInlineMarkdown(text: string): React.ReactNode {
   if (!text) return null;
   const parts: React.ReactNode[] = [];
-  let remaining = text;
+  const remaining = text;
   const regex = /(\*\*(.+?)\*\*)|(\*(.+?)\*)|(`(.+?)`)/g;
   let lastIndex = 0;
   let match;

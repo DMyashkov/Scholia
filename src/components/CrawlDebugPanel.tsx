@@ -23,9 +23,9 @@ function SourceDebugItem({ sourceId, domain }: { sourceId: string; domain: strin
       {job ? (
         <div className="space-y-1 mt-1 text-[10px]">
           <div>Status: <span className="font-mono">{job.status}</span></div>
-          <div>Indexed: <span className="font-mono">{(job as any).indexed_count ?? job.pages_indexed ?? 0}</span></div>
-          <div>Discovered: <span className="font-mono">{(job as any).discovered_count ?? 0}</span></div>
-          <div>Links: <span className="font-mono">{(job as any).links_count ?? 0}</span></div>
+          <div>Indexed: <span className="font-mono">{(job as { indexed_count?: number }).indexed_count ?? job.pages_indexed ?? 0}</span></div>
+          <div>Discovered: <span className="font-mono">{(job as { discovered_count?: number }).discovered_count ?? 0}</span></div>
+          <div>Links: <span className="font-mono">{(job as { links_count?: number }).links_count ?? 0}</span></div>
           {job.last_activity_at && (
             <div>Last Activity: <span className="font-mono text-[9px]">{new Date(job.last_activity_at).toLocaleTimeString()}</span></div>
           )}

@@ -3,7 +3,7 @@ import { claimJob, processCrawlJob } from './crawler';
 const CRAWL_INTERVAL_MS = parseInt(process.env.CRAWL_INTERVAL_MS || '5000', 10);
 const MAX_CONCURRENT_JOBS = parseInt(process.env.MAX_CONCURRENT_JOBS || '3', 10);
 
-let activeJobs = new Set<string>();
+const activeJobs = new Set<string>();
 let idlePollCount = 0;
 
 async function main() {

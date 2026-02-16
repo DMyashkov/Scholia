@@ -1,6 +1,6 @@
 import { usePages } from './usePages';
 import { useCrawlJob } from './useCrawlJobs';
-import type { Source as DBSource } from '@/lib/db/types';
+import type { Source as DBSource, CrawlJob } from '@/lib/db/types';
 import type { Source, DiscoveredPage } from '@/types/source';
 
 export const useSourceWithData = (dbSource: DBSource | null): Source | null => {
@@ -23,7 +23,7 @@ export const useSourceWithData = (dbSource: DBSource | null): Source | null => {
       status = 'ready';
     }
     // Use indexed_count if available, fallback to pages_indexed
-    pagesIndexed = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? 0;
+    pagesIndexed = (crawlJob as CrawlJob).indexed_count ?? crawlJob.pages_indexed ?? 0;
     totalPages = crawlJob.total_pages || pages.length || 0;
   } else {
     totalPages = pages.length;

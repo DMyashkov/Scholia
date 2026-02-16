@@ -50,7 +50,8 @@ export const conversationSourcesApi = {
     const { data, error } = await query;
 
     if (error) throw error;
-    return (data || []).map((item: any) => ({
+    type Row = { conversation_id: string; conversation: { id: string; title: string | null; created_at: string } | null };
+    return ((data || []) as Row[]).map((item) => ({
       conversationId: item.conversation_id,
       conversation: item.conversation,
     }));

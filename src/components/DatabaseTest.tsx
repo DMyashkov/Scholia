@@ -78,12 +78,13 @@ export function DatabaseTest() {
       addResult('✅ Crawl job should be created automatically');
 
       addResult('🎉 All tests completed successfully!');
-    } catch (error: any) {
-      const errorMessage = error?.message || error?.error?.message || JSON.stringify(error, null, 2);
+    } catch (error: unknown) {
+      const err = error as { message?: string; error?: { message?: string } };
+      const errorMessage = err?.message || err?.error?.message || JSON.stringify(error, null, 2);
       addResult(`❌ Test failed: ${errorMessage}`);
       console.error('Test error details:', error);
-      if (error?.error) {
-        console.error('Supabase error:', error.error);
+      if (err?.error) {
+        console.error('Supabase error:', err.error);
       }
     } finally {
       setIsRunning(false);

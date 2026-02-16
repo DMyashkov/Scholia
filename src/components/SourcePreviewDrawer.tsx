@@ -37,8 +37,18 @@ export const SourcePreviewDrawer = ({
   const baseUrl = quote?.pageUrl ?? (quote ? `https://${quote.domain}${quote.pagePath}` : '');
   const baseNoHash = baseUrl ? baseUrl.split('#')[0] : '';
   // Scroll to Text Fragment: highlight and scroll to the quoted snippet on the source page (supported in Chrome, Edge, Safari 16.4+)
-  const openPageUrl = quote && quote.snippet && baseNoHash
-    ? `${baseNoHash}#:~:text=${encodeURIComponent(quote.snippet.slice(0, 100).trim())}`
+  // Use full snippet; truncate at word boundary only if very long (URL limit ~2k, encoded text expands)
+  const textForFragment = (() => {
+    if (!quote?.snippet) return '';
+    const trimmed = quote.snippet.trim();
+    const maxChars = 600; // Leaves room for base URL + encoding overhead
+    if (trimmed.length <= maxChars) return trimmed;
+    const truncated = trimmed.slice(0, maxChars);
+    const lastSpace = truncated.lastIndexOf(' ');
+    return lastSpace > maxChars * 0.5 ? truncated.slice(0, lastSpace) : truncated;
+  })();
+  const openPageUrl = quote && textForFragment && baseNoHash
+    ? `${baseNoHash}#:~:text=${encodeURIComponent(textForFragment)}`
     : baseUrl;
 
   const handleCopy = async () => {

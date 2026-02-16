@@ -1,17 +1,30 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { Send } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
+export type DisableReason = 'no_sources' | 'processing' | 'loading' | 'adding_page' | null;
+
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
   isLoading: boolean;
-  /** When true, send is disabled (e.g. no sources, add-page in progress) */
+  /** When true, send is disabled */
   isDisabled?: boolean;
+  /** Why send is disabled - used for Enter key feedback */
+  disableReason?: DisableReason;
+  /** Called when user presses Enter with no sources - open add source modal */
+  onRequestAddSource?: () => void;
 }
 
-export const ChatInput = ({ onSendMessage, isLoading, isDisabled = false }: ChatInputProps) => {
+export const ChatInput = ({
+  onSendMessage,
+  isLoading,
+  isDisabled = false,
+  disableReason = null,
+  onRequestAddSource,
+}: ChatInputProps) => {
   const [message, setMessage] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -33,6 +46,14 @@ export const ChatInput = ({ onSendMessage, isLoading, isDisabled = false }: Chat
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      if (disabled && disableReason === 'no_sources' && onRequestAddSource) {
+        onRequestAddSource();
+        return;
+      }
+      if (disabled && (disableReason === 'processing' || disableReason === 'loading' || disableReason === 'adding_page')) {
+        toast.info('Wait for processing to finish', { duration: 3000 });
+        return;
+      }
       handleSubmit();
     }
   };

@@ -22,6 +22,8 @@ interface AddSourceModalProps {
     depth: CrawlDepth,
     options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }
   ) => void;
+  /** Optional message to show at top (e.g. "Add source first") */
+  promptMessage?: string | null;
 }
 
 const crawlDepthOptions: { value: CrawlDepth; label: string; description: string; icon: React.ReactNode }[] = [
@@ -32,7 +34,7 @@ const crawlDepthOptions: { value: CrawlDepth; label: string; description: string
 
 const dynamicOption = { value: 'dynamic' as const, label: 'Dynamic', description: '1 page, suggest more on demand', icon: <Zap className="h-4 w-4" /> };
 
-export const AddSourceModal = ({ open, onOpenChange, onAddSource }: AddSourceModalProps) => {
+export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage }: AddSourceModalProps) => {
   const [url, setUrl] = useState('');
   const [depth, setDepth] = useState<CrawlDepth>('shallow');
   const [sameDomainOnly, setSameDomainOnly] = useState(true);
@@ -60,7 +62,7 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource }: AddSourceMod
         <DialogHeader>
           <DialogTitle className="text-xl font-serif">Add Source</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Index a website to enable evidence-backed citations
+            {promptMessage ?? 'Index a website to enable evidence-backed citations'}
           </DialogDescription>
         </DialogHeader>
 

@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
 import { useConversationSources } from '@/hooks/useConversationSources';
+import { useAddPageJob } from '@/hooks/useAddPageJob';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import { useQuery } from '@tanstack/react-query';
 import { Zap } from 'lucide-react';
@@ -37,6 +38,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   });
 
   const { data: conversationSources = [] } = useConversationSources(conversationId);
+  const { data: addPageJob } = useAddPageJob(conversationId ?? null, addingPageSourceId ?? null);
 
   const { data: pages = [], isLoading: pagesLoading, error: pagesError } = useConversationPages(conversationId);
   const { data: edges = [], isLoading: edgesLoading, error: edgesError } = useConversationPageEdges(conversationId);
@@ -85,18 +87,33 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         // Use indexed_count if available, fallback to pages_indexed; prefer actual DB count when we have pages
         const jobIndexed = (crawlJob as any).indexed_count ?? crawlJob.pages_indexed ?? 0;
         pagesIndexed = Math.max(jobIndexed, sourcePages.length);
-        // For dynamic: use actual page count (can grow when user adds pages via "Yes")
+        // For dynamic + add-page: target = current+1 until page is inserted. Once addPageJob is encoding/completed,
+        // the new page is in DB so use sourcePages.length (avoids 2/3 when realtime delivers page before status update).
         const maxPagesForDepth = source.crawlDepth === 'dynamic' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
         if (source.crawlDepth === 'dynamic') {
-          totalPages = sourcePages.length;
+          if (addingPageSourceId === source.id) {
+            const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
+            totalPages = jobDone ? sourcePages.length : sourcePages.length + 1;
+          } else {
+            totalPages = Math.max(sourcePages.length, 1);
+          }
         } else {
           totalPages = maxPagesForDepth;
         }
       } else {
-        // No crawl job yet - assume it's being created, show as crawling
+        // No crawl job: either being created, or add-page flow (edge function, no job)
         status = 'crawling';
-        pagesIndexed = 0;
-        totalPages = 0;
+        pagesIndexed = sourcePages.length;
+        if (source.crawlDepth === 'dynamic') {
+          if (addingPageSourceId === source.id) {
+            const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
+            totalPages = jobDone ? sourcePages.length : sourcePages.length + 1;
+          } else {
+            totalPages = Math.max(sourcePages.length, 1);
+          }
+        } else {
+          totalPages = 1;
+        }
       }
       
       return {
@@ -113,7 +130,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         })),
       };
     });
-  }, [sources, crawlJobMap, pages, addingPageSourceId]);
+  }, [sources, crawlJobMap, pages, addingPageSourceId, addPageJob?.status]);
   
   const crawlingSources = sourcesWithStatus.filter(s => s.status === 'crawling');
   
@@ -136,7 +153,45 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   
   const isCrawling = crawlingSources.length > 0 || !!addingPageSourceId;
   const isIndexingFromJob = displaySources.some(s => crawlJobMap.get(s.id)?.status === 'indexing');
+  const isAddingPageFlow = !!addingPageSourceId && displaySources.some(s => s.id === addingPageSourceId);
+  const addPagePhase = addPageJob?.status;
+  const isAddPageIndexing = addPagePhase === 'indexing';
+  const isAddPageEncoding = addPagePhase === 'encoding';
+  const isAddPageResponding = addPagePhase === 'completed' && !!addingPageSourceId;
   const hasAnySources = sources.length > 0;
+
+  // Five states: Crawling (static) | Adding Page (dynamic add) | Scraping Page (dynamic worker) | Indexing Crawled Pages | Encoding Discovered Pages | Responding (add-page done, chat answering)
+  const indexingJob = displaySources.find(s => crawlJobMap.get(s.id)?.status === 'indexing');
+  const crawlJob = indexingJob ? crawlJobMap.get(indexingJob.id) : null;
+  const isDynamic = displaySources.some(s => s.crawlDepth === 'dynamic');
+  const encChunksDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_done ?? 0) : (crawlJob as any)?.encoding_chunks_done ?? 0;
+  const encChunksTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob as any)?.encoding_chunks_total ?? 0;
+  const encDiscoveredDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob as any)?.encoding_discovered_done ?? 0;
+  const encDiscoveredTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob as any)?.encoding_discovered_total ?? 0;
+  const isIndexingCrawledPages = (isIndexingFromJob || isAddPageEncoding) && encChunksTotal > 0 && encChunksDone < encChunksTotal;
+  const isEncodingDiscoveredPages = (isIndexingFromJob || isAddPageEncoding) && encDiscoveredTotal > 0 && (encChunksDone >= encChunksTotal || encChunksTotal === 0);
+  const combinedEncDone = encChunksDone + encDiscoveredDone;
+  const combinedEncTotal = encChunksTotal + encDiscoveredTotal;
+
+  const statusLabel = (() => {
+    if (isAddPageResponding) return 'Responding…';
+    if (isAddPageIndexing) return 'Adding page…';
+    if (isAddPageEncoding) {
+      if (isIndexingCrawledPages) return 'Indexing Crawled Pages';
+      if (isEncodingDiscoveredPages) return 'Encoding Discovered Pages';
+      return 'Encoding Discovered Pages'; // fallback
+    }
+    if (isIndexingFromJob) {
+      if (isIndexingCrawledPages) return 'Indexing Crawled Pages';
+      if (isEncodingDiscoveredPages) return 'Encoding Discovered Pages';
+      return 'Indexing Crawled Pages'; // fallback
+    }
+    return isDynamic ? 'Scraping Page' : 'Crawling';
+  })();
+  // When adding a page, show progress for ONLY the adding source (avoid 2/3 from multi-source aggregation)
+  const progressSources = isAddingPageFlow && addingPageSourceId
+    ? sourcesWithStatus.filter(s => s.id === addingPageSourceId)
+    : displaySources;
 
   // Get pages for current view - use pages directly from database (already filtered by conversation and status='indexed')
   // Filter by active source if one is selected, then convert to DiscoveredPage format
@@ -227,7 +282,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           {isCrawling && (
             <span className="text-[10px] text-primary flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              {isIndexingFromJob ? 'Indexing…' : 'Crawling'}
+              {statusLabel}
             </span>
           )}
         </div>
@@ -272,7 +327,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           />
           <StatItem 
             label="Indexed" 
-            value={totalIndexed}
+            value={isAddingPageFlow ? progressSources.reduce((s, x) => s + x.pagesIndexed, 0) : totalIndexed}
             highlight={isCrawling && !activeSource}
           />
           <StatItem 
@@ -281,24 +336,38 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           />
         </div>
         
-        {/* Progress bar - use totalPages (target) instead of totalDiscovered */}
-        {isCrawling && !activeSource && (
-          <div className="space-y-1.5">
-            <div className="relative h-0.5 bg-border/30 rounded-full overflow-hidden">
-              <div 
-                className="absolute inset-y-0 left-0 bg-primary/60 rounded-full transition-all duration-300"
-                style={{ width: `${Math.min(100, (totalIndexed / (displaySources.reduce((sum, s) => sum + s.totalPages, 0) || 1)) * 100)}%` }}
+        {/* Single layered progress bar: crawl fill → encoding fill on top. Same behavior as first dynamic page (crawl job indexing). */}
+        {(isCrawling && !activeSource) || isAddingPageFlow ? (
+          <div className="space-y-1">
+            <div className="relative h-1.5 bg-border/30 rounded-full overflow-hidden">
+              {/* Crawl fill: 100% when indexing/encoding phases, else pages progress */}
+              <div
+                className="absolute inset-y-0 left-0 bg-primary/50 rounded-full transition-all duration-300"
+                style={{
+                  width: `${(isIndexingFromJob || isAddPageEncoding) ? 100 : Math.min(100, ((isAddingPageFlow ? progressSources.reduce((s, x) => s + x.pagesIndexed, 0) : totalIndexed) / (progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1)) * 100)}%`,
+                }}
               />
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent animate-shimmer" />
+              {/* Indexing fill: page chunks + discovered links (combined progress) */}
+              {(isIndexingFromJob || isAddPageEncoding) && (() => {
+                const hasEncData = combinedEncTotal > 0;
+                const encPct = hasEncData ? Math.min(100, (combinedEncDone / combinedEncTotal) * 100) : 100;
+                return (
+                  <div
+                    className={cn(
+                      'absolute inset-y-0 left-0 bg-primary rounded-full transition-all duration-500',
+                      !hasEncData && 'animate-pulse opacity-80'
+                    )}
+                    style={{ width: `${encPct}%` }}
+                  />
+                );
+              })()}
+              {/* Shimmer only during fetch phases (crawl/add page), not during indexing */}
+              {!isIndexingFromJob && !isAddPageEncoding && (isCrawling || isAddingPageFlow) && (
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent animate-shimmer" />
+              )}
             </div>
-            {isIndexingFromJob && (
-              <div className="relative h-0.5 bg-border/30 rounded-full overflow-hidden">
-                <div className="absolute inset-y-0 left-0 right-0 bg-amber-500/50 rounded-full animate-pulse" />
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-400/40 to-transparent animate-shimmer" />
-              </div>
-            )}
           </div>
-        )}
+        ) : null}
       </div>
       
       {/* Graph */}

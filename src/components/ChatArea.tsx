@@ -1,9 +1,11 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Conversation } from '@/types/chat';
 import { PanelLeft } from 'lucide-react';
 import { Quote, Source, CrawlDepth } from '@/types/source';
 import { ChatMessage, TypingIndicator } from './ChatMessage';
-import { ChatInput } from './ChatInput';
+import { ChatInput, type DisableReason } from './ChatInput';
+import { useQuery } from '@tanstack/react-query';
+import { crawlJobsApi } from '@/lib/db';
 import { WelcomeScreen } from './WelcomeScreen';
 import { SourcesBar } from './SourcesBar';
 import { AddSourceModal } from './AddSourceModal';
@@ -49,6 +51,59 @@ export const ChatArea = ({
 }: ChatAreaProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [addSourceOpen, setAddSourceOpen] = useState(false);
+  const [addSourcePromptMessage, setAddSourcePromptMessage] = useState<string | null>(null);
+
+  const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
+  const { data: crawlJobsData = [] } = useQuery({
+    queryKey: ['crawl-jobs-for-sources', sourceIds],
+    queryFn: async () => {
+      const jobs = await Promise.all(sourceIds.map(id => crawlJobsApi.listBySource(id)));
+      return jobs.flat();
+    },
+    enabled: sourceIds.length > 0,
+    refetchInterval: (q) => {
+      const jobs = (q.state.data ?? []) as { status?: string }[];
+      const anyActive = jobs.some(j => ['queued', 'running', 'indexing'].includes(j?.status ?? ''));
+      return anyActive ? 2000 : false;
+    },
+  });
+
+  const crawlJobMap = useMemo(() => {
+    const map = new Map<string, (typeof crawlJobsData)[0]>();
+    crawlJobsData.forEach(job => {
+      const existing = map.get(job.source_id);
+      if (!existing || new Date(job.created_at) > new Date(existing.created_at)) {
+        map.set(job.source_id, job);
+      }
+    });
+    return map;
+  }, [crawlJobsData]);
+
+  const hasReadySource = useMemo(() => {
+    if (sources.length === 0) return false;
+    return sources.some(s => {
+      const job = crawlJobMap.get(s.id);
+      return job?.status === 'completed';
+    });
+  }, [sources, crawlJobMap]);
+
+  const { isDisabled: inputDisabled, disableReason } = useMemo((): { isDisabled: boolean; disableReason: DisableReason } => {
+    if (sources.length === 0) return { isDisabled: true, disableReason: 'no_sources' };
+    if (isLoading) return { isDisabled: true, disableReason: 'loading' };
+    if (addingPageSourceId) return { isDisabled: true, disableReason: 'adding_page' };
+    if (!hasReadySource) return { isDisabled: true, disableReason: 'processing' };
+    return { isDisabled: false, disableReason: null };
+  }, [sources.length, isLoading, addingPageSourceId, hasReadySource]);
+
+  const handleRequestAddSource = useCallback(() => {
+    setAddSourcePromptMessage('Add source first');
+    setAddSourceOpen(true);
+  }, []);
+
+  const handleAddSourceOpenChange = useCallback((open: boolean) => {
+    setAddSourceOpen(open);
+    if (!open) setAddSourcePromptMessage(null);
+  }, []);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
@@ -126,7 +181,7 @@ export const ChatArea = ({
         )}
         <SourcesBar
           sources={sources}
-          onAddSource={() => setAddSourceOpen(true)}
+          onAddSource={() => { setAddSourcePromptMessage(null); setAddSourceOpen(true); }}
           onSourceClick={handleSourceChipClick}
           recentlyUsedSourceIds={recentlyUsedSourceIds}
           showSignIn={showSignIn}
@@ -172,27 +227,33 @@ export const ChatArea = ({
                   isStreaming
                 />
               )}
-              {(isLoading && !streamingMessage) || addingPageSourceId ? <TypingIndicator /> : null}
+              {(isLoading && !streamingMessage) || addingPageSourceId ? (
+                <TypingIndicator minimal={!!addingPageSourceId} />
+              ) : null}
             </div>
           </ScrollArea>
           <ChatInput
             onSendMessage={onSendMessage}
             isLoading={isLoading}
-            isDisabled={isLoading || !!addingPageSourceId || sources.length === 0}
+            isDisabled={inputDisabled}
+            disableReason={disableReason}
+            onRequestAddSource={handleRequestAddSource}
           />
         </>
       ) : (
         <>
-          <WelcomeScreen onAddSource={() => setAddSourceOpen(true)} hasSources={sources.length > 0} />
+          <WelcomeScreen onAddSource={() => { setAddSourcePromptMessage(null); setAddSourceOpen(true); }} hasSources={sources.length > 0} />
           {addingPageSourceId && (
             <div className="px-4">
-              <TypingIndicator />
+              <TypingIndicator minimal />
             </div>
           )}
           <ChatInput
             onSendMessage={onSendMessage}
             isLoading={isLoading}
-            isDisabled={isLoading || !!addingPageSourceId || sources.length === 0}
+            isDisabled={inputDisabled}
+            disableReason={disableReason}
+            onRequestAddSource={handleRequestAddSource}
           />
         </>
       )}
@@ -200,8 +261,9 @@ export const ChatArea = ({
       {/* Modals and Drawers */}
       <AddSourceModal
         open={addSourceOpen}
-        onOpenChange={setAddSourceOpen}
+        onOpenChange={handleAddSourceOpenChange}
         onAddSource={handleAddSource}
+        promptMessage={addSourcePromptMessage}
       />
 
       <SourceDrawer

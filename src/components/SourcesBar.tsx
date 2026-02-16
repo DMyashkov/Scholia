@@ -14,6 +14,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { crawlJobsApi } from '@/lib/db/crawl-jobs';
 import { useConversationPages } from '@/hooks/usePages';
+import { useAddPageJob } from '@/hooks/useAddPageJob';
 import { useMemo } from 'react';
 
 interface SourcesBarProps {
@@ -176,6 +177,7 @@ export const SourcesBar = ({
 }: SourcesBarProps) => {
   const hasDynamicSources = sources.some(s => s.crawlDepth === 'dynamic');
   const { data: conversationPages = [] } = useConversationPages(conversationId ?? null);
+  const { data: addPageJob } = useAddPageJob(conversationId ?? null, addingPageSourceId ?? null);
   // Load crawl jobs for all sources to determine real status
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const { data: crawlJobsData = [] } = useQuery({
@@ -217,7 +219,7 @@ export const SourcesBar = ({
       if (crawlJob) {
         if (addingPageSourceId === source.id) {
           status = 'crawling';
-        } else if (crawlJob.status === 'queued' || crawlJob.status === 'running') {
+        } else if (crawlJob.status === 'queued' || crawlJob.status === 'running' || crawlJob.status === 'indexing') {
           status = 'crawling';
         } else if (crawlJob.status === 'failed') {
           status = 'error';
@@ -230,15 +232,29 @@ export const SourcesBar = ({
         pagesIndexed = Math.max(jobIndexed, sourcePages.length);
         const maxPagesForDepth = source.crawlDepth === 'dynamic' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
         if (source.crawlDepth === 'dynamic') {
-          totalPages = sourcePages.length;
+          if (addingPageSourceId === source.id) {
+            const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
+            totalPages = jobDone ? sourcePages.length : sourcePages.length + 1;
+          } else {
+            totalPages = Math.max(sourcePages.length, 1);
+          }
         } else {
           totalPages = maxPagesForDepth;
         }
       } else {
-        // No crawl job yet - assume it's being created, show as crawling
+        // No crawl job: being created or add-page flow (edge function)
         status = 'crawling';
         pagesIndexed = sourcePages.length || 0;
-        totalPages = source.crawlDepth === 'dynamic' ? sourcePages.length : 0;
+        if (source.crawlDepth === 'dynamic') {
+          if (addingPageSourceId === source.id) {
+            const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
+            totalPages = jobDone ? sourcePages.length : sourcePages.length + 1;
+          } else {
+            totalPages = Math.max(sourcePages.length, 1);
+          }
+        } else {
+          totalPages = 0;
+        }
       }
       
       return {
@@ -248,7 +264,7 @@ export const SourcesBar = ({
         totalPages,
       };
     });
-  }, [sources, crawlJobMap, conversationPages, addingPageSourceId]);
+  }, [sources, crawlJobMap, conversationPages, addingPageSourceId, addPageJob?.status]);
   
   if (sources.length === 0) {
     return (

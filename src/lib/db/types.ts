@@ -68,6 +68,10 @@ export interface CrawlJob {
   started_at: string | null;
   completed_at: string | null;
   last_activity_at?: string | null;
+  encoding_chunks_done?: number | null;
+  encoding_chunks_total?: number | null;
+  encoding_discovered_done?: number | null;
+  encoding_discovered_total?: number | null;
   created_at: string;
   updated_at: string;
   owner_id: string | null;
@@ -138,4 +142,18 @@ export type CrawlJobInsert = Omit<CrawlJob, 'id' | 'created_at' | 'updated_at' |
   owner_id?: string | null;
 };
 
+export interface AddPageJob {
+  id: string;
+  conversation_id: string;
+  source_id: string;
+  url: string;
+  status: 'indexing' | 'encoding' | 'completed' | 'failed';
+  error_message: string | null;
+  encoding_chunks_done?: number | null;
+  encoding_chunks_total?: number | null;
+  encoding_discovered_done?: number | null;
+  encoding_discovered_total?: number | null;
+  created_at: string;
+  updated_at: string;
+}
 

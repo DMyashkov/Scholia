@@ -13,17 +13,29 @@ interface CrawlStatsProps {
   connectionsFound: number;
   isCrawling: boolean;
   isIndexing?: boolean;
+  encodingChunksDone?: number;
+  encodingChunksTotal?: number;
+  encodingDiscoveredDone?: number;
+  encodingDiscoveredTotal?: number;
 }
 
-export const CrawlStats = ({ 
-  pagesDiscovered, 
-  pagesIndexed, 
+export const CrawlStats = ({
+  pagesDiscovered,
+  pagesIndexed,
   targetPages,
   connectionsFound,
   isCrawling,
   isIndexing = false,
+  encodingChunksDone = 0,
+  encodingChunksTotal = 0,
+  encodingDiscoveredDone = 0,
+  encodingDiscoveredTotal = 0,
 }: CrawlStatsProps) => {
-  const progressPercent = targetPages > 0 ? Math.min(100, (pagesIndexed / targetPages) * 100) : 0;
+  const crawlProgressPercent = targetPages > 0 ? Math.min(100, (pagesIndexed / targetPages) * 100) : 0;
+  const combinedEncDone = encodingChunksDone + encodingDiscoveredDone;
+  const combinedEncTotal = encodingChunksTotal + encodingDiscoveredTotal;
+  const encodingPercent = combinedEncTotal > 0 ? Math.min(100, (combinedEncDone / combinedEncTotal) * 100) : 0;
+
   return (
     <div className="space-y-3">
       {/* Stats grid */}
@@ -32,8 +44,8 @@ export const CrawlStats = ({
           <Tooltip>
             <TooltipTrigger asChild>
               <div>
-                <StatItem 
-                  label="Discovered" 
+                <StatItem
+                  label="Discovered"
                   value={pagesDiscovered}
                   highlight={isCrawling}
                 />
@@ -46,8 +58,8 @@ export const CrawlStats = ({
           <Tooltip>
             <TooltipTrigger asChild>
               <div>
-                <StatItem 
-                  label="Indexed" 
+                <StatItem
+                  label="Indexed"
                   value={pagesIndexed}
                   highlight={isCrawling}
                 />
@@ -60,8 +72,8 @@ export const CrawlStats = ({
           <Tooltip>
             <TooltipTrigger asChild>
               <div>
-                <StatItem 
-                  label="Connections" 
+                <StatItem
+                  label="Connections"
                   value={connectionsFound}
                 />
               </div>
@@ -72,24 +84,31 @@ export const CrawlStats = ({
           </Tooltip>
         </div>
       </TooltipProvider>
-      
-      {/* Crawling activity indicator - same formula as SidebarCrawlPanel: indexed/target */}
+
+      {/* Single layered progress bar: crawl fill (primary) → encoding fill (darker) on top */}
       {(isCrawling || isIndexing) && targetPages > 0 && (
-        <div className="space-y-1.5">
-          <div className="relative h-0.5 bg-border/30 rounded-full overflow-hidden">
-            <div 
-              className="absolute inset-y-0 left-0 bg-primary/60 rounded-full animate-crawl-progress"
-              style={{ width: `${isIndexing ? 100 : progressPercent}%` }}
+        <div className="space-y-1">
+          <div className="relative h-1.5 bg-border/30 rounded-full overflow-hidden">
+            {/* Crawl fill - primary, becomes baseline when encoding starts */}
+            <div
+              className="absolute inset-y-0 left-0 bg-primary/50 rounded-full transition-all duration-300"
+              style={{ width: `${isIndexing ? 100 : crawlProgressPercent}%` }}
             />
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent animate-shimmer" />
+            {/* Encoding fill - page chunks + discovered links (combined). Indeterminate when no data. */}
+            {isIndexing && (
+              <div
+                className={cn(
+                  'absolute inset-y-0 left-0 bg-primary rounded-full transition-all duration-500',
+                  combinedEncTotal === 0 && 'animate-pulse opacity-80'
+                )}
+                style={{ width: `${combinedEncTotal > 0 ? encodingPercent : 100}%` }}
+              />
+            )}
+            {/* Shimmer only during crawl */}
+            {isCrawling && !isIndexing && (
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent animate-shimmer" />
+            )}
           </div>
-          {/* Indexing bar - shown when crawl done but RAG indexing in progress */}
-          {isIndexing && (
-            <div className="relative h-0.5 bg-border/30 rounded-full overflow-hidden">
-              <div className="absolute inset-y-0 left-0 right-0 bg-amber-500/50 rounded-full animate-pulse" />
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-400/40 to-transparent animate-shimmer" />
-            </div>
-          )}
         </div>
       )}
     </div>

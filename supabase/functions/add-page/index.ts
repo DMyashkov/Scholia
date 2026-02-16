@@ -19,8 +19,13 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  let parsedBody: { conversationId?: string; sourceId?: string; url?: string } | undefined;
+  let jobId: string | undefined;
+  let supabaseClient: ReturnType<typeof createClient> | undefined;
+
   try {
-    const body = (await req.json()) as { conversationId?: string; sourceId?: string; url?: string };
+    parsedBody = (await req.json()) as { conversationId?: string; sourceId?: string; url?: string };
+    const body = parsedBody;
     const { conversationId, sourceId, url } = body;
     console.log('[add-page] request', { conversationId, sourceId, url });
 
@@ -43,9 +48,10 @@ Deno.serve(async (req) => {
 
     const authHeader = req.headers.get('Authorization');
     console.log('[add-page] auth:', { hasHeader: !!authHeader });
-    const supabase = createClient(supabaseUrl, supabaseKey, {
+    supabaseClient = createClient(supabaseUrl, supabaseKey, {
       global: { headers: authHeader ? { Authorization: authHeader } : {} },
     });
+    const supabase = supabaseClient;
 
     // Normalize URL: strip fragment, query, strip protocol then add https (matches client urlUtils)
     let s = (url || '').trim();
@@ -86,12 +92,45 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Create add_page_job so frontend can show indexing → encoding status
+    const { data: job, error: jobErr } = await supabase
+      .from('add_page_jobs')
+      .insert({ conversation_id: conversationId, source_id: sourceId, url: normalizedUrl, status: 'indexing' })
+      .select('id')
+      .single();
+    if (jobErr) {
+      console.warn('[add-page] failed to create add_page_job:', jobErr.message);
+    }
+    jobId = job?.id;
+
+    const updateJobStatus = async (
+      status: string,
+      errMsg?: string,
+      encChunksDone?: number,
+      encChunksTotal?: number,
+      encDiscoveredDone?: number,
+      encDiscoveredTotal?: number
+    ) => {
+      if (!jobId) return;
+      const updates: Record<string, unknown> = {
+        status,
+        error_message: errMsg ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      if (encChunksTotal != null) updates.encoding_chunks_total = encChunksTotal;
+      if (encChunksDone != null) updates.encoding_chunks_done = encChunksDone;
+      if (encDiscoveredTotal != null) updates.encoding_discovered_total = encDiscoveredTotal;
+      if (encDiscoveredDone != null) updates.encoding_discovered_done = encDiscoveredDone;
+      await supabase.from('add_page_jobs').update(updates).eq('id', jobId);
+    };
+
     // Fetch page
     const res = await fetch(normalizedUrl, {
       headers: { 'User-Agent': 'ScholiaCrawler/1.0' },
     });
     if (!res.ok) {
       console.error('[add-page] fetch failed', res.status);
+      await updateJobStatus('failed', `Failed to fetch: HTTP ${res.status}`);
       return new Response(
         JSON.stringify({ error: `Failed to fetch: HTTP ${res.status}` }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -155,6 +194,7 @@ Deno.serve(async (req) => {
 
     if (insertErr) {
       console.error('[add-page] page insert error:', insertErr.code, insertErr.message);
+      await updateJobStatus('failed', insertErr.message);
       return new Response(
         JSON.stringify({ error: insertErr.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -177,10 +217,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Chunk and embed
+    // Chunk and embed (report encoding progress like worker indexer)
     const chunks = chunkText(content, CHUNK_MAX_CHARS, CHUNK_OVERLAP_CHARS);
     console.log('[add-page] chunks:', chunks.length);
     if (chunks.length > 0) {
+      await updateJobStatus('encoding', undefined, 0, chunks.length, undefined, undefined);
       const embeddings = await embedBatch(openaiKey, chunks);
       const rows = chunks.slice(0, embeddings.length).map((content, i) => ({
         page_id: newPage.id,
@@ -190,10 +231,15 @@ Deno.serve(async (req) => {
         embedding: embeddings[i],
         owner_id: ownerId,
       }));
+      let inserted = 0;
       for (let i = 0; i < rows.length; i += EMBED_BATCH_SIZE) {
         const batch = rows.slice(i, i + EMBED_BATCH_SIZE);
         await supabase.from('chunks').insert(batch);
+        inserted += batch.length;
+        await updateJobStatus('encoding', undefined, inserted, chunks.length, undefined, undefined);
       }
+    } else {
+      await updateJobStatus('encoding');
     }
 
     // Populate discovered_links from new page (for future suggestions)
@@ -227,26 +273,39 @@ Deno.serve(async (req) => {
         ignoreDuplicates: true,
       });
       if (!dlErr && toInsert.length > 0) {
-        const { data: newLinks } = await supabase
+        const { data: linksToEmbed } = await supabase
           .from('discovered_links')
           .select('id, context_snippet')
           .eq('conversation_id', conversationId)
           .eq('from_page_id', newPage.id)
           .is('embedding', null);
-        if (newLinks?.length) {
-          const snippets = newLinks.map((l) => l.context_snippet);
+        if (linksToEmbed?.length) {
+          const total = linksToEmbed.length;
+          await updateJobStatus('encoding', undefined, undefined, undefined, 0, total);
+          const snippets = linksToEmbed.map((l) => l.context_snippet);
           const linkEmbs = await embedBatch(openaiKey, snippets);
-          for (let i = 0; i < newLinks.length && i < linkEmbs.length; i++) {
+          const DISCOVERED_BATCH = 25;
+          let done = 0;
+          for (let i = 0; i < linksToEmbed.length && i < linkEmbs.length; i++) {
             await supabase
               .from('discovered_links')
               .update({ embedding: linkEmbs[i] })
-              .eq('id', newLinks[i].id);
+              .eq('id', linksToEmbed[i].id);
+            done++;
+            if (done % DISCOVERED_BATCH === 0) {
+              await updateJobStatus('encoding', undefined, undefined, undefined, done, total);
+            }
+          }
+          if (done > 0) {
+            await updateJobStatus('encoding', undefined, undefined, undefined, done, total);
           }
         }
       }
     }
 
     console.log('[add-page] success, page id:', newPage.id);
+    await updateJobStatus('completed');
+
     return new Response(
       JSON.stringify({
         page: newPage,
@@ -256,8 +315,14 @@ Deno.serve(async (req) => {
     );
   } catch (e) {
     console.error('[add-page] unhandled error:', e);
+    const errMsg = e instanceof Error ? e.message : String(e);
+    try {
+      if (jobId && supabaseClient) {
+        await supabaseClient.from('add_page_jobs').update({ status: 'failed', error_message: errMsg, updated_at: new Date().toISOString() }).eq('id', jobId);
+      }
+    } catch (_) { /* ignore */ }
     return new Response(
-      JSON.stringify({ error: (e as Error).message }),
+      JSON.stringify({ error: errMsg }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

@@ -17,6 +17,7 @@ import { CrawlStats } from './CrawlStats';
 import { useMemo } from 'react';
 import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
+import { useAddPageJob } from '@/hooks/useAddPageJob';
 import { useQuery } from '@tanstack/react-query';
 // MAX_PAGES defined inline
 
@@ -30,12 +31,19 @@ interface SourceDrawerProps {
   addingPageSourceId?: string | null;
 }
 
-const getStatusBadge = (status: Source['status']) => {
+const getStatusBadge = (
+  status: Source['status'],
+  statusLabel: string
+) => {
   switch (status) {
     case 'ready':
       return <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30">Ready</Badge>;
     case 'crawling':
-      return <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30">Crawling</Badge>;
+      return (
+        <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30">
+          {statusLabel}
+        </Badge>
+      );
     case 'error':
       return <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/30">Error</Badge>;
     case 'outdated':
@@ -96,6 +104,8 @@ export const SourceDrawer = ({
     },
   });
 
+  const { data: addPageJob } = useAddPageJob(conversationId ?? null, addingPageSourceId === source?.id ? source?.id ?? null : null);
+
   const crawlJob = useMemo(() => {
     if (!crawlJobsData.length) return null;
     return crawlJobsData.sort((a, b) =>
@@ -114,7 +124,19 @@ export const SourceDrawer = ({
     return source.status || 'crawling';
   }, [source, crawlJob, addingPageSourceId]);
 
-  const isIndexing = crawlJob?.status === 'indexing';
+  const isIndexing = crawlJob?.status === 'indexing' || addPageJob?.status === 'encoding';
+  const isAddPageIndexing = addingPageSourceId === source?.id && addPageJob?.status === 'indexing';
+  const isAddPageEncoding = addingPageSourceId === source?.id && addPageJob?.status === 'encoding';
+  const isAddPageResponding = addingPageSourceId === source?.id && addPageJob?.status === 'completed';
+  const encChunksDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_done ?? 0) : ((crawlJob as any)?.encoding_chunks_done ?? 0);
+  const encChunksTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_total ?? 0) : ((crawlJob as any)?.encoding_chunks_total ?? 0);
+  const encDiscoveredDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_done ?? 0) : ((crawlJob as any)?.encoding_discovered_done ?? 0);
+  const encDiscoveredTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_total ?? 0) : ((crawlJob as any)?.encoding_discovered_total ?? 0);
+  const isIndexingCrawled = encChunksTotal > 0 && encChunksDone < encChunksTotal;
+  const isEncodingDiscovered = encDiscoveredTotal > 0 && (encChunksDone >= encChunksTotal || encChunksTotal === 0);
+  const statusLabel = isAddPageResponding ? 'Responding…' : isAddPageIndexing ? 'Adding page…' : isAddPageEncoding || isIndexing
+    ? (isIndexingCrawled ? 'Indexing Crawled Pages' : isEncodingDiscovered ? 'Encoding Discovered Pages' : 'Indexing Crawled Pages')
+    : (source?.crawlDepth === 'dynamic' ? 'Scraping Page' : 'Crawling');
 
   // Use the conversation that ran the crawl so we get the right pages/edges (can differ from active conversation)
   const graphConversationId = crawlJob?.conversation_id ?? conversationId;
@@ -164,9 +186,15 @@ export const SourceDrawer = ({
   
   const maxPagesForDepth = useMemo(() => {
     if (!source) return 0;
-    if (source.crawlDepth === 'dynamic') return Math.max(1, sourcePages.length);
+    if (source.crawlDepth === 'dynamic') {
+      if (addingPageSourceId === source.id) {
+        const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
+        return jobDone ? sourcePages.length : sourcePages.length + 1;
+      }
+      return Math.max(sourcePages.length, 1);
+    }
     return source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
-  }, [source?.crawlDepth, sourcePages.length]);
+  }, [source?.crawlDepth, source?.id, sourcePages.length, addingPageSourceId, addPageJob?.status]);
 
   const connectionsFound = sourceEdges.length;
 
@@ -205,7 +233,7 @@ export const SourceDrawer = ({
               </div>
 
               <div className="flex items-center gap-2 mt-4">
-                {getStatusBadge(realStatus)}
+                {getStatusBadge(realStatus, statusLabel)}
                 <span className="text-xs text-muted-foreground">
                   {pagesIndexed}/{maxPagesForDepth} pages
                 </span>
@@ -220,6 +248,10 @@ export const SourceDrawer = ({
                 connectionsFound={connectionsFound}
                 isCrawling={realStatus === 'crawling'}
                 isIndexing={isIndexing}
+                encodingChunksDone={encChunksDone}
+                encodingChunksTotal={encChunksTotal}
+                encodingDiscoveredDone={encDiscoveredDone}
+                encodingDiscoveredTotal={encDiscoveredTotal}
               />
 
               <div className="space-y-2">

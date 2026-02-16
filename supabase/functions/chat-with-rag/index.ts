@@ -730,7 +730,7 @@ Output a JSON object with this structure only (no other text):
 {"content":"your answer in markdown with inline citations","quotes":[{"snippet":"verbatim passage","pageId":"uuid","ref":1}]}
 
 Rules:
-- Use INLINE numbered citations: place [1], [2], [3] etc. immediately after each claim. Format: "Statement [1]. Another fact [2]." Every quote MUST have a matching [n] in the content—if you have 4 quotes, the content must include [1], [2], [3], [4].
+- Use INLINE numbered citations: place [1], [2], [3] etc. immediately after EACH claim. Format: "Statement [1]. Another fact [2]." You MUST add a citation marker after every factual claim. If you have 4 quotes, the content must include [1], [2], [3], [4]—one after each claim, not just [1] at the end. Never cite only once for multiple claims.
 - Each quote MUST include "ref" (1-based number) matching its citation: the quote that supports [3] in the text must have "ref":3.
 - The snippet you cite MUST DIRECTLY support the claim. If you state "there is a museum," the snippet must explicitly mention a museum—not just a related term like "Hall of Fame" unless the context clearly equates them.
 - NEVER cite meta-statements as evidence. Do NOT add a quote when your answer is "The context does not include...", "The provided context does not mention...", or similar—these are YOUR words, not from the source. Only cite verbatim passages from the context. When the context lacks information, say so clearly but leave "quotes" empty or omit that part.
@@ -790,12 +790,17 @@ Rules:
     resolved.sort((a, b) => (a.ref ?? 999) - (b.ref ?? 999));
   }
   parsed.quotes = resolved.map(({ snippet, pageId }) => ({ snippet, pageId }));
-  // If we have quotes but content lacks citation markers, append them so evidence cards are linkable
+  // Ensure every quote has a matching [n] in content. If model omits some, append missing markers.
   if (resolved.length > 0 && parsed.content) {
-    const hasAnyRef = /\[\d+\]/.test(parsed.content);
-    if (!hasAnyRef) {
-      const markers = resolved.map((_, i) => `[${i + 1}]`).join(' ');
-      parsed.content = parsed.content.trimEnd() + ' ' + markers;
+    const refsInContent = new Set<number>();
+    const refMatch = parsed.content.matchAll(/\[(\d+)\]/g);
+    for (const m of refMatch) refsInContent.add(parseInt(m[1], 10));
+    const missing = [];
+    for (let i = 1; i <= resolved.length; i++) {
+      if (!refsInContent.has(i)) missing.push(`[${i}]`);
+    }
+    if (missing.length > 0) {
+      parsed.content = parsed.content.trimEnd() + ' ' + missing.join(' ');
     }
   }
   return parsed;

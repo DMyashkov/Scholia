@@ -460,7 +460,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
     .eq('id', job.id);
 
   try {
-    await indexConversationForRag(conversationId);
+    await indexConversationForRag(conversationId, job.id);
   } catch (_indexErr) {
     console.warn('[crawl] RAG indexing failed:', _indexErr);
   }

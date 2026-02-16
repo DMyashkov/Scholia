@@ -366,7 +366,26 @@ function IndexSuggestionCard({
   );
 }
 
-export const TypingIndicator = () => {
+interface TypingIndicatorProps {
+  /** When true, show only three dots (no icon/name). Used when adding suggested page + waiting for answer. */
+  minimal?: boolean;
+}
+
+export const TypingIndicator = ({ minimal = false }: TypingIndicatorProps) => {
+  if (minimal) {
+    return (
+      <div className="flex gap-4 px-4 py-3 bg-chat-assistant animate-fade-in">
+        <div className="max-w-3xl mx-auto w-full flex gap-4">
+          <div className="shrink-0 w-8" aria-hidden />
+          <div className="flex gap-1">
+            <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+            <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+            <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex gap-4 px-4 py-6 bg-chat-assistant animate-fade-in">
       <div className="max-w-3xl mx-auto w-full flex gap-4">

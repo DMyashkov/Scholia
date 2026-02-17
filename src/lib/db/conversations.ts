@@ -2,19 +2,12 @@ import { supabase } from '@/lib/supabase';
 import type { Conversation, ConversationInsert } from './types';
 
 export const conversationsApi = {
-  async list(userId: string | null) {
-    const query = supabase
+  async list(userId: string) {
+    const { data, error } = await supabase
       .from('conversations')
       .select('*')
+      .eq('owner_id', userId)
       .order('updated_at', { ascending: false });
-
-    if (userId) {
-      query.eq('owner_id', userId);
-    } else {
-      query.is('owner_id', null);
-    }
-
-    const { data, error } = await query;
     if (error) throw error;
     return data as Conversation[];
   },
@@ -31,11 +24,11 @@ export const conversationsApi = {
   },
 
   async create(conversation: ConversationInsert) {
-    // Get current user to set owner_id explicitly
     const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Authentication required');
     const insertData = {
       ...conversation,
-      owner_id: user?.id || null,
+      owner_id: user.id,
     };
 
     const { data, error } = await supabase
@@ -76,12 +69,10 @@ export const conversationsApi = {
       throw new Error('Conversation not found');
     }
 
-    // Get current user
     const { data: { user } } = await supabase.auth.getUser();
-    const currentUserId = user?.id || null;
+    if (!user) throw new Error('Authentication required');
 
-    // Check if user has permission
-    if (existing.owner_id !== currentUserId && existing.owner_id !== null) {
+    if (existing.owner_id !== user.id) {
       console.error('Permission denied:', { 
         conversationOwnerId: existing.owner_id, 
         currentUserId 
@@ -103,21 +94,18 @@ export const conversationsApi = {
     
     // If no rows were deleted, RLS blocked it
     if (!data || data.length === 0) {
-      console.error('RLS policy blocked deletion. Conversation owner_id:', existing.owner_id, 'Current user:', currentUserId);
+      console.error('RLS policy blocked deletion. Conversation owner_id:', existing.owner_id, 'Current user:', user.id);
       throw new Error('Failed to delete conversation. RLS policy may be blocking deletion. Please check your database policies.');
     }
   },
 
   async deleteAll() {
     const { data: { user } } = await supabase.auth.getUser();
-    const currentUserId = user?.id ?? null;
-    let query = supabase.from('conversations').delete();
-    if (currentUserId) {
-      query = query.eq('owner_id', currentUserId);
-    } else {
-      query = query.is('owner_id', null);
-    }
-    const { error } = await query;
+    if (!user) throw new Error('Authentication required');
+    const { error } = await supabase
+      .from('conversations')
+      .delete()
+      .eq('owner_id', user.id);
     if (error) throw error;
   },
 };

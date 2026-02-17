@@ -70,7 +70,7 @@ export const SourcePreviewDrawer = ({
       {quote && (
       <SheetContent 
         side="right" 
-        className="w-full sm:max-w-lg bg-card border-l border-border p-0 flex flex-col h-[100dvh] max-h-[100dvh] overflow-hidden"
+        className="w-full sm:max-w-lg bg-card border-l border-border p-0 flex flex-col gap-0 h-[100dvh] max-h-[100dvh] overflow-hidden"
       >
         {/* Header with prominent page info */}
         <SheetHeader className="p-6 pb-4 border-b border-border/50 shrink-0">

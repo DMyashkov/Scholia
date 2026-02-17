@@ -1,6 +1,6 @@
 export interface Conversation {
   id: string;
-  owner_id: string | null;
+  owner_id: string;
   title: string;
   dynamic_mode: boolean;
   created_at: string;
@@ -25,7 +25,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   created_at: string;
-  owner_id: string | null;
+  owner_id: string;
   quotes?: MessageQuote[] | null;
   was_multi_step?: boolean;
   follows_message_id?: string | null;
@@ -34,7 +34,7 @@ export interface Message {
 
 export interface Source {
   id: string;
-  owner_id: string | null;
+  owner_id: string;
   url: string;
   domain: string;
   source_label?: string | null; // Human-readable label from first page (e.g. "Joe Biden"). domain = hostname.
@@ -75,7 +75,7 @@ export interface CrawlJob {
   seed_urls?: string[] | null;
   created_at: string;
   updated_at: string;
-  owner_id: string | null;
+  owner_id: string;
 }
 
 export interface Page {
@@ -89,7 +89,7 @@ export interface Page {
   status: 'pending' | 'crawling' | 'indexed' | 'error';
   created_at: string;
   updated_at: string;
-  owner_id: string | null;
+  owner_id: string;
 }
 
 export interface PageEdge {
@@ -101,7 +101,7 @@ export interface PageEdge {
   from_url?: string | null;
   to_url?: string | null;
   created_at: string;
-  owner_id: string | null;
+  owner_id: string;
 }
 
 export interface Chunk {
@@ -112,7 +112,7 @@ export interface Chunk {
   end_index: number | null;
   embedding: number[] | null;
   created_at: string;
-  owner_id: string | null;
+  owner_id: string;
 }
 
 export interface Citation {
@@ -123,7 +123,7 @@ export interface Citation {
   source_id: string;
   snippet: string;
   created_at: string;
-  owner_id: string | null;
+  owner_id: string;
 }
 
 // Insert types (omitting auto-generated fields)

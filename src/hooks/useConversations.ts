@@ -8,8 +8,8 @@ export const useConversations = () => {
 
   return useQuery({
     queryKey: ['conversations', userId],
-    queryFn: () => conversationsApi.list(userId),
-    enabled: true, // Works for both authenticated and guest
+    queryFn: () => conversationsApi.list(userId!),
+    enabled: !!userId,
   });
 };
 
@@ -30,8 +30,10 @@ export const useCreateConversation = () => {
   const userId = user?.id || null;
 
   return useMutation({
-    mutationFn: (title?: string) =>
-      conversationsApi.create({ title: title || 'New Research' }),
+    mutationFn: (title?: string) => {
+      if (!userId) throw new Error('Authentication required');
+      return conversationsApi.create({ title: title || 'New Research', dynamic_mode: true });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['conversations', userId] });
     },

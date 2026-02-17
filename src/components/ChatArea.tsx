@@ -27,6 +27,8 @@ interface ChatAreaProps {
   onToggleSidebar?: () => void;
   showSignIn?: boolean;
   onSignIn?: () => void;
+  /** Called when a guest tries to add a source or start a conversation */
+  onGuestRequired?: () => void;
   onDynamicModeChange?: (enabled: boolean) => void;
   onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string) => Promise<void>;
   addingPageSourceId?: string | null;
@@ -45,6 +47,7 @@ export const ChatArea = ({
   onToggleSidebar,
   showSignIn,
   onSignIn,
+  onGuestRequired,
   onDynamicModeChange,
   onAddSuggestedPage,
   addingPageSourceId,
@@ -91,10 +94,18 @@ export const ChatArea = ({
     return { isDisabled: false, disableReason: null };
   }, [sources.length, isLoading, addingPageSourceId, hasReadySource]);
 
-  const handleRequestAddSource = useCallback(() => {
-    setAddSourcePromptMessage('Add source first');
+  const openAddSourceModal = useCallback((promptMessage: string | null) => {
+    if (showSignIn && onGuestRequired) {
+      onGuestRequired();
+      return;
+    }
+    setAddSourcePromptMessage(promptMessage);
     setAddSourceOpen(true);
-  }, []);
+  }, [showSignIn, onGuestRequired]);
+
+  const handleRequestAddSource = useCallback(() => {
+    openAddSourceModal('Add source first');
+  }, [openAddSourceModal]);
 
   const handleAddSourceOpenChange = useCallback((open: boolean) => {
     setAddSourceOpen(open);
@@ -177,7 +188,7 @@ export const ChatArea = ({
         )}
         <SourcesBar
           sources={sources}
-          onAddSource={() => { setAddSourcePromptMessage(null); setAddSourceOpen(true); }}
+          onAddSource={() => openAddSourceModal(null)}
           onSourceClick={handleSourceChipClick}
           recentlyUsedSourceIds={recentlyUsedSourceIds}
           showSignIn={showSignIn}
@@ -238,7 +249,7 @@ export const ChatArea = ({
         </>
       ) : (
         <>
-          <WelcomeScreen onAddSource={() => { setAddSourcePromptMessage(null); setAddSourceOpen(true); }} hasSources={sources.length > 0} />
+          <WelcomeScreen onAddSource={() => openAddSourceModal(null)} hasSources={sources.length > 0} />
           {addingPageSourceId && (
             <div className="px-4">
               <TypingIndicator minimal />

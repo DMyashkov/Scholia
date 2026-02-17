@@ -15,12 +15,12 @@ export interface CrawlJob {
   seed_urls?: string[] | null;
   created_at: string;
   updated_at: string;
-  owner_id: string | null;
+  owner_id: string;
 }
 
 export interface Source {
   id: string;
-  owner_id: string | null;
+  owner_id: string;
   url: string;
   domain: string;
   favicon: string | null;
@@ -43,7 +43,7 @@ export interface Page {
   status: 'pending' | 'crawling' | 'indexed' | 'error';
   created_at: string;
   updated_at: string;
-  owner_id: string | null;
+  owner_id: string;
 }
 
 export interface PageEdge {
@@ -55,5 +55,5 @@ export interface PageEdge {
   from_page_id?: string | null; // Optional now
   to_page_id?: string | null; // Optional now
   created_at: string;
-  owner_id: string | null;
+  owner_id: string;
 }

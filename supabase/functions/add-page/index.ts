@@ -34,6 +34,14 @@ Deno.serve(async (req) => {
     });
     const supabase = supabaseClient;
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return new Response(
+        JSON.stringify({ error: 'Authentication required' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Normalize URL (matches worker addPageProcessor)
     let s = (url || '').trim();
     const hashIdx = s.indexOf('#');

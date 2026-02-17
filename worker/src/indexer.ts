@@ -35,7 +35,7 @@ export async function indexConversationForRag(
     return { chunksCreated: 0 };
   }
 
-  const chunkSpecs: { page_id: string; content: string; start_index: number | null; end_index: number | null; owner_id: string | null }[] = [];
+  const chunkSpecs: { page_id: string; content: string; start_index: number | null; end_index: number | null; owner_id: string }[] = [];
 
   for (const page of pages) {
     const text = (page.content || '').trim();
@@ -47,7 +47,7 @@ export async function indexConversationForRag(
         content,
         start_index: null,
         end_index: null,
-        owner_id: page.owner_id ?? null,
+        owner_id: page.owner_id,
       });
     }
   }
@@ -108,7 +108,7 @@ export async function indexConversationForRag(
 export async function indexSinglePageForRag(
   pageId: string,
   content: string,
-  ownerId: string | null,
+  ownerId: string,
   addPageJobId: string
 ): Promise<{ chunksCreated: number }> {
   const apiKey = process.env.OPENAI_API_KEY;

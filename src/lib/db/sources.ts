@@ -2,19 +2,12 @@ import { supabase } from '@/lib/supabase';
 import type { Source, SourceInsert } from './types';
 
 export const sourcesApi = {
-  async list(userId: string | null) {
-    const query = supabase
+  async list(userId: string) {
+    const { data, error } = await supabase
       .from('sources')
       .select('*')
+      .eq('owner_id', userId)
       .order('created_at', { ascending: false });
-
-    if (userId) {
-      query.eq('owner_id', userId);
-    } else {
-      query.is('owner_id', null);
-    }
-
-    const { data, error } = await query;
     if (error) throw error;
     return data as Source[];
   },
@@ -31,9 +24,12 @@ export const sourcesApi = {
   },
 
   async create(source: SourceInsert) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Authentication required');
+    const insertData = { ...source, owner_id: user.id };
     const { data, error } = await supabase
       .from('sources')
-      .insert(source)
+      .insert(insertData)
       .select()
       .single();
 

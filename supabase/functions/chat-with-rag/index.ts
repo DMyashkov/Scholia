@@ -93,6 +93,12 @@ Deno.serve(async (req) => {
       global: { headers: authHeader ? { Authorization: authHeader } : {} },
     });
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      await emit({ error: 'Authentication required' });
+      return;
+    }
+
     const { data: pages, error: pagesError } = await supabase
       .from('pages')
       .select('id, source_id, title, path, url')
@@ -308,7 +314,11 @@ Deno.serve(async (req) => {
       .select('owner_id, dynamic_mode')
       .eq('id', conversationId)
       .single();
-    const ownerId = conv?.owner_id ?? null;
+    if (!conv) {
+      await emit({ error: 'Conversation not found' });
+      return;
+    }
+    const ownerId = conv.owner_id;
 
     let logReason = '1 round';
     if (didSecondRound) logReason = '2 rounds (decomposition + extraction + round2 queries)';
@@ -390,7 +400,7 @@ Deno.serve(async (req) => {
           page_id: q.pageId,
           source_id: q.sourceId,
           snippet: q.snippet,
-          owner_id: conv?.owner_id ?? null,
+          owner_id: ownerId,
         });
           }
     }

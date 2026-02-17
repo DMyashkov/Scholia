@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatArea } from '@/components/ChatArea';
+import { GuestModeRequiredModal } from '@/components/GuestModeRequiredModal';
 import { useChatDatabase } from '@/hooks/useChatDatabase';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useSidebarWidth } from '@/hooks/useSidebarWidth';
@@ -26,6 +27,7 @@ const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isResizing, setIsResizing] = useState(false);
   const [addingPageSourceId, setAddingPageSourceId] = useState<string | null>(null);
+  const [guestModeModalOpen, setGuestModeModalOpen] = useState(false);
   const resizeRef = useRef<{ startX: number; startWidth: number; lastWidth?: number } | null>(null);
   
   const {
@@ -92,11 +94,31 @@ const Index = () => {
     };
   }, [isResizing, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, saveWidth, setSidebarWidth]);
 
+  const handleNewChatClick = useCallback(() => {
+    if (!user) {
+      setGuestModeModalOpen(true);
+      return;
+    }
+    createNewConversation();
+  }, [user, createNewConversation]);
+
+  const handleSendMessage = useCallback((content: string) => {
+    if (!user && !activeConversationId) {
+      setGuestModeModalOpen(true);
+      return;
+    }
+    sendMessage(content);
+  }, [user, activeConversationId, sendMessage]);
+
   const handleAddSource = useCallback(async (
     url: string,
     depth: CrawlDepth,
     options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }
   ): Promise<Source | null> => {
+    if (!user) {
+      setGuestModeModalOpen(true);
+      return null;
+    }
     const fullUrl = normalizeSourceUrl(url);
     const domain = extractDomain(fullUrl);
 
@@ -116,7 +138,7 @@ const Index = () => {
     };
 
     return addSourceToConversation(newSource);
-  }, [addSourceToConversation]);
+  }, [user, addSourceToConversation]);
 
   // Clear add-page state when switching conversations so we don't show another conversation's loading
   useEffect(() => {
@@ -177,7 +199,7 @@ const Index = () => {
             activeConversationId={activeConversationId}
             isOpen={sidebarOpen}
             onToggle={handleToggleSidebar}
-            onNewChat={createNewConversation}
+            onNewChat={handleNewChatClick}
             onSelectConversation={selectConversation}
             onDeleteConversation={deleteConversation}
             currentSources={currentSources}
@@ -208,7 +230,7 @@ const Index = () => {
           sources={currentSources}
           isLoading={isLoading}
           streamingMessage={streamingMessage}
-          onSendMessage={sendMessage}
+          onSendMessage={handleSendMessage}
           onAddSource={handleAddSource}
           onRemoveSource={removeSourceFromConversation}
           onRecrawlSource={recrawlSource}
@@ -216,9 +238,16 @@ const Index = () => {
           onToggleSidebar={handleToggleSidebar}
           showSignIn={!user}
           onSignIn={() => navigate('/auth')}
+          onGuestRequired={!user ? () => setGuestModeModalOpen(true) : undefined}
           onDynamicModeChange={handleDynamicModeChange}
           onAddSuggestedPage={handleAddSuggestedPage}
           addingPageSourceId={addingPageSourceId}
+        />
+
+        <GuestModeRequiredModal
+          open={guestModeModalOpen}
+          onOpenChange={setGuestModeModalOpen}
+          onLogIn={() => navigate('/auth')}
         />
       </div>
     </div>

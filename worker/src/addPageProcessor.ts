@@ -131,7 +131,7 @@ export async function processAddPageJob(job: {
       await updateAddPageJob(jobId, { status: 'failed', error_message: 'Source not found' });
       throw new Error('Source not found');
     }
-    const ownerId = source.owner_id ?? null;
+    const ownerId = source.owner_id;
 
     // Insert page
     const { data: newPage, error: insertErr } = await supabase

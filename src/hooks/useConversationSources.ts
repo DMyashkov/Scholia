@@ -55,10 +55,10 @@ export const useAddSourceToConversation = () => {
       sourceData: SourceInsert;
       inheritFromConversationId?: string;
     }) => {
+      if (!user) throw new Error('Authentication required');
       const normalizedUrl = normalizeSourceUrl(sourceData.url || '');
       const sourceDataNorm = { ...sourceData, url: normalizedUrl };
-      const userId = user?.id || null;
-      const existingSources = await sourcesApi.list(userId);
+      const existingSources = await sourcesApi.list(user.id);
       let source = existingSources.find(s => s.url === normalizedUrl);
 
       if (!source) {

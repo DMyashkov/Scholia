@@ -318,7 +318,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       const linksWithContext = isDynamic ? extractLinksWithContext(html, normalizedUrl, source) : [];
 
       const newLinks: string[] = [];
-      const edgesToInsert: Array<{conversation_id: string; source_id: string; from_page_id: string; from_url: string; to_url: string; owner_id: string | null}> = [];
+      const edgesToInsert: Array<{conversation_id: string; source_id: string; from_page_id: string; from_url: string; to_url: string; owner_id: string}> = [];
       
       const linksToProcess = links.slice(0, 200);
 

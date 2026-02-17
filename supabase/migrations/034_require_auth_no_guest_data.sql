@@ -114,44 +114,49 @@ CREATE POLICY "Users can create sources"
   ON sources FOR INSERT
   WITH CHECK (owner_id = (select auth.uid()));
 
--- conversation_sources
-DROP POLICY IF EXISTS "Users can view conversation sources for their conversations" ON conversation_sources;
-CREATE POLICY "Users can view conversation sources for their conversations"
-  ON conversation_sources FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM conversations
-      WHERE conversations.id = conversation_sources.conversation_id
-      AND conversations.owner_id = (select auth.uid())
-    )
-  );
+-- conversation_sources (skipped if table was already dropped by migration 037)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'conversation_sources') THEN
+    DROP POLICY IF EXISTS "Users can view conversation sources for their conversations" ON conversation_sources;
+    CREATE POLICY "Users can view conversation sources for their conversations"
+      ON conversation_sources FOR SELECT
+      USING (
+        EXISTS (
+          SELECT 1 FROM conversations
+          WHERE conversations.id = conversation_sources.conversation_id
+          AND conversations.owner_id = (select auth.uid())
+        )
+      );
 
-DROP POLICY IF EXISTS "Users can add sources to their conversations" ON conversation_sources;
-CREATE POLICY "Users can add sources to their conversations"
-  ON conversation_sources FOR INSERT
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM conversations
-      WHERE conversations.id = conversation_sources.conversation_id
-      AND conversations.owner_id = (select auth.uid())
-    ) AND
-    EXISTS (
-      SELECT 1 FROM sources
-      WHERE sources.id = conversation_sources.source_id
-      AND sources.owner_id = (select auth.uid())
-    )
-  );
+    DROP POLICY IF EXISTS "Users can add sources to their conversations" ON conversation_sources;
+    CREATE POLICY "Users can add sources to their conversations"
+      ON conversation_sources FOR INSERT
+      WITH CHECK (
+        EXISTS (
+          SELECT 1 FROM conversations
+          WHERE conversations.id = conversation_sources.conversation_id
+          AND conversations.owner_id = (select auth.uid())
+        ) AND
+        EXISTS (
+          SELECT 1 FROM sources
+          WHERE sources.id = conversation_sources.source_id
+          AND sources.owner_id = (select auth.uid())
+        )
+      );
 
-DROP POLICY IF EXISTS "Users can remove sources from their conversations" ON conversation_sources;
-CREATE POLICY "Users can remove sources from their conversations"
-  ON conversation_sources FOR DELETE
-  USING (
-    EXISTS (
-      SELECT 1 FROM conversations
-      WHERE conversations.id = conversation_sources.conversation_id
-      AND conversations.owner_id = (select auth.uid())
-    )
-  );
+    DROP POLICY IF EXISTS "Users can remove sources from their conversations" ON conversation_sources;
+    CREATE POLICY "Users can remove sources from their conversations"
+      ON conversation_sources FOR DELETE
+      USING (
+        EXISTS (
+          SELECT 1 FROM conversations
+          WHERE conversations.id = conversation_sources.conversation_id
+          AND conversations.owner_id = (select auth.uid())
+        )
+      );
+  END IF;
+END $$;
 
 -- crawl_jobs
 DROP POLICY IF EXISTS "Users can view their own crawl jobs" ON crawl_jobs;

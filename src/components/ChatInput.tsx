@@ -90,9 +90,6 @@ export const ChatInput = ({
             <Send className="h-4 w-4" />
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground text-center mt-3">
-          Scholia uses mock responses. Answers may vary.
-        </p>
       </div>
     </div>
   );

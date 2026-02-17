@@ -14,6 +14,7 @@ interface CrawlStatsProps {
   isCrawling: boolean;
   isIndexing?: boolean;
   isDynamic?: boolean;
+  isResponding?: boolean;
   encodedDiscoveredCount?: number;
   encodingChunksDone?: number;
   encodingChunksTotal?: number;
@@ -28,6 +29,7 @@ export const CrawlStats = ({
   isCrawling,
   isIndexing = false,
   isDynamic = false,
+  isResponding = false,
   encodedDiscoveredCount = 0,
   encodingChunksDone = 0,
   encodingChunksTotal = 0,
@@ -90,7 +92,7 @@ export const CrawlStats = ({
       </TooltipProvider>
 
       {/* Three-phase progress bar: crawl | indexing chunks | encoding discovered */}
-      {(isCrawling || isIndexing) && targetPages > 0 && (
+      {(isCrawling || isIndexing || isResponding) && targetPages > 0 && (
         <EncodingProgressBar
           crawlDone={pagesIndexed}
           crawlTotal={targetPages}
@@ -101,6 +103,7 @@ export const CrawlStats = ({
           phase={phase}
           isDynamic={isDynamic}
           isCrawling={isCrawling && !isIndexing}
+          isResponding={isResponding}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { Source } from '@/types/source';
 import { ForceGraph } from './graph';
 import { cn } from '@/lib/utils';
@@ -30,20 +30,30 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
 
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const { data: crawlJobsData = [] } = useQuery({
-    queryKey: ['crawl-jobs-for-sources', sourceIds],
+    queryKey: ['crawl-jobs-for-sources', sourceIds, conversationId ?? ''],
     queryFn: async () => {
-      const jobs = await Promise.all(
-        sourceIds.map(sourceId => crawlJobsApi.listBySource(sourceId))
-      );
-      return jobs.flat();
+      if (!conversationId || sourceIds.length === 0) return [];
+      return crawlJobsApi.listBySourceAndConversation(sourceIds, conversationId);
     },
-    enabled: sourceIds.length > 0,
+    enabled: sourceIds.length > 0 && !!conversationId,
   });
 
   const { data: conversationSources = [] } = useConversationSources(conversationId);
   const { data: addPageJob } = useAddPageJob(conversationId ?? null, addingPageSourceId ?? null);
 
   const { data: pages = [], isLoading: pagesLoading, error: pagesError } = useConversationPages(conversationId);
+
+  // Freeze totalPages for add-page flow: capture initial page count when add starts, use initial+1 as max throughout
+  const prevAddingRef = useRef<string | null>(null);
+  const addPageInitialCountRef = useRef<number>(0);
+  if (addingPageSourceId) {
+    if (prevAddingRef.current !== addingPageSourceId) {
+      addPageInitialCountRef.current = pages.filter((p) => p.source_id === addingPageSourceId).length;
+      prevAddingRef.current = addingPageSourceId;
+    }
+  } else {
+    prevAddingRef.current = null;
+  }
   const { data: edges = [], isLoading: edgesLoading, error: edgesError } = useConversationPageEdges(conversationId);
   const { data: discoveredCountsMap = {} } = useQuery({
     queryKey: ['discovered-links-counts', conversationId],
@@ -101,7 +111,9 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         if (source.crawlDepth === 'dynamic') {
           if (addingPageSourceId === source.id) {
             const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
-            totalPages = jobDone ? sourcePages.length : sourcePages.length + 1;
+            // Use frozen initial+1 as max until job done (avoids 2/3 when realtime delivers new page before status update)
+            const frozenInitial = addPageInitialCountRef.current || sourcePages.length;
+            totalPages = jobDone ? sourcePages.length : frozenInitial + 1;
           } else {
             totalPages = Math.max(sourcePages.length, 1);
           }
@@ -115,7 +127,9 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         if (source.crawlDepth === 'dynamic') {
           if (addingPageSourceId === source.id) {
             const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
-            totalPages = jobDone ? sourcePages.length : sourcePages.length + 1;
+            // Use frozen initial+1 as max until job done (avoids 2/3)
+            const frozenInitial = addPageInitialCountRef.current || sourcePages.length;
+            totalPages = jobDone ? sourcePages.length : frozenInitial + 1;
           } else {
             totalPages = Math.max(sourcePages.length, 1);
           }
@@ -166,6 +180,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const isIndexingFromJob = displaySources.some(s => crawlJobMap.get(s.id)?.status === 'indexing');
   const isAddingPageFlow = !!addingPageSourceId && displaySources.some(s => s.id === addingPageSourceId);
   const addPagePhase = addPageJob?.status;
+  const isAddPageQueued = addPagePhase === 'queued';
   const isAddPageIndexing = addPagePhase === 'indexing';
   const isAddPageEncoding = addPagePhase === 'encoding';
   const isAddPageResponding = addPagePhase === 'completed' && !!addingPageSourceId;
@@ -189,7 +204,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const statusLabel = getEncodingStatusLabel(
     encodingPhase,
     isAddPageResponding,
-    isAddPageIndexing,
+    isAddPageQueued || isAddPageIndexing,
     isAddPageEncoding,
     isIndexingFromJob,
     isDynamic
@@ -369,6 +384,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
             phase={encodingPhase}
             isDynamic={isDynamic}
             isCrawling={(isCrawling || isAddingPageFlow) && !isIndexingFromJob && !isAddPageEncoding}
+            isResponding={isAddPageResponding}
           />
         ) : null}
       </div>

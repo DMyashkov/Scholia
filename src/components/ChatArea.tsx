@@ -54,13 +54,14 @@ export const ChatArea = ({
   const [addSourcePromptMessage, setAddSourcePromptMessage] = useState<string | null>(null);
 
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
+  const conversationId = conversation?.id ?? null;
   const { data: crawlJobsData = [] } = useQuery({
-    queryKey: ['crawl-jobs-for-sources', sourceIds],
+    queryKey: ['crawl-jobs-for-sources', sourceIds, conversationId ?? ''],
     queryFn: async () => {
-      const jobs = await Promise.all(sourceIds.map(id => crawlJobsApi.listBySource(id)));
-      return jobs.flat();
+      if (!conversationId || sourceIds.length === 0) return [];
+      return crawlJobsApi.listBySourceAndConversation(sourceIds, conversationId);
     },
-    enabled: sourceIds.length > 0,
+    enabled: sourceIds.length > 0 && !!conversationId,
   });
 
   const crawlJobMap = useMemo(() => {

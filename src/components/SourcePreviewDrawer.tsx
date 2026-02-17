@@ -121,7 +121,7 @@ export const SourcePreviewDrawer = ({
 
         {/* Scrollable content area - fills remaining space */}
         <ScrollArea className="flex-1 min-h-0">
-          <div className="p-6 space-y-5">
+          <div className="px-6 pb-6 pt-4 space-y-5">
             {/* Snippet with surrounding context from the source */}
             <div className="space-y-2">
               <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">

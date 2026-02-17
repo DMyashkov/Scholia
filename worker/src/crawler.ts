@@ -672,8 +672,8 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
 
 const CONTEXT_SNIPPET_LENGTH = 200;
 
-/** For dynamic mode: extract links with ~200 chars of surrounding context for RAG */
-function extractLinksWithContext(
+/** For dynamic mode: extract links with ~200 chars of surrounding context for RAG. Exported for addPageProcessor. */
+export function extractLinksWithContext(
   html: string,
   pageUrl: string,
   source: Source

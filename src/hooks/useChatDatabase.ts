@@ -4,6 +4,7 @@ import { useConversations, useCreateConversation, useDeleteConversation, useUpda
 import { useMessages, useCreateMessage, useUpdateMessage } from './useMessages';
 import { useConversationSources, useAddSourceToConversation, useRemoveSourceFromConversation, useCheckExistingSource } from './useConversationSources';
 import { recrawlSource as recrawlSourceApi } from '@/lib/db/recrawl';
+import { addPageJobsApi } from '@/lib/db';
 import { useSourceWithData } from './useSourceWithData';
 import { useRealtimeCrawlUpdates } from './useRealtimeCrawlUpdates';
 import { useAuthContext } from '@/contexts/AuthContext';
@@ -250,7 +251,6 @@ export const useChatDatabase = () => {
       throw new Error('Functions URL not configured');
     }
     const { data: { session } } = await supabase.auth.getSession();
-    console.log('[addPageToSource] auth:', { hasSession: !!session?.access_token });
     const res = await fetch(`${functionsUrl}/add-page`, {
       method: 'POST',
       headers: {
@@ -259,7 +259,6 @@ export const useChatDatabase = () => {
       },
       body: JSON.stringify({ conversationId, sourceId, url }),
     });
-    console.log('[addPageToSource] fetch response', { status: res.status, ok: res.ok });
     if (!res.ok) {
       const errBody = await res.text();
       let err: { error?: string } = {};
@@ -268,24 +267,58 @@ export const useChatDatabase = () => {
       } catch {
         err = { error: errBody || `HTTP ${res.status}` };
       }
-      console.error('[addPageToSource] fetch failed', { status: res.status, body: errBody });
       throw new Error(err?.error ?? `Failed to add page: ${res.status}`);
     }
     const data = await res.json();
-    const dl = data?.discoveredLinks;
-    console.log('[addPageToSource] success', data?.page ? { pageId: data.page.id?.slice(0, 8), discoveredLinks: dl ?? 'N/A' } : data);
-    if (dl) console.log('[addPageToSource] discovered_links:', dl.extracted, 'extracted,', dl.new, 'new (overlap =', dl.extracted - dl.new, 'already in graph)');
+
+    // Page already exists – done
+    if (data?.page) {
+      console.log('[addPageToSource] page already exists', data.page.id?.slice(0, 8));
+      queryClient.invalidateQueries({ queryKey: ['add-page-job', conversationId, sourceId] });
+      queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['conversation-pages', conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['conversation-page-edges', conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['conversation-pages', conversationId] }),
+        queryClient.refetchQueries({ queryKey: ['conversation-page-edges', conversationId] }),
+        queryClient.refetchQueries({ queryKey: ['discovered-links-counts', conversationId] }),
+      ]);
+      return data;
+    }
+
+    // Job queued – poll until completed or failed (worker processes; Realtime delivers progress)
+    const jobId = data?.jobId;
+    if (!jobId) {
+      throw new Error('Invalid response: missing page or jobId');
+    }
+    const pollMs = 800;
+    const maxAttempts = 180; // ~2.5 min
+    let finalJob: Awaited<ReturnType<typeof addPageJobsApi.getById>> = null;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      finalJob = await addPageJobsApi.getById(jobId);
+      if (!finalJob) continue;
+      if (finalJob.status === 'completed') break;
+      if (finalJob.status === 'failed') {
+        throw new Error(finalJob.error_message ?? 'Add page failed');
+      }
+    }
+    if (finalJob?.status === 'failed') {
+      throw new Error(finalJob.error_message ?? 'Add page failed');
+    }
+
+    queryClient.invalidateQueries({ queryKey: ['add-page-job', conversationId, sourceId] });
     queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
     queryClient.invalidateQueries({ queryKey: ['conversation-pages', conversationId] });
     queryClient.invalidateQueries({ queryKey: ['conversation-page-edges', conversationId] });
     queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
-    // Refetch pages/edges so UI and RAG caller have latest before re-asking
     await Promise.all([
       queryClient.refetchQueries({ queryKey: ['conversation-pages', conversationId] }),
       queryClient.refetchQueries({ queryKey: ['conversation-page-edges', conversationId] }),
       queryClient.refetchQueries({ queryKey: ['discovered-links-counts', conversationId] }),
     ]);
-    return data;
+    return { page: {}, message: 'Page added' };
   }, [queryClient]);
 
   const addPageAndContinueResponse = useCallback(async (

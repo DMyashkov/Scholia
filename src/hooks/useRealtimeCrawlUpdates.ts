@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
-import type { CrawlJob, Page, PageEdge } from '@/lib/db/types';
+import type { AddPageJob, CrawlJob, Page, PageEdge } from '@/lib/db/types';
 
 /**
  * Hook to subscribe to realtime updates for crawl progress
@@ -65,6 +65,34 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
 
       channelsRef.current.push(crawlJobsChannel);
     }
+
+    // Subscribe to add_page_jobs (same pattern as crawl_jobs - single source of truth for all progress)
+    const addPageJobsChannel = supabase
+      .channel(`add-page-jobs:${conversationId}`)
+      .on<AddPageJob>(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'add_page_jobs',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const job = payload.new as AddPageJob;
+          queryClient.invalidateQueries({ predicate: (query) => {
+            const key = query.queryKey;
+            return (
+              Array.isArray(key) &&
+              key[0] === 'add-page-job' &&
+              key[1] === conversationId &&
+              key[2] === job.source_id
+            );
+          }});
+        }
+      )
+      .subscribe();
+
+    channelsRef.current.push(addPageJobsChannel);
 
     const syncAfterSubscribe = () => {
       queryClient.invalidateQueries({ predicate: (query) => {

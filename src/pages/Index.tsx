@@ -118,6 +118,11 @@ const Index = () => {
     return addSourceToConversation(newSource);
   }, [addSourceToConversation]);
 
+  // Clear add-page state when switching conversations so we don't show another conversation's loading
+  useEffect(() => {
+    setAddingPageSourceId(null);
+  }, [activeConversationId]);
+
   const handleDynamicModeChange = useCallback((enabled: boolean) => {
     if (activeConversationId) updateDynamicMode(activeConversationId, enabled);
   }, [activeConversationId, updateDynamicMode]);

@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 import { ForceGraph } from './graph';
 import { CrawlStats } from './CrawlStats';
 import { getEncodingStatusLabel, getEncodingPhase } from './EncodingProgressBar';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import type { CrawlJob } from '@/lib/db/types';
@@ -104,13 +104,12 @@ export const SourceDrawer = ({
     [allSourceIds, source?.id]
   );
   const { data: allCrawlJobs = [] } = useQuery({
-    queryKey: ['crawl-jobs-for-sources', sourceIds],
+    queryKey: ['crawl-jobs-for-sources', sourceIds, conversationId ?? ''],
     queryFn: async () => {
-      if (sourceIds.length === 0) return [];
-      const jobs = await Promise.all(sourceIds.map(id => crawlJobsApi.listBySource(id)));
-      return jobs.flat();
+      if (!conversationId || sourceIds.length === 0) return [];
+      return crawlJobsApi.listBySourceAndConversation(sourceIds, conversationId);
     },
-    enabled: sourceIds.length > 0,
+    enabled: sourceIds.length > 0 && !!conversationId,
   });
   const crawlJobsData = useMemo(
     () => (source?.id ? allCrawlJobs.filter(j => j.source_id === source.id) : []),
@@ -196,6 +195,18 @@ export const SourceDrawer = ({
     return allPages.filter(p => p.source_id === source.id && p.status === 'indexed');
   }, [allPages, source]);
 
+  // Freeze totalPages for add-page flow (avoids 2/3 when new page arrives before status update)
+  const prevAddingRef = useRef<string | null>(null);
+  const addPageInitialCountRef = useRef<number>(0);
+  if (addingPageSourceId && source?.id && addingPageSourceId === source.id) {
+    if (prevAddingRef.current !== addingPageSourceId) {
+      addPageInitialCountRef.current = sourcePages.length;
+      prevAddingRef.current = addingPageSourceId;
+    }
+  } else {
+    prevAddingRef.current = null;
+  }
+
   const sourceEdges = useMemo(() => {
     if (!source) return [];
     return allEdges.filter(e => e.source_id === source.id);
@@ -224,7 +235,8 @@ export const SourceDrawer = ({
     if (source.crawlDepth === 'dynamic') {
       if (addingPageSourceId === source.id) {
         const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
-        return jobDone ? sourcePages.length : sourcePages.length + 1;
+        const frozenInitial = addPageInitialCountRef.current || sourcePages.length;
+        return jobDone ? sourcePages.length : frozenInitial + 1;
       }
       return Math.max(sourcePages.length, 1);
     }
@@ -281,6 +293,7 @@ export const SourceDrawer = ({
                 isCrawling={realStatus === 'crawling'}
                 isIndexing={isIndexing}
                 isDynamic={source.crawlDepth === 'dynamic'}
+                isResponding={isAddPageResponding}
                 encodedDiscoveredCount={encodedDiscoveredCount}
                 encodingChunksDone={encChunksDone}
                 encodingChunksTotal={encChunksTotal}

@@ -148,7 +148,7 @@ export interface AddPageJob {
   conversation_id: string;
   source_id: string;
   url: string;
-  status: 'indexing' | 'encoding' | 'completed' | 'failed';
+  status: 'queued' | 'indexing' | 'encoding' | 'completed' | 'failed';
   error_message: string | null;
   encoding_chunks_done?: number | null;
   encoding_chunks_total?: number | null;

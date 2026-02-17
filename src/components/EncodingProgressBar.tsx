@@ -27,7 +27,7 @@ export function getEncodingStatusLabel(
   isDynamic: boolean
 ): string {
   if (isAddPageResponding) return 'Responding…';
-  if (isAddPageIndexing) return 'Adding page…';
+  if (isAddPageIndexing) return 'Scraping Page';
   if (isAddPageEncoding || isIndexingFromJob) {
     if (phase === 'indexing-chunks') return 'Indexing Crawled Pages';
     if (phase === 'encoding-discovered') return 'Encoding Discovered Pages';
@@ -53,6 +53,8 @@ export interface EncodingProgressBarProps {
   isDynamic?: boolean;
   /** Show shimmer overlay during crawl */
   isCrawling?: boolean;
+  /** Responding state: keep bar full (orange) and pulse */
+  isResponding?: boolean;
   className?: string;
 }
 
@@ -66,6 +68,7 @@ export function EncodingProgressBar({
   phase,
   isDynamic = false,
   isCrawling = false,
+  isResponding = false,
   className,
 }: EncodingProgressBarProps) {
   const crawlPct = crawlTotal > 0 ? Math.min(1, crawlDone / crawlTotal) : 0;
@@ -75,22 +78,29 @@ export function EncodingProgressBar({
   const showChunksIndeterminate = phase === 'indexing-chunks' && chunksTotal === 0;
   const showDiscoveredIndeterminate = phase === 'encoding-discovered' && discoveredTotal === 0;
 
-  // Layered fills: each phase overlays 0–100% of the bar. Color intensifies per phase.
-  // Phase 1 (crawl): light fill
-  const crawlWidth = phase === 'crawl' ? crawlPct : phase !== 'idle' ? 1 : 0;
-  // Phase 2 (chunks): overlays. Static = done color (same as phase 3). Dynamic = medium (phase 3 will overlay).
-  const chunksWidth =
-    phase === 'indexing-chunks' ? (showChunksIndeterminate ? 1 : chunksPct) : phase === 'encoding-discovered' ? 1 : 0;
-  // Phase 3 (discovered): overlays, darkest. Dynamic only.
-  const discoveredWidth =
-    phase === 'encoding-discovered' ? (showDiscoveredIndeterminate ? 1 : discoveredPct) : 0;
+  // When Responding: keep bar fully filled (orange) and pulse
+  const showFullBar = isResponding;
+  const crawlWidth = showFullBar ? 1 : phase === 'crawl' ? crawlPct : phase !== 'idle' ? 1 : 0;
+  const chunksWidth = showFullBar
+    ? 1
+    : phase === 'indexing-chunks'
+      ? (showChunksIndeterminate ? 1 : chunksPct)
+      : phase === 'encoding-discovered'
+        ? 1
+        : 0;
+  const discoveredWidth = showFullBar ? 1 : phase === 'encoding-discovered' ? (showDiscoveredIndeterminate ? 1 : discoveredPct) : 0;
 
   // Chunks uses "done" color when static (matches phase 3); medium when dynamic (phase 3 overlays with distinct color).
   const chunksIsFinalPhase = !isDynamic;
 
   return (
     <div className={cn('space-y-1', className)}>
-      <div className="relative h-1.5 bg-muted/50 rounded-full overflow-hidden">
+      <div
+        className={cn(
+          'relative h-1.5 bg-muted/50 rounded-full overflow-hidden',
+          isResponding && 'animate-pulse'
+        )}
+      >
         {/* Layer 1: Crawl – lightest */}
         <div
           className="absolute inset-y-0 left-0 bg-primary/40 rounded-full transition-all duration-300"

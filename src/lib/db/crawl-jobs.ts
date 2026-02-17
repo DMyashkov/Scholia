@@ -13,6 +13,20 @@ export const crawlJobsApi = {
     return data as CrawlJob[];
   },
 
+  /** List jobs for sources in a conversation - filters by conversation_id so switching convs shows correct state */
+  async listBySourceAndConversation(sourceIds: string[], conversationId: string) {
+    if (sourceIds.length === 0) return [];
+    const { data, error } = await supabase
+      .from('crawl_jobs')
+      .select('*')
+      .in('source_id', sourceIds)
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return (data as CrawlJob[]) ?? [];
+  },
+
   async get(id: string) {
     const { data, error } = await supabase
       .from('crawl_jobs')

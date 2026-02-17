@@ -16,7 +16,7 @@ import { crawlJobsApi } from '@/lib/db/crawl-jobs';
 import type { CrawlJob } from '@/lib/db/types';
 import { useConversationPages } from '@/hooks/usePages';
 import { useAddPageJob } from '@/hooks/useAddPageJob';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 
 interface SourcesBarProps {
   sources: Source[];
@@ -180,17 +180,27 @@ export const SourcesBar = ({
   const hasDynamicSources = sources.some(s => s.crawlDepth === 'dynamic');
   const { data: conversationPages = [] } = useConversationPages(conversationId ?? null);
   const { data: addPageJob } = useAddPageJob(conversationId ?? null, addingPageSourceId ?? null);
-  // Load crawl jobs for all sources to determine real status
+
+  // Freeze totalPages for add-page flow (avoids 2/3 when new page arrives before status update)
+  const prevAddingRef = useRef<string | null>(null);
+  const addPageInitialCountRef = useRef<number>(0);
+  if (addingPageSourceId) {
+    if (prevAddingRef.current !== addingPageSourceId) {
+      addPageInitialCountRef.current = conversationPages.filter((p) => p.source_id === addingPageSourceId).length;
+      prevAddingRef.current = addingPageSourceId;
+    }
+  } else {
+    prevAddingRef.current = null;
+  }
+  // Load crawl jobs for all sources to determine real status (filter by conversation so switching convs shows correct state)
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const { data: crawlJobsData = [] } = useQuery({
-    queryKey: ['crawl-jobs-for-sources', sourceIds],
+    queryKey: ['crawl-jobs-for-sources-bar', sourceIds, conversationId ?? ''],
     queryFn: async () => {
-      const jobs = await Promise.all(
-        sourceIds.map(sourceId => crawlJobsApi.listBySource(sourceId))
-      );
-      return jobs.flat();
+      if (!conversationId || sourceIds.length === 0) return [];
+      return crawlJobsApi.listBySourceAndConversation(sourceIds, conversationId);
     },
-    enabled: sourceIds.length > 0,
+    enabled: sourceIds.length > 0 && !!conversationId,
   });
   
   // Create a map of sourceId -> crawlJob
@@ -237,7 +247,8 @@ export const SourcesBar = ({
         if (source.crawlDepth === 'dynamic') {
           if (addingPageSourceId === source.id) {
             const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
-            totalPages = jobDone ? sourcePages.length : sourcePages.length + 1;
+            const frozenInitial = addPageInitialCountRef.current || sourcePages.length;
+            totalPages = jobDone ? sourcePages.length : frozenInitial + 1;
           } else {
             totalPages = Math.max(sourcePages.length, 1);
           }
@@ -251,7 +262,8 @@ export const SourcesBar = ({
         if (source.crawlDepth === 'dynamic') {
           if (addingPageSourceId === source.id) {
             const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
-            totalPages = jobDone ? sourcePages.length : sourcePages.length + 1;
+            const frozenInitial = addPageInitialCountRef.current || sourcePages.length;
+            totalPages = jobDone ? sourcePages.length : frozenInitial + 1;
           } else {
             totalPages = Math.max(sourcePages.length, 1);
           }

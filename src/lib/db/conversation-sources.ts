@@ -29,12 +29,9 @@ export const conversationSourcesApi = {
     if (!activeJob) {
       await crawlJobsApi.create({
         source_id: sourceId,
-        conversation_id: conversationId,
         status: 'queued',
-        pages_indexed: 0,
         indexed_count: 0,
         discovered_count: 0,
-        links_count: 0,
         total_pages: null,
         error_message: null,
         started_at: null,

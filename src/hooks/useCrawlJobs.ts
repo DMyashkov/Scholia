@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useEffect } from 'react';
 import type { CrawlJob } from '@/lib/db/types';
 
-export const useCrawlJob = (sourceId: string | null) => {
+export const useCrawlJob = (sourceId: string | null, conversationId?: string | null) => {
   const queryClient = useQueryClient();
 
   // Set up realtime subscription
@@ -22,7 +22,7 @@ export const useCrawlJob = (sourceId: string | null) => {
           filter: `source_id=eq.${sourceId}`,
         },
         (payload) => {
-          queryClient.setQueryData(['crawl-job', sourceId], payload.new as CrawlJob);
+          queryClient.setQueryData(['crawl-job', sourceId, conversationId ?? ''], payload.new as CrawlJob);
           queryClient.invalidateQueries({ queryKey: ['crawl-jobs', sourceId] });
         }
       )
@@ -31,14 +31,21 @@ export const useCrawlJob = (sourceId: string | null) => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [sourceId, queryClient]);
+  }, [sourceId, conversationId, queryClient]);
 
   return useQuery({
-    queryKey: ['crawl-job', sourceId],
+    queryKey: ['crawl-job', sourceId, conversationId ?? ''],
     queryFn: async () => {
       if (!sourceId) throw new Error('Source ID required');
       const jobs = await crawlJobsApi.listBySource(sourceId);
-      return jobs.find(j => j.status === 'queued' || j.status === 'running') || jobs[0] || null;
+      const inProgress = jobs.find(j => ['queued', 'running', 'indexing', 'encoding'].includes(j.status));
+      if (inProgress) return inProgress;
+      // Prefer main crawl job for status - add-page failure shouldn't mark source as error
+      if (conversationId) {
+        const main = await crawlJobsApi.getLatestMainBySource(sourceId, conversationId);
+        if (main) return main;
+      }
+      return jobs[0] || null;
     },
     enabled: !!sourceId,
   });

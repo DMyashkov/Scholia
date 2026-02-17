@@ -104,10 +104,10 @@ export const SourceDrawer = ({
     [allSourceIds, source?.id]
   );
   const { data: allCrawlJobs = [] } = useQuery({
-    queryKey: ['crawl-jobs-for-sources', sourceIds, conversationId ?? ''],
+    queryKey: ['crawl-jobs-main-for-sources', sourceIds, conversationId ?? ''],
     queryFn: async () => {
       if (!conversationId || sourceIds.length === 0) return [];
-      return crawlJobsApi.listBySourceAndConversation(sourceIds, conversationId);
+      return crawlJobsApi.listLatestMainBySources(sourceIds, conversationId);
     },
     enabled: sourceIds.length > 0 && !!conversationId,
   });
@@ -165,8 +165,7 @@ export const SourceDrawer = ({
     source?.crawlDepth === 'dynamic'
   );
 
-  // Use the conversation that ran the crawl so we get the right pages/edges (can differ from active conversation)
-  const graphConversationId = crawlJob?.conversation_id ?? conversationId;
+  const graphConversationId = conversationId;
 
   const { data: allPages = [], isLoading: pagesLoading } = useConversationPages(graphConversationId);
   const { data: allEdges = [], isLoading: edgesLoading } = useConversationPageEdges(graphConversationId);
@@ -215,7 +214,7 @@ export const SourceDrawer = ({
   const pagesIndexed = useMemo(() => {
     if (crawlJob) {
       const job = crawlJob as CrawlJob;
-      const fromJob = job.indexed_count ?? job.pages_indexed ?? sourcePages.length;
+      const fromJob = job.indexed_count ?? sourcePages.length;
       // Job can report 0 before first update; never show fewer nodes than pages we have
       return Math.max(fromJob, sourcePages.length);
     }
@@ -272,7 +271,7 @@ export const SourceDrawer = ({
                     {getSourceDisplayLabel(source)}
                   </SheetTitle>
                   <SheetDescription className="text-xs truncate">
-                    {source.url}
+                    {source.initial_url}
                   </SheetDescription>
                 </div>
               </div>
@@ -428,7 +427,7 @@ export const SourceDrawer = ({
             setIsRecrawling(false);
           }
         }}
-        sourceLabel={displayName || source?.url}
+        sourceLabel={displayName || source?.initial_url}
         isRecrawling={isRecrawling}
       />
     </Sheet>

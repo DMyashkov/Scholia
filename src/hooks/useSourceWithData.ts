@@ -5,7 +5,7 @@ import type { Source, DiscoveredPage } from '@/types/source';
 
 export const useSourceWithData = (dbSource: DBSource | null): Source | null => {
   const { data: pages = [] } = usePages(dbSource?.id || null);
-  const { data: crawlJob } = useCrawlJob(dbSource?.id || null);
+  const { data: crawlJob } = useCrawlJob(dbSource?.id || null, (dbSource as { conversation_id?: string })?.conversation_id);
 
   if (!dbSource) return null;
 
@@ -22,8 +22,7 @@ export const useSourceWithData = (dbSource: DBSource | null): Source | null => {
     } else if (crawlJob.status === 'completed') {
       status = 'ready';
     }
-    // Use indexed_count if available, fallback to pages_indexed
-    pagesIndexed = (crawlJob as CrawlJob).indexed_count ?? crawlJob.pages_indexed ?? 0;
+    pagesIndexed = (crawlJob as CrawlJob).indexed_count ?? 0;
     totalPages = crawlJob.total_pages || pages.length || 0;
   } else {
     totalPages = pages.length;
@@ -31,14 +30,11 @@ export const useSourceWithData = (dbSource: DBSource | null): Source | null => {
 
   return {
     id: dbSource.id,
-    url: dbSource.url,
+    initial_url: dbSource.initial_url,
     domain: dbSource.domain,
     source_label: (dbSource as { source_label?: string | null }).source_label ?? undefined,
-    favicon: dbSource.favicon || undefined,
     status,
     crawlDepth: dbSource.crawl_depth,
-    includeSubpages: dbSource.include_subpages,
-    includePdfs: dbSource.include_pdfs,
     sameDomainOnly: dbSource.same_domain_only,
     pagesIndexed,
     totalPages: totalPages || 0,

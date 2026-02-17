@@ -1,6 +1,6 @@
 import { supabase } from './db';
 import { claimJob, processCrawlJob } from './crawler';
-import { claimAddPageJob, processAddPageJob } from './addPageProcessor';
+import { processAddPageJob } from './addPageProcessor';
 const FALLBACK_POLL_MS = parseInt(process.env.CRAWL_FALLBACK_POLL_MS || '60000', 10); // 60s – catch missed Realtime, stuck jobs
 const MAX_CONCURRENT_JOBS = parseInt(process.env.MAX_CONCURRENT_JOBS || '3', 10);
 const activeJobs = new Set();
@@ -29,21 +29,6 @@ async function main() {
             console.warn('[worker] Realtime channel error – relying on fallback poll');
         }
     });
-    // Subscribe to add_page_jobs
-    supabase
-        .channel('worker-add-page-jobs')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'add_page_jobs' }, (payload) => {
-        if (payload.new?.status === 'queued')
-            wake();
-    })
-        .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-            console.log('[worker] Realtime subscribed to add_page_jobs');
-        }
-        else if (status === 'CHANNEL_ERROR') {
-            console.warn('[worker] add_page_jobs channel error – relying on fallback poll');
-        }
-    });
     let fallbackTimer = null;
     const scheduleFallback = () => {
         if (fallbackTimer)
@@ -57,9 +42,7 @@ async function main() {
     while (true) {
         try {
             while (activeJobs.size < MAX_CONCURRENT_JOBS) {
-                const crawlJob = await claimJob();
-                const addPageJob = !crawlJob ? await claimAddPageJob() : null;
-                const job = crawlJob ?? addPageJob;
+                const job = await claimJob();
                 if (!job) {
                     if (!hasLoggedIdle) {
                         console.log('[worker] Idle (Add a source or page to create a job)');
@@ -75,16 +58,17 @@ async function main() {
                     fallbackTimer = null;
                 }
                 const sourceShort = job.source_id?.slice(0, 8) || '?';
-                const convShort = job.conversation_id?.slice(0, 8) || '?';
-                if (addPageJob) {
-                    console.log('[worker] Claimed add_page_job', job.id.slice(0, 8), 'source', sourceShort, 'conv', convShort);
+                const explicitUrls = job.explicit_crawl_urls;
+                const isAddPage = explicitUrls && explicitUrls.length === 1;
+                if (isAddPage) {
+                    console.log('[worker] Claimed add-page crawl job', job.id.slice(0, 8), 'source', sourceShort);
                 }
                 else {
-                    console.log('[worker] Claimed job', job.id.slice(0, 8), 'source', sourceShort, 'conv', convShort, '(discovered/indexed logs will follow with [D/I] prefix)');
+                    console.log('[worker] Claimed job', job.id.slice(0, 8), 'source', sourceShort, '(discovered/indexed logs will follow with [D/I] prefix)');
                 }
                 activeJobs.add(job.id);
-                const processor = addPageJob
-                    ? processAddPageJob(addPageJob)
+                const processor = isAddPage
+                    ? processAddPageJob({ id: job.id, source_id: job.source_id, explicit_crawl_urls: explicitUrls })
                     : processCrawlJob(job.id);
                 processor
                     .then(() => {

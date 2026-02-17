@@ -70,7 +70,7 @@ export const useChatSources = ({ sources, onSourcesChange }: UseChatSourcesOptio
   const addSource = useCallback((
     url: string,
     depth: CrawlDepth,
-    options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }
+    options: { sameDomainOnly: boolean }
   ) => {
     const domain = extractDomain(url);
     const totalPages = getTotalPagesForDepth(depth);
@@ -89,12 +89,10 @@ export const useChatSources = ({ sources, onSourcesChange }: UseChatSourcesOptio
 
     const newSource: Source = {
       id,
-      url: url.startsWith('http') ? url : `https://${url}`,
+      initial_url: url.startsWith('http') ? url : `https://${url}`,
       domain,
       status: 'crawling',
       crawlDepth: depth,
-      includeSubpages: options.includeSubpages,
-      includePdfs: options.includePdfs,
       sameDomainOnly: options.sameDomainOnly,
       pagesIndexed: 0,
       totalPages,

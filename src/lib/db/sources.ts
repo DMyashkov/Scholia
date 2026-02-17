@@ -59,7 +59,7 @@ export const sourcesApi = {
     let query = supabase
       .from('sources')
       .select('conversation_id, conversation:conversations(id, title, created_at)')
-      .eq('url', url);
+      .eq('initial_url', url);
     if (excludeConversationId) {
       query = query.neq('conversation_id', excludeConversationId);
     }

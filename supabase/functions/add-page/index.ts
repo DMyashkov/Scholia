@@ -69,7 +69,6 @@ Deno.serve(async (req) => {
     const { data: existing } = await supabase
       .from('pages')
       .select('id, url, title, path')
-      .eq('conversation_id', conversationId)
       .eq('source_id', sourceId)
       .eq('url', normalizedUrl)
       .maybeSingle();
@@ -82,27 +81,42 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Create add_page_job with status queued – worker will process and report progress
+    // Get owner_id from source (crawl_jobs requires it)
+    const { data: source, error: srcErr } = await supabase
+      .from('sources')
+      .select('owner_id')
+      .eq('id', sourceId)
+      .single();
+    if (srcErr || !source?.owner_id) {
+      return new Response(
+        JSON.stringify({ error: 'Source not found' }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Create crawl_job with explicit_crawl_urls (add-page = single URL to crawl)
     const { data: job, error: jobErr } = await supabase
-      .from('add_page_jobs')
+      .from('crawl_jobs')
       .insert({
-        conversation_id: conversationId,
         source_id: sourceId,
-        url: normalizedUrl,
+        owner_id: source.owner_id,
         status: 'queued',
+        explicit_crawl_urls: [normalizedUrl],
+        encoding_chunks_done: 0,
+        encoding_discovered_done: 0,
       })
       .select('id')
       .single();
 
     if (jobErr) {
-      console.error('[add-page] failed to create job:', jobErr.message);
+      console.error('[add-page] failed to create crawl job:', jobErr.message);
       return new Response(
         JSON.stringify({ error: jobErr.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('[add-page] job queued', job.id);
+    console.log('[add-page] crawl job queued', job.id);
     return new Response(
       JSON.stringify({
         jobId: job.id,

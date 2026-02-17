@@ -5,12 +5,12 @@ export const messagesApi = {
   async list(conversationId: string) {
     const { data, error } = await supabase
       .from('messages')
-      .select('*')
+      .select('*, quotes(*, pages!quotes_page_id_fkey(source_id))')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true });
 
     if (error) throw error;
-    return data as Message[];
+    return (data ?? []) as (Message & { quotes: Array<Record<string, unknown>> })[];
   },
 
   async create(message: MessageInsert) {

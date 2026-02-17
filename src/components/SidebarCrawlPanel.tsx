@@ -30,10 +30,10 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
 
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const { data: crawlJobsData = [] } = useQuery({
-    queryKey: ['crawl-jobs-for-sources', sourceIds, conversationId ?? ''],
+    queryKey: ['crawl-jobs-main-for-sources', sourceIds, conversationId ?? ''],
     queryFn: async () => {
       if (!conversationId || sourceIds.length === 0) return [];
-      return crawlJobsApi.listBySourceAndConversation(sourceIds, conversationId);
+      return crawlJobsApi.listLatestMainBySources(sourceIds, conversationId);
     },
     enabled: sourceIds.length > 0 && !!conversationId,
   });
@@ -69,13 +69,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   // Create a map of sourceId -> crawlJob
   const crawlJobMap = useMemo(() => {
     const map = new Map<string, typeof crawlJobsData[0]>();
-    crawlJobsData.forEach(job => {
-      // Get the most recent job for each source
-      const existing = map.get(job.source_id);
-      if (!existing || new Date(job.created_at) > new Date(existing.created_at)) {
-        map.set(job.source_id, job);
-      }
-    });
+    crawlJobsData.forEach(job => map.set(job.source_id, job));
     return map;
   }, [crawlJobsData]);
   
@@ -230,9 +224,10 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   // Sort pages: starting page (source URL) first, then by created_at
   if (displaySources.length > 0) {
     const startingSource = displaySources[0];
-    const startingUrl = startingSource.url;
+    const startingUrl = startingSource.initial_url;
     // Normalize URLs for comparison
     const normalizeForSort = (url: string) => {
+      if (!url) return '';
       try {
         const u = new URL(url);
         u.hash = '';
@@ -261,7 +256,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   // If crawling but no pages yet, show the starting page immediately as a placeholder
   if (isCrawling && displayPages.length === 0 && displaySources.length > 0) {
     const startingSource = displaySources[0];
-    const sourceUrl = startingSource.url;
+    const sourceUrl = startingSource.initial_url;
     try {
       const urlObj = new URL(sourceUrl);
       const path = urlObj.pathname || '/';
@@ -283,7 +278,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     displayPages.length,
     displaySources.reduce((sum, s) => {
       const crawlJob = crawlJobMap.get(s.id);
-      const jobIndexedCount = crawlJob ? ((crawlJob as CrawlJob).indexed_count ?? crawlJob.pages_indexed ?? 0) : 0;
+      const jobIndexedCount = crawlJob ? ((crawlJob as CrawlJob).indexed_count ?? 0) : 0;
       return sum + jobIndexedCount;
     }, 0)
   );

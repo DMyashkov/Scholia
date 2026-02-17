@@ -12,7 +12,7 @@ function recrawlLog(...args: unknown[]) {
 /**
  * Recrawl a source: clear graph data and create a new crawl job.
  * - Static: delete pages/edges/chunks/discovered, create job (crawls from seed)
- * - Dynamic: collect all page URLs before delete, pass as seed_urls so worker re-crawls seed + all added pages
+ * - Dynamic: collect all page URLs before delete, pass as explicit_crawl_urls so worker re-crawls seed + all added pages
  */
 export async function recrawlSource(conversationId: string, sourceId: string): Promise<void> {
   recrawlLog('START', { conversationId: conversationId.slice(0, 8), sourceId: sourceId.slice(0, 8) });
@@ -29,7 +29,6 @@ export async function recrawlSource(conversationId: string, sourceId: string): P
     const { data: pages } = await supabase
       .from('pages')
       .select('url')
-      .eq('conversation_id', conversationId)
       .eq('source_id', sourceId);
     if (pages && pages.length > 0) {
       seedUrls = pages.map((p) => p.url);
@@ -52,11 +51,10 @@ export async function recrawlSource(conversationId: string, sourceId: string): P
       .eq('id', job.id);
   }
 
-  // 2. Get page IDs for this source+conversation (for chunk deletion - chunks ref pages)
+  // 2. Get page IDs for this source (for chunk deletion - chunks ref pages)
   const { data: pages } = await supabase
     .from('pages')
     .select('id')
-    .eq('conversation_id', conversationId)
     .eq('source_id', sourceId);
 
   const pageIds = (pages ?? []).map((p) => p.id);
@@ -68,45 +66,43 @@ export async function recrawlSource(conversationId: string, sourceId: string): P
     if (chunksErr) recrawlLog('chunks delete error:', chunksErr);
   }
 
-  // 4. Delete discovered_links for this conversation+source
-  const { error: dlErr } = await supabase
-    .from('discovered_links')
-    .delete()
-    .eq('conversation_id', conversationId)
-    .eq('source_id', sourceId);
+  // 4. Delete discovered_links for this source (via from_page_id -> pages)
+  const { data: sourcePages } = await supabase.from('pages').select('id').eq('source_id', sourceId);
+  const sourcePageIds = (sourcePages ?? []).map((p) => p.id);
+  const { error: dlErr } =
+    sourcePageIds.length > 0
+      ? await supabase.from('discovered_links').delete().in('from_page_id', sourcePageIds)
+      : { error: null };
   recrawlLog('discovered_links delete', dlErr ? { error: dlErr } : 'ok');
 
-  // 5. Delete page_edges for this conversation+source
-  const { error: edgesErr } = await supabase
-    .from('page_edges')
-    .delete()
-    .eq('conversation_id', conversationId)
-    .eq('source_id', sourceId);
-  if (edgesErr) recrawlLog('page_edges delete error:', edgesErr);
+  // 5. Delete page_edges (via from_page_id - edges reference pages)
+  if (pageIds.length > 0) {
+    const { error: edgesErr } = await supabase
+      .from('page_edges')
+      .delete()
+      .in('from_page_id', pageIds);
+    if (edgesErr) recrawlLog('page_edges delete error:', edgesErr);
+  }
 
   // 6. Delete pages
   const { error: pagesErr } = await supabase
     .from('pages')
     .delete()
-    .eq('conversation_id', conversationId)
     .eq('source_id', sourceId);
   if (pagesErr) recrawlLog('pages delete error:', pagesErr);
 
-  // 7. Create new crawl job (with seed_urls for dynamic full recrawl) - explicit 0 for all progress fields
+  // 7. Create new crawl job (with explicit_crawl_urls for dynamic full recrawl) - explicit 0 for all progress fields
   const newJobPayload = {
     source_id: sourceId,
-    conversation_id: conversationId,
     status: 'queued',
-    pages_indexed: 0,
     indexed_count: 0,
     discovered_count: 0,
-    links_count: 0,
     total_pages: null,
     error_message: null,
     started_at: null,
     completed_at: null,
     last_activity_at: null,
-    seed_urls: seedUrls ?? null,
+    explicit_crawl_urls: seedUrls ?? null,
     encoding_chunks_done: 0,
     encoding_chunks_total: 0,
     encoding_discovered_done: 0,

@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { toast } from 'sonner';
 import { Conversation } from '@/types/chat';
 import { PanelLeft } from 'lucide-react';
 import { Quote, Source, CrawlDepth } from '@/types/source';
@@ -20,7 +21,7 @@ interface ChatAreaProps {
   isLoading: boolean;
   streamingMessage: string;
   onSendMessage: (message: string) => void;
-  onAddSource: (url: string, depth: CrawlDepth, options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }) => Promise<Source | null>;
+  onAddSource: (url: string, depth: CrawlDepth, options: { sameDomainOnly: boolean }) => Promise<Source | null>;
   onRemoveSource: (sourceId: string) => void;
   onRecrawlSource: (sourceId: string) => void;
   sidebarOpen: boolean;
@@ -58,33 +59,45 @@ export const ChatArea = ({
 
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const conversationId = conversation?.id ?? null;
-  const { data: crawlJobsData = [] } = useQuery({
-    queryKey: ['crawl-jobs-for-sources', sourceIds, conversationId ?? ''],
+  const { data: mainCrawlJobs = [] } = useQuery({
+    queryKey: ['crawl-jobs-main-for-sources', sourceIds, conversationId ?? ''],
     queryFn: async () => {
       if (!conversationId || sourceIds.length === 0) return [];
-      return crawlJobsApi.listBySourceAndConversation(sourceIds, conversationId);
+      return crawlJobsApi.listLatestMainBySources(sourceIds, conversationId);
     },
     enabled: sourceIds.length > 0 && !!conversationId,
   });
 
-  const crawlJobMap = useMemo(() => {
-    const map = new Map<string, (typeof crawlJobsData)[0]>();
-    crawlJobsData.forEach(job => {
-      const existing = map.get(job.source_id);
-      if (!existing || new Date(job.created_at) > new Date(existing.created_at)) {
-        map.set(job.source_id, job);
-      }
-    });
+  const mainCrawlJobMap = useMemo(() => {
+    const map = new Map<string, (typeof mainCrawlJobs)[0]>();
+    mainCrawlJobs.forEach(job => map.set(job.source_id, job));
     return map;
-  }, [crawlJobsData]);
+  }, [mainCrawlJobs]);
 
   const hasReadySource = useMemo(() => {
     if (sources.length === 0) return false;
     return sources.some(s => {
-      const job = crawlJobMap.get(s.id);
+      const job = mainCrawlJobMap.get(s.id);
       return job?.status === 'completed';
     });
-  }, [sources, crawlJobMap]);
+  }, [sources, mainCrawlJobMap]);
+
+  // Auto-remove sources that failed on initial add (0 pages) - unblocks conversation
+  const failedInitialSourceIds = useMemo(() => {
+    return sources.filter(s => {
+      const job = mainCrawlJobMap.get(s.id);
+      return job?.status === 'failed' && (job.indexed_count ?? 0) === 0;
+    }).map(s => s.id);
+  }, [sources, mainCrawlJobMap]);
+
+  useEffect(() => {
+    if (failedInitialSourceIds.length === 0) return;
+    failedInitialSourceIds.forEach(sourceId => {
+      onRemoveSource(sourceId);
+    });
+    // Toast once per batch
+    toast.error('Source failed to load and was removed. Try adding it again.');
+  }, [failedInitialSourceIds, onRemoveSource]);
 
   const { isDisabled: inputDisabled, disableReason } = useMemo((): { isDisabled: boolean; disableReason: DisableReason } => {
     if (sources.length === 0) return { isDisabled: true, disableReason: 'no_sources' };
@@ -153,7 +166,7 @@ export const ChatArea = ({
     }
   };
 
-  const handleAddSource = async (url: string, depth: CrawlDepth, options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }) => {
+  const handleAddSource = async (url: string, depth: CrawlDepth, options: { sameDomainOnly: boolean }) => {
     const added = await onAddSource(url, depth, options);
     if (added) {
       setAddSourceOpen(false);

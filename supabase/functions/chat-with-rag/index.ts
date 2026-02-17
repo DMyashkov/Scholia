@@ -3,6 +3,7 @@
 // Supports 2-round retrieval for complex questions. Streams step progress as NDJSON.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { corsHeaders } from 'jsr:@supabase/supabase-js@2/cors';
 
 const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 const OPENAI_CHAT_MODEL = 'gpt-4o-mini';
@@ -11,11 +12,6 @@ const MATCH_CHUNKS_PER_QUERY_ROUND2 = 10;
 const MATCH_CHUNKS_MERGED_CAP = 45;
 const ROUND2_QUERIES_CAP = 10;
 const LAST_MESSAGES_COUNT = 10;
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
 
 interface QuotePayload {
   snippet: string;
@@ -52,6 +48,8 @@ interface DecomposeResult {
 }
 
 type ChunkRow = { id: string; page_id: string; content: string; page_title: string; page_path: string; source_domain: string; distance?: number };
+type PageRow = { id: string; source_id: string; title: string | null; path: string; url: string };
+type SourceRow = { id: string; domain: string };
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -99,11 +97,20 @@ Deno.serve(async (req) => {
       return;
     }
 
-    const { data: pages, error: pagesError } = await supabase
-      .from('pages')
-      .select('id, source_id, title, path, url')
-      .eq('conversation_id', conversationId)
-      .eq('status', 'indexed');
+    const { data: sources } = await supabase
+      .from('sources')
+      .select('id')
+      .eq('conversation_id', conversationId);
+    const sourceIds = (sources ?? []).map((s) => s.id);
+    const { data: pagesData, error: pagesError } =
+      sourceIds.length > 0
+        ? await supabase
+            .from('pages')
+            .select('id, source_id, title, path, url')
+            .in('source_id', sourceIds)
+            .eq('status', 'indexed')
+        : { data: [] as PageRow[], error: null };
+    const pages = (pagesData ?? []) as PageRow[];
 
     if (pagesError || !pages?.length) {
       const content = !pages?.length
@@ -113,7 +120,6 @@ Deno.serve(async (req) => {
         conversation_id: conversationId,
         role: 'assistant',
         content,
-        quotes: null,
       }).select('*');
       if (insertErr || !inserted?.length) {
           await emit({ error: insertErr?.message ?? 'Failed to save message' });
@@ -223,7 +229,6 @@ Deno.serve(async (req) => {
         conversation_id: conversationId,
         role: 'assistant',
         content: noChunksMessage,
-        quotes: null,
       }).select('*');
         await emit({ done: true, message: inserted?.[0] ?? { content: noChunksMessage }, quotes: [] });
         return;
@@ -235,12 +240,12 @@ Deno.serve(async (req) => {
     console.log('[RAG-TITLE] isFirstMessage=', isFirstMessage, 'lastMessages.length=', lastMessages.length, 'appendToMessageId=', appendToMessageId);
     const chatResult = await chat(openaiKey, context, lastMessages, userMessage.trim(), combined, isFirstMessage);
 
-    const pageById = new Map(pages.map((p) => [p.id, p]));
-    const { data: sources } = await supabase
+    const pageById = new Map<string, PageRow>(pages.map((p) => [p.id, p]));
+    const { data: sourceRows } = await supabase
       .from('sources')
       .select('id, domain')
       .in('id', [...new Set(pages.map((p) => p.source_id))]);
-    const sourceById = new Map((sources || []).map((s) => [s.id, s]));
+    const sourceById = new Map<string, SourceRow>(((sourceRows || []) as SourceRow[]).map((s) => [s.id, s]));
 
     // Fetch full page content for quoted pages (to show richer context in sidebar)
     const quotedPageIds = [...new Set(chatResult.quotes.map((q) => q.pageId))];
@@ -341,7 +346,6 @@ Deno.serve(async (req) => {
           conversation_id: conversationId,
           role: 'assistant',
           content: chatResult.content,
-          quotes: quotesOut,
           owner_id: ownerId,
           was_multi_step: didSecondRound,
           follows_message_id: appendToMessageId,
@@ -363,7 +367,6 @@ Deno.serve(async (req) => {
           conversation_id: conversationId,
           role: 'assistant',
           content: chatResult.content,
-          quotes: quotesOut,
           owner_id: ownerId,
           was_multi_step: didSecondRound,
         })
@@ -395,28 +398,43 @@ Deno.serve(async (req) => {
 
     if (quotesOut.length > 0) {
       for (const q of quotesOut) {
-        await supabase.from('citations').insert({
+        await supabase.from('quotes').insert({
           message_id: assistantRow.id,
           page_id: q.pageId,
-          source_id: q.sourceId,
           snippet: q.snippet,
+          page_title: q.pageTitle ?? '',
+          page_path: q.pagePath ?? '',
+          domain: q.domain ?? '',
+          page_url: q.pageUrl ?? null,
+          context_before: q.contextBefore ?? null,
+          context_after: q.contextAfter ?? null,
           owner_id: ownerId,
         });
-          }
+      }
     }
 
     // Page suggestion: only when answer indicates context doesn't include the info (skip when appending)
     let suggestedPage: { url: string; title: string; contextSnippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string } | null = null;
     const cantAnswer = indicatesCantAnswer(chatResult.content);
     const dynamicMode = (conv as { dynamic_mode?: boolean } | null)?.dynamic_mode !== false;
+    console.log('[RAG-SUGGEST] evaluating', JSON.stringify({ appendToMessageId, cantAnswer, dynamicMode, conversationId }));
 
-    if (!appendToMessageId && cantAnswer && dynamicMode) {
+    if (appendToMessageId) {
+      console.log('[RAG-SUGGEST] no suggested page: appendToMessageId=true');
+    } else if (!cantAnswer) {
+      console.log('[RAG-SUGGEST] no suggested page: cantAnswer=false (model did not indicate lack of context)');
+    } else if (!dynamicMode) {
+      console.log('[RAG-SUGGEST] no suggested page: dynamicMode=false');
+    } else {
       const { data: convSources } = await supabase
         .from('sources')
         .select('id')
         .eq('conversation_id', conversationId);
       const allSourceIds = (convSources || []).map((s: { id: string }) => s.id);
-      if (allSourceIds.length > 0) {
+      if (allSourceIds.length === 0) {
+        console.log('[RAG-SUGGEST] no suggested page: no sources for conversation', conversationId);
+      } else {
+        console.log('[RAG-SUGGEST] attempting suggestion: sourceIds=', allSourceIds.length, '| conversationId=', conversationId);
         try {
           const suggestionQueries = [
             ...searchQueries.slice(0, 3),
@@ -427,13 +445,18 @@ Deno.serve(async (req) => {
 
           const matchMap = new Map<string, { m: { to_url: string; anchor_text: string | null; context_snippet: string; source_id: string; from_page_id: string | null }; distance: number }>();
           for (let i = 0; i < queryEmbs.length; i++) {
-            const { data: matches } = await supabase.rpc('match_discovered_links', {
+            const { data: matches, error: rpcErr } = await supabase.rpc('match_discovered_links', {
               query_embedding: queryEmbs[i],
-              match_conversation_id: conversationId,
               match_source_ids: allSourceIds,
               match_count: 12,
             });
+            if (rpcErr) {
+              console.log('[RAG-SUGGEST] match_discovered_links RPC error:', rpcErr.message, '| queryIndex:', i);
+            }
             const list = (matches || []) as { to_url: string; anchor_text: string | null; context_snippet: string; source_id: string; from_page_id: string | null; distance: number }[];
+            if (list.length === 0 && i === 0) {
+              console.log('[RAG-SUGGEST] match_discovered_links returned 0 rows for first query | sourceIds:', allSourceIds.length);
+            }
             for (const m of list) {
               const key = `${m.source_id}:${m.to_url}`;
               const dist = m.distance ?? 1;
@@ -468,9 +491,12 @@ Deno.serve(async (req) => {
               promptedByQuestion: userMessage.trim(),
               fromPageTitle,
             };
+            console.log('[RAG-SUGGEST] suggested page set:', top.to_url);
+          } else {
+            console.log('[RAG-SUGGEST] no suggested page: match_discovered_links returned no non-indexed candidates | matchMapSize:', matchMap.size, '| sortedCount:', sorted.length);
           }
         } catch (e) {
-          console.warn('[RAG] match_discovered_links failed:', e);
+          console.warn('[RAG-SUGGEST] match_discovered_links failed:', e);
         }
       }
     }
@@ -478,7 +504,7 @@ Deno.serve(async (req) => {
     if (suggestedPage) {
       await supabase
         .from('messages')
-        .update({ suggested_page: suggestedPage })
+        .update({ suggested_page: suggestedPage as Record<string, unknown> })
         .eq('id', assistantRow.id);
     }
 
@@ -526,12 +552,17 @@ function indicatesCantAnswer(content: string): boolean {
     /does not provide|doesn't provide|does not contain|doesn't contain/,
     /does not list|doesn't list|does not have|doesn't have/,
     /unable to (find|provide|list|answer)/,
-    /i don't have|i do not have/,
+    /i don't have|i do not have|i cannot find|i can't find/,
     /no (indexed |)(information|content|list|data) (in |)(the |)context/,
     /the (provided |)context does not/,
     /(the |)context (does not|doesn't) (include|contain|have|provide|list)/,
     /focuses exclusively on|mainly discusses|only (discusses|mentions|covers)/,
     /aside from|other than.*not (included|mentioned|listed)/,
+    /not (available|mentioned|covered|included|found) (in |)(the |)context/,
+    /(the |)context (only |)(includes|contains|covers|mentions)/,
+    /cannot (find|provide|answer|determine)/,
+    /is not (in |)(the |)context|not in the (provided |)context/,
+    /limited to.*context|based (solely |)on the context/,
   ];
   return patterns.some((p) => p.test(lower));
 }

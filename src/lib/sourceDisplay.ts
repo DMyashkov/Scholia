@@ -3,11 +3,11 @@
  * (e.g. Wikipedia start page is Joe Biden but first crawled page was President of the United States).
  */
 export function getSourceDisplayLabel(source: {
-  url: string;
+  initial_url: string;
   domain: string;
   source_label?: string | null;
 }): string {
-  const derived = deriveLabelFromUrl(source.url);
+  const derived = deriveLabelFromUrl(source.initial_url);
   if (derived) return derived;
   return source.source_label ?? source.domain;
 }

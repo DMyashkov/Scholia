@@ -53,11 +53,11 @@ export const useAddSourceToConversation = () => {
       inheritFromConversationId?: string;
     }) => {
       if (!user) throw new Error('Authentication required');
-      const normalizedUrl = normalizeSourceUrl(sourceData.url || '');
-      const sourceDataNorm = { ...sourceData, url: normalizedUrl };
+      const normalizedUrl = normalizeSourceUrl(sourceData.initial_url || '');
+      const sourceDataNorm = { ...sourceData, initial_url: normalizedUrl };
 
       const existingSources = await sourcesApi.listByConversation(conversationId);
-      const alreadyAdded = existingSources.some((s) => s.url === normalizedUrl);
+      const alreadyAdded = existingSources.some((s) => s.initial_url === normalizedUrl);
       if (alreadyAdded) {
         throw new Error('This source is already added to this conversation');
       }

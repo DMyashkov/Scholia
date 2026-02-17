@@ -215,13 +215,9 @@ const ConversationItem = ({
                 className="w-4 h-4 rounded-full bg-secondary border border-background flex items-center justify-center overflow-hidden"
                 style={{ zIndex: 3 - i }}
               >
-                {source.favicon ? (
-                  <img src={source.favicon} alt="" className="w-3 h-3" />
-                ) : (
-                  <span className="text-[8px] font-medium text-muted-foreground uppercase">
-                    {getSourceDisplayLabel(source).charAt(0)}
-                  </span>
-                )}
+                <span className="text-[8px] font-medium text-muted-foreground uppercase">
+                  {getSourceDisplayLabel(source).charAt(0)}
+                </span>
               </div>
             ))}
             {conversation.sources.length > 3 && (

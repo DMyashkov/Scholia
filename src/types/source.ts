@@ -11,14 +11,11 @@ export interface DiscoveredPage {
 
 export interface Source {
   id: string;
-  url: string;
+  initial_url: string;
   domain: string;
   source_label?: string | null; // Human-readable label (e.g. "Joe Biden"). domain = hostname.
-  favicon?: string;
   status: SourceStatus;
   crawlDepth: CrawlDepth;
-  includeSubpages: boolean;
-  includePdfs: boolean;
   sameDomainOnly: boolean;
   pagesIndexed: number;
   totalPages: number;

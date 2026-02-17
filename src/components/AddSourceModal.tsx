@@ -21,7 +21,7 @@ interface AddSourceModalProps {
   onAddSource: (
     url: string,
     depth: CrawlDepth,
-    options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }
+    options: { sameDomainOnly: boolean }
   ) => void | Promise<unknown>;
   /** Optional message to show at top (e.g. "Add source first") */
   promptMessage?: string | null;
@@ -50,8 +50,6 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
     setIsSubmitting(true);
     try {
       const result = onAddSource(url.trim(), depth, {
-        includeSubpages: true,
-        includePdfs: false,
         sameDomainOnly,
       });
       await (typeof result?.then === 'function' ? result : Promise.resolve(result));

@@ -20,10 +20,17 @@ export async function indexConversationForRag(
     return { chunksCreated: 0 };
   }
 
+  const { data: sources } = await supabase
+    .from('sources')
+    .select('id')
+    .eq('conversation_id', conversationId);
+  const sourceIds = (sources ?? []).map((s) => s.id);
+  if (sourceIds.length === 0) return { chunksCreated: 0 };
+
   const { data: pages, error: pagesError } = await supabase
     .from('pages')
     .select('id, content, owner_id')
-    .eq('conversation_id', conversationId)
+    .in('source_id', sourceIds)
     .eq('status', 'indexed')
     .not('content', 'is', null);
 
@@ -104,12 +111,12 @@ export async function indexConversationForRag(
   return { chunksCreated: inserted + discoveredEmbedded };
 }
 
-/** Index a single page for RAG and report progress to add_page_jobs */
+/** Index a single page for RAG and report progress to crawl_jobs (add-page flow) */
 export async function indexSinglePageForRag(
   pageId: string,
   content: string,
   ownerId: string,
-  addPageJobId: string
+  crawlJobId: string
 ): Promise<{ chunksCreated: number }> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -133,14 +140,14 @@ export async function indexSinglePageForRag(
 
   const totalChunks = chunkSpecs.length;
   await supabase
-    .from('add_page_jobs')
+    .from('crawl_jobs')
     .update({
       encoding_chunks_total: totalChunks,
       encoding_chunks_done: 0,
       status: 'encoding',
       updated_at: new Date().toISOString(),
     })
-    .eq('id', addPageJobId);
+    .eq('id', crawlJobId);
 
   let inserted = 0;
   for (let i = 0; i < chunkSpecs.length; i += EMBED_BATCH_SIZE) {
@@ -163,29 +170,28 @@ export async function indexSinglePageForRag(
     }
     inserted += rows.length;
     await supabase
-      .from('add_page_jobs')
+      .from('crawl_jobs')
       .update({
         encoding_chunks_done: inserted,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', addPageJobId);
+      .eq('id', crawlJobId);
   }
   return { chunksCreated: inserted };
 }
 
-/** Embed discovered_links for a single page (add-page flow) and report progress.
+/** Embed discovered_links for a single page (add-page flow) and report progress to crawl_jobs.
  * Skips links pointing to already-indexed pages - we never suggest those. */
 export async function embedDiscoveredLinksForPage(
   conversationId: string,
   pageId: string,
   apiKey: string,
-  addPageJobId: string
+  crawlJobId: string
 ): Promise<number> {
-  const indexedUrls = await getIndexedPageUrls(conversationId);
+  const indexedUrls = await getIndexedPageUrlsForPage(pageId);
   const { data: links, error: fetchError } = await supabase
     .from('discovered_links')
     .select('id, context_snippet, to_url')
-    .eq('conversation_id', conversationId)
     .eq('from_page_id', pageId)
     .is('embedding', null);
 
@@ -196,13 +202,13 @@ export async function embedDiscoveredLinksForPage(
 
   const total = toEmbed.length;
   await supabase
-    .from('add_page_jobs')
+    .from('crawl_jobs')
     .update({
       encoding_discovered_total: total,
       encoding_discovered_done: 0,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', addPageJobId);
+    .eq('id', crawlJobId);
 
   const texts = toEmbed.map((l) => l.context_snippet);
   const embeddings = await embedBatch(apiKey, texts);
@@ -217,22 +223,22 @@ export async function embedDiscoveredLinksForPage(
     if (!error) updated++;
     if (updated % DISCOVERED_PROGRESS_BATCH === 0) {
       await supabase
-        .from('add_page_jobs')
+        .from('crawl_jobs')
         .update({
           encoding_discovered_done: updated,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', addPageJobId);
+        .eq('id', crawlJobId);
     }
   }
   if (updated > 0) {
     await supabase
-      .from('add_page_jobs')
+      .from('crawl_jobs')
       .update({
         encoding_discovered_done: updated,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', addPageJobId);
+      .eq('id', crawlJobId);
     const skipped = links.length - toEmbed.length;
     console.log('[indexer] add-page embedded', updated, 'discovered_links', skipped > 0 ? `(skipped ${skipped} already-indexed)` : '');
   }
@@ -255,12 +261,32 @@ function normalizeUrlForCompare(url: string): string {
   }
 }
 
-/** Fetch indexed page URLs for a conversation - we never suggest already-indexed pages */
-async function getIndexedPageUrls(conversationId: string): Promise<Set<string>> {
+/** Fetch indexed page URLs for a page's source - we never suggest already-indexed pages */
+async function getIndexedPageUrlsForPage(pageId: string): Promise<Set<string>> {
+  const { data: page } = await supabase.from('pages').select('source_id').eq('id', pageId).single();
+  const sourceId = (page as { source_id?: string } | null)?.source_id;
+  if (!sourceId) return new Set();
   const { data: pages, error } = await supabase
     .from('pages')
     .select('url')
-    .eq('conversation_id', conversationId)
+    .eq('source_id', sourceId)
+    .eq('status', 'indexed');
+  if (error || !pages?.length) return new Set();
+  return new Set(pages.map((p) => normalizeUrlForCompare(p.url || '')));
+}
+
+/** Fetch indexed page URLs for a conversation's sources - we never suggest already-indexed pages */
+async function getIndexedPageUrls(conversationId: string): Promise<Set<string>> {
+  const { data: sources } = await supabase
+    .from('sources')
+    .select('id')
+    .eq('conversation_id', conversationId);
+  const sourceIds = (sources ?? []).map((s) => s.id);
+  if (sourceIds.length === 0) return new Set();
+  const { data: pages, error } = await supabase
+    .from('pages')
+    .select('url')
+    .in('source_id', sourceIds)
     .eq('status', 'indexed');
   if (error || !pages?.length) return new Set();
   return new Set(pages.map((p) => normalizeUrlForCompare(p.url || '')));
@@ -268,10 +294,22 @@ async function getIndexedPageUrls(conversationId: string): Promise<Set<string>> 
 
 async function embedDiscoveredLinks(conversationId: string, apiKey: string, crawlJobId?: string): Promise<number> {
   const indexedUrls = await getIndexedPageUrls(conversationId);
+  const { data: sources } = await supabase
+    .from('sources')
+    .select('id')
+    .eq('conversation_id', conversationId);
+  const sourceIds = (sources ?? []).map((s) => s.id);
+  if (sourceIds.length === 0) return 0;
+  const { data: pages } = await supabase
+    .from('pages')
+    .select('id')
+    .in('source_id', sourceIds);
+  const pageIds = (pages ?? []).map((p) => p.id);
+  if (pageIds.length === 0) return 0;
   const { data: links, error: fetchError } = await supabase
     .from('discovered_links')
     .select('id, context_snippet, to_url')
-    .eq('conversation_id', conversationId)
+    .in('from_page_id', pageIds)
     .is('embedding', null);
 
   if (fetchError || !links?.length) return 0;

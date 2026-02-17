@@ -15,22 +15,19 @@ interface SourceDataLoaderProps {
 
 export const SourceDataLoader = ({ source, onDataLoaded }: SourceDataLoaderProps) => {
   const { data: pages = [] } = usePages(source.id);
-  const { data: crawlJob } = useCrawlJob(source.id);
+  const { data: crawlJob } = useCrawlJob(source.id, source.conversation_id);
 
   // Convert to UI format
   const uiSource: Source = {
     id: source.id,
-    url: source.url,
+    initial_url: source.initial_url,
     domain: source.domain,
-    favicon: source.favicon || undefined,
     status: crawlJob?.status === 'queued' || crawlJob?.status === 'running' ? 'crawling' 
       : crawlJob?.status === 'failed' ? 'error' 
       : 'ready',
     crawlDepth: source.crawl_depth,
-    includeSubpages: source.include_subpages,
-    includePdfs: source.include_pdfs,
     sameDomainOnly: source.same_domain_only,
-    pagesIndexed: crawlJob?.pages_indexed || 0,
+    pagesIndexed: crawlJob?.indexed_count ?? 0,
     totalPages: crawlJob?.total_pages || pages.length || 0,
     lastUpdated: new Date(source.updated_at),
     discoveredPages: pages.map((p: Page) => ({

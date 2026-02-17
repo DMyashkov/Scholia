@@ -144,7 +144,7 @@ const SourceChip = ({
           className="bg-popover border-border p-3 max-w-xs"
         >
             <div className="space-y-1.5 text-xs">
-            <p className="font-medium text-foreground">{source.url}</p>
+            <p className="font-medium text-foreground">{source.initial_url}</p>
             <div className="flex items-center gap-2 text-muted-foreground">
               <span>Depth: {getDepthLabel(source.crawlDepth)}</span>
             </div>
@@ -195,10 +195,10 @@ export const SourcesBar = ({
   // Load crawl jobs for all sources to determine real status (filter by conversation so switching convs shows correct state)
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const { data: crawlJobsData = [] } = useQuery({
-    queryKey: ['crawl-jobs-for-sources-bar', sourceIds, conversationId ?? ''],
+    queryKey: ['crawl-jobs-main-for-sources', sourceIds, conversationId ?? ''],
     queryFn: async () => {
       if (!conversationId || sourceIds.length === 0) return [];
-      return crawlJobsApi.listBySourceAndConversation(sourceIds, conversationId);
+      return crawlJobsApi.listLatestMainBySources(sourceIds, conversationId);
     },
     enabled: sourceIds.length > 0 && !!conversationId,
   });
@@ -206,13 +206,7 @@ export const SourcesBar = ({
   // Create a map of sourceId -> crawlJob
   const crawlJobMap = useMemo(() => {
     const map = new Map<string, typeof crawlJobsData[0]>();
-    crawlJobsData.forEach(job => {
-      // Get the most recent job for each source
-      const existing = map.get(job.source_id);
-      if (!existing || new Date(job.created_at) > new Date(existing.created_at)) {
-        map.set(job.source_id, job);
-      }
-    });
+    crawlJobsData.forEach(job => map.set(job.source_id, job));
     return map;
   }, [crawlJobsData]);
   
@@ -239,9 +233,8 @@ export const SourcesBar = ({
           status = 'ready';
         }
         
-        // Use indexed_count if available, fallback to pages_indexed; prefer actual DB count when we have pages
         const job = crawlJob as CrawlJob;
-        const jobIndexed = job.indexed_count ?? job.pages_indexed ?? 0;
+        const jobIndexed = job.indexed_count ?? 0;
         pagesIndexed = Math.max(jobIndexed, sourcePages.length);
         const maxPagesForDepth = source.crawlDepth === 'dynamic' || source.crawlDepth === 'singular' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
         if (source.crawlDepth === 'dynamic') {

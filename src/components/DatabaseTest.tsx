@@ -61,11 +61,9 @@ export function DatabaseTest() {
       const newSource = await addSource.mutateAsync({
         conversationId: newConv.id,
         sourceData: {
-          url: 'https://example.com',
+          initial_url: 'https://example.com',
           domain: 'example.com',
           crawl_depth: 'shallow',
-          include_subpages: true,
-          include_pdfs: false,
           same_domain_only: true,
         },
       });

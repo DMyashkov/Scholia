@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
-import type { AddPageJob, CrawlJob, Page, PageEdge } from '@/lib/db/types';
+import type { CrawlJob, Page, PageEdge } from '@/lib/db/types';
 
 /**
  * Hook to subscribe to realtime updates for crawl progress
@@ -49,50 +49,25 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
         (payload) => {
           const job = payload.new as CrawlJob;
 
-            queryClient.invalidateQueries({ predicate: (query) => {
-              const key = query.queryKey;
-              return (
-                (Array.isArray(key) && key[0] === 'crawl-job' && key[1] === job.source_id) ||
-                (Array.isArray(key) && key[0] === 'crawl-jobs' && (key[1] === job.source_id || key.length === 1)) ||
-                (Array.isArray(key) && key[0] === 'crawl-jobs-for-sources') ||
-                (Array.isArray(key) && key[0] === 'crawl-jobs-for-sources-bar')
-              );
-            }});
-            queryClient.invalidateQueries({ queryKey: ['conversation-sources', conversationId] });
-          }
+          queryClient.invalidateQueries({ predicate: (query) => {
+            const key = query.queryKey;
+            return (
+              (Array.isArray(key) && key[0] === 'crawl-job' && key[1] === job.source_id) ||
+              (Array.isArray(key) && key[0] === 'crawl-jobs' && (key[1] === job.source_id || key.length === 1)) ||
+              (Array.isArray(key) && key[0] === 'crawl-jobs-for-sources') ||
+              (Array.isArray(key) && key[0] === 'crawl-jobs-for-sources-bar') ||
+              (Array.isArray(key) && key[0] === 'crawl-jobs-main-for-sources') ||
+              // Add-page jobs are now crawl_jobs with explicit_crawl_urls
+              (Array.isArray(key) && key[0] === 'add-page-job' && key[1] === conversationId && key[2] === job.source_id && job.explicit_crawl_urls != null)
+            );
+          }});
+          queryClient.invalidateQueries({ queryKey: ['conversation-sources', conversationId] });
+        }
         )
         .subscribe();
 
       channelsRef.current.push(crawlJobsChannel);
     }
-
-    // Subscribe to add_page_jobs (same pattern as crawl_jobs - single source of truth for all progress)
-    const addPageJobsChannel = supabase
-      .channel(`add-page-jobs:${conversationId}`)
-      .on<AddPageJob>(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'add_page_jobs',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const job = payload.new as AddPageJob;
-          queryClient.invalidateQueries({ predicate: (query) => {
-            const key = query.queryKey;
-            return (
-              Array.isArray(key) &&
-              key[0] === 'add-page-job' &&
-              key[1] === conversationId &&
-              key[2] === job.source_id
-            );
-          }});
-        }
-      )
-      .subscribe();
-
-    channelsRef.current.push(addPageJobsChannel);
 
     const syncAfterSubscribe = () => {
       queryClient.invalidateQueries({ predicate: (query) => {
@@ -104,18 +79,19 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
       }});
     };
 
-    // Subscribe to pages INSERTs for this conversation only.
-    // Use conversation_id=eq (single UUID) so we don't rely on source_id=in.(...) with UUIDs.
-    const pagesChannel = supabase
-      .channel(`pages:${conversationId}`)
-      .on<Page>(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'pages',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
+    // Subscribe to pages INSERTs for sources in this conversation.
+    const pagesChannel =
+      sourceIds.length > 0
+        ? supabase
+            .channel(`pages:${conversationId}`)
+            .on<Page>(
+              'postgres_changes',
+              {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'pages',
+                filter: `source_id=in.(${sourceIds.join(',')})`,
+              },
         (payload) => {
           if (pagesDebounceTimerRef.current) clearTimeout(pagesDebounceTimerRef.current);
           pagesDebounceTimerRef.current = setTimeout(() => {
@@ -131,14 +107,13 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
           }, 300);
         }
       )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') syncAfterSubscribe();
-      });
+            .subscribe((status) => {
+              if (status === 'SUBSCRIBED') syncAfterSubscribe();
+            })
+        : null;
+    if (pagesChannel) channelsRef.current.push(pagesChannel);
 
-    channelsRef.current.push(pagesChannel);
-
-    // Subscribe to page_edges INSERTs for this conversation only.
-    // Use conversation_id=eq (single UUID) so we don't rely on source_id=in.(...) with UUIDs.
+    // Subscribe to page_edges INSERTs (no filter - conversation_id removed; we invalidate and refetch)
     const edgesChannel = supabase
       .channel(`page-edges:${conversationId}`)
       .on<PageEdge>(
@@ -147,7 +122,6 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
           event: 'INSERT',
           schema: 'public',
           table: 'page_edges',
-          filter: `conversation_id=eq.${conversationId}`,
         },
         () => {
           // Debounce: 2000+ edge INSERTs during crawl would exhaust browser connections.
@@ -186,47 +160,48 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
     channelsRef.current.push(edgesChannel);
 
     // Subscribe to discovered_links INSERTs (new links) and UPDATEs (embedding set during encoding)
-    const dlChannel = supabase
-      .channel(`discovered-links:${conversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'discovered_links',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        () => {
-          if (discoveredLinksDebounceRef.current) clearTimeout(discoveredLinksDebounceRef.current);
-          discoveredLinksDebounceRef.current = setTimeout(() => {
-            discoveredLinksDebounceRef.current = null;
-            queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
-            queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-count' });
-          }, DISCOVERED_LINKS_DEBOUNCE_MS);
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'discovered_links',
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        () => {
-          if (discoveredLinksDebounceRef.current) clearTimeout(discoveredLinksDebounceRef.current);
-          discoveredLinksDebounceRef.current = setTimeout(() => {
-            discoveredLinksDebounceRef.current = null;
-            queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
-            queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] });
-            queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-count' });
-            queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-encoded-count' });
-          }, DISCOVERED_LINKS_DEBOUNCE_MS);
-        }
-      )
-      .subscribe();
-
-    channelsRef.current.push(dlChannel);
+    // No filter: source_id dropped; RLS restricts to our rows
+    const dlChannel =
+      sourceIds.length > 0
+        ? supabase
+            .channel(`discovered-links:${conversationId}`)
+            .on(
+              'postgres_changes',
+              {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'discovered_links',
+              },
+              () => {
+                if (discoveredLinksDebounceRef.current) clearTimeout(discoveredLinksDebounceRef.current);
+                discoveredLinksDebounceRef.current = setTimeout(() => {
+                  discoveredLinksDebounceRef.current = null;
+                  queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
+                  queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-count' });
+                }, DISCOVERED_LINKS_DEBOUNCE_MS);
+              }
+            )
+            .on(
+              'postgres_changes',
+              {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'discovered_links',
+              },
+              () => {
+                if (discoveredLinksDebounceRef.current) clearTimeout(discoveredLinksDebounceRef.current);
+                discoveredLinksDebounceRef.current = setTimeout(() => {
+                  discoveredLinksDebounceRef.current = null;
+                  queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
+                  queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] });
+                  queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-count' });
+                  queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-encoded-count' });
+                }, DISCOVERED_LINKS_DEBOUNCE_MS);
+              }
+            )
+            .subscribe()
+        : null;
+    if (dlChannel) channelsRef.current.push(dlChannel);
 
     return () => {
       if (edgesDebounceTimerRef.current) {

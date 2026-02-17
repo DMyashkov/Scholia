@@ -5,6 +5,7 @@ import { encodeTextForFragment } from '@/lib/utils';
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
@@ -82,6 +83,9 @@ export const SourcePreviewDrawer = ({
               <SheetTitle className="text-lg font-serif leading-tight">
                 {cleanPageTitleForDisplay(quote.pageTitle, quote.domain)}
               </SheetTitle>
+              <SheetDescription className="sr-only">
+                Quote and surrounding context from the cited source page
+              </SheetDescription>
               <p className="text-xs text-muted-foreground mt-1 truncate flex items-center gap-1">
                 <span className="text-primary/80">{quote.domain}</span>
                 <span className="opacity-50">{quote.pagePath}</span>

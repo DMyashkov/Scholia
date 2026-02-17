@@ -4,12 +4,12 @@ import { useConversations, useCreateConversation, useDeleteConversation, useUpda
 import { useMessages, useCreateMessage, useUpdateMessage } from './useMessages';
 import { useConversationSources, useAddSourceToConversation, useRemoveSourceFromConversation, useCheckExistingSource } from './useConversationSources';
 import { recrawlSource as recrawlSourceApi } from '@/lib/db/recrawl';
-import { addPageJobsApi } from '@/lib/db';
+import { crawlJobsApi } from '@/lib/db';
 import { useSourceWithData } from './useSourceWithData';
 import { useRealtimeCrawlUpdates } from './useRealtimeCrawlUpdates';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import type { Conversation as DBConversation, Message as DBMessage } from '@/lib/db/types';
+import type { Conversation as DBConversation, Message as DBMessage, MessageQuote } from '@/lib/db/types';
 import type { Conversation, Message } from '@/types/chat';
 import type { Source } from '@/types/source';
 import { deriveTitleFromUrl } from '@/lib/utils';
@@ -27,20 +27,45 @@ const dbConversationToUI = (db: DBConversation & { dynamic_mode?: boolean }, mes
   updatedAt: new Date(db.updated_at),
 });
 
+type DbQuoteRow = {
+  id: string;
+  page_id: string;
+  snippet: string;
+  page_title: string;
+  page_path: string;
+  domain: string;
+  context_before?: string | null;
+  context_after?: string | null;
+  pages?: { source_id: string } | null;
+};
+
+const mapQuoteDbToUI = (q: DbQuoteRow): MessageQuote => ({
+  id: q.id,
+  sourceId: q.pages?.source_id ?? '',
+  pageId: q.page_id,
+  snippet: q.snippet,
+  pageTitle: q.page_title ?? '',
+  pagePath: q.page_path ?? '',
+  domain: q.domain ?? '',
+  ...(q.context_before ? { contextBefore: q.context_before } : {}),
+  ...(q.context_after ? { contextAfter: q.context_after } : {}),
+});
+
 const dbMessageToUI = (db: DBMessage): Message => {
   const extended = db as DBMessage & {
-    quotes?: { id: string; sourceId: string; pageId: string; snippet: string; pageTitle: string; pagePath: string; domain: string; contextBefore?: string; contextAfter?: string }[];
+    quotes?: DbQuoteRow[] | null;
     suggested_page?: { url: string; title: string; contextSnippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string } | null;
     follows_message_id?: string | null;
     indexed_page_display?: string | null;
   };
-  const quotes = extended.quotes ?? [];
+  const quotesDb = extended.quotes ?? [];
+  const quotes = quotesDb.map(mapQuoteDbToUI) as Message['quotes'];
   return {
     id: db.id,
     role: db.role,
     content: db.content,
     timestamp: new Date(db.created_at),
-    quotes: quotes as Message['quotes'],
+    quotes,
     sourcesUsed: [...new Set(quotes.map((q) => q.sourceId))],
     wasMultiStep: db.was_multi_step ?? false,
     suggestedPage: extended.suggested_page ?? undefined,
@@ -103,13 +128,10 @@ export const useChatDatabase = () => {
     const db = cs.source;
     return {
       id: db.id,
-      url: db.url,
+      initial_url: db.initial_url,
       domain: db.domain,
-      favicon: db.favicon || undefined,
       status: 'crawling' as const, // Default to crawling - SidebarCrawlPanel will update based on actual crawl job
       crawlDepth: db.crawl_depth,
-      includeSubpages: db.include_subpages,
-      includePdfs: db.include_pdfs,
       sameDomainOnly: db.same_domain_only,
       pagesIndexed: 0, // Will be updated by realtime
       totalPages: 0, // Will be updated by realtime
@@ -171,7 +193,7 @@ export const useChatDatabase = () => {
     
     if (!finalConvId) {
       // Create conversation first with title from first source
-      const title = deriveTitleFromUrl(source.url) || 'New Research';
+      const title = deriveTitleFromUrl(source.initial_url) || 'New Research';
       const newConv = await createConversationMutation.mutateAsync(title);
       finalConvId = newConv.id;
       setActiveConversationId(newConv.id);
@@ -180,12 +202,9 @@ export const useChatDatabase = () => {
     const dbSource = await addSourceMutation.mutateAsync({
       conversationId: finalConvId,
       sourceData: {
-        url: source.url,
+        initial_url: source.initial_url,
         domain: source.domain,
-        favicon: source.favicon,
         crawl_depth: source.crawlDepth,
-        include_subpages: source.includeSubpages,
-        include_pdfs: source.includePdfs,
         same_domain_only: source.sameDomainOnly,
       },
     });
@@ -193,13 +212,10 @@ export const useChatDatabase = () => {
     // Map db source to UI Source for the caller (e.g. to select and open drawer).
     return {
       id: dbSource.id,
-      url: dbSource.url,
+      initial_url: dbSource.initial_url,
       domain: dbSource.domain,
-      favicon: dbSource.favicon ?? undefined,
       status: 'crawling' as const,
       crawlDepth: dbSource.crawl_depth,
-      includeSubpages: dbSource.include_subpages,
-      includePdfs: dbSource.include_pdfs,
       sameDomainOnly: dbSource.same_domain_only,
       pagesIndexed: 0,
       totalPages: 0,
@@ -224,7 +240,7 @@ export const useChatDatabase = () => {
     queryClient.invalidateQueries({ queryKey: ['conversation-sources', activeConversationId] });
     queryClient.invalidateQueries({ queryKey: ['conversation-pages', activeConversationId] });
     queryClient.invalidateQueries({ queryKey: ['conversation-page-edges', activeConversationId] });
-    queryClient.invalidateQueries({ queryKey: ['crawl-jobs-for-sources'] });
+    queryClient.invalidateQueries({ queryKey: ['crawl-jobs-main-for-sources'] });
     queryClient.invalidateQueries({ queryKey: ['crawl-job', sourceId] });
     queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', activeConversationId] });
     queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', activeConversationId] });
@@ -234,7 +250,7 @@ export const useChatDatabase = () => {
         (q.queryKey[0] === 'discovered-links-count' || q.queryKey[0] === 'discovered-links-encoded-count'),
     });
     // Force immediate refetch of crawl jobs so UI updates right away
-    await queryClient.refetchQueries({ queryKey: ['crawl-jobs-for-sources'] });
+    await queryClient.refetchQueries({ queryKey: ['crawl-jobs-main-for-sources'] });
     await queryClient.refetchQueries({ queryKey: ['crawl-job', sourceId] });
     console.log('[recrawl] useChatDatabase: refetch complete');
   }, [activeConversationId, queryClient]);
@@ -294,10 +310,10 @@ export const useChatDatabase = () => {
     }
     const pollMs = 800;
     const maxAttempts = 180; // ~2.5 min
-    let finalJob: Awaited<ReturnType<typeof addPageJobsApi.getById>> = null;
+    let finalJob: Awaited<ReturnType<typeof crawlJobsApi.get>> | null = null;
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, pollMs));
-      finalJob = await addPageJobsApi.getById(jobId);
+      finalJob = await crawlJobsApi.get(jobId);
       if (!finalJob) continue;
       if (finalJob.status === 'completed') break;
       if (finalJob.status === 'failed') {
@@ -567,28 +583,18 @@ export const useChatDatabase = () => {
           crawlingSources.length > 0
         );
 
-    const quotes = readySources.length > 0
-      ? generateQuotesForMessage(
-          content,
-          readySources.map(s => ({
-            id: s.id,
-            domain: s.domain,
-            pages: s.discoveredPages,
-          }))
-        )
-      : [];
-
     const words = fullResponse.split(' ');
     for (let i = 0; i < words.length; i++) {
       await new Promise(resolve => setTimeout(resolve, 30 + Math.random() * 20));
       setStreamingMessage(prev => prev + (i === 0 ? '' : ' ') + words[i]);
     }
 
+    // Fallback creates message without quotes (quotes table requires valid page_id FKs;
+    // mock quotes may have invalid refs)
     await createMessageMutation.mutateAsync({
       conversation_id: conversationId,
       role: 'assistant',
       content: fullResponse,
-      ...(quotes.length > 0 ? { quotes } : {}),
     });
 
     setStreamingMessage('');

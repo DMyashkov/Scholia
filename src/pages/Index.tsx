@@ -113,7 +113,7 @@ const Index = () => {
   const handleAddSource = useCallback(async (
     url: string,
     depth: CrawlDepth,
-    options: { includeSubpages: boolean; includePdfs: boolean; sameDomainOnly: boolean }
+    options: { sameDomainOnly: boolean }
   ): Promise<Source | null> => {
     if (!user) {
       setGuestModeModalOpen(true);
@@ -124,12 +124,10 @@ const Index = () => {
 
     const newSource: Source = {
       id: '',
-      url: fullUrl,
+      initial_url: fullUrl,
       domain,
       status: 'crawling',
       crawlDepth: depth,
-      includeSubpages: options.includeSubpages,
-      includePdfs: options.includePdfs,
       sameDomainOnly: options.sameDomainOnly,
       pagesIndexed: 0,
       totalPages: 0,

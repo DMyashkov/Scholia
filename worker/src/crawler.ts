@@ -34,9 +34,8 @@ export async function processCrawlJob(jobId: string) {
       jobId: job.id?.slice(0, 8),
       status: job.status,
       sourceId: job.source_id?.slice(0, 8),
-      conversationId: job.conversation_id?.slice(0, 8),
     });
-    console.log(`[D/I] job from DB: discovered_count=${(job as CrawlJob).discovered_count ?? '?'} indexed_count=${(job as CrawlJob).indexed_count ?? job.pages_indexed ?? '?'} pages_indexed=${job.pages_indexed}`);
+    console.log(`[D/I] job from DB: discovered_count=${(job as CrawlJob).discovered_count ?? '?'} indexed_count=${(job as CrawlJob).indexed_count ?? '?'}`);
 
     // Check if job is still queued or running (might have been claimed)
     if (job.status !== 'queued' && job.status !== 'running') {
@@ -57,9 +56,6 @@ export async function processCrawlJob(jobId: string) {
       return;
     }
 
-  if (!job.conversation_id) {
-    console.error(`❌ WARNING: Job ${jobId} has no conversation_id! This will cause pages to be created with wrong conversation_id.`);
-  }
     
     // Update job to running (if not already)
     if (job.status !== 'running') {
@@ -87,25 +83,19 @@ export async function processCrawlJob(jobId: string) {
 }
 
 async function crawlSource(job: CrawlJob, source: Source) {
-  // Get conversation_id from the job (stored when job was created)
-  // This is more reliable than querying conversation_sources
-  let conversationId = job.conversation_id;
-  
-  if (!conversationId) {
-    console.error(`❌ conversation_id is missing from crawl job ${job.id}`);
-    const { data: sourceRow, error: srcError } = await supabase
-      .from('sources')
-      .select('conversation_id')
-      .eq('id', source.id)
-      .single();
+  // Get conversation_id from source (sources.conversation_id)
+  const { data: sourceRow, error: srcError } = await supabase
+    .from('sources')
+    .select('conversation_id')
+    .eq('id', source.id)
+    .single();
 
-    if (srcError || !sourceRow?.conversation_id) {
-      console.error(`❌ Failed to find conversation for source ${source.id}:`, srcError);
-      throw new Error(`No conversation found for source ${source.id}`);
-    }
-    conversationId = sourceRow.conversation_id;
+  if (srcError || !sourceRow?.conversation_id) {
+    console.error(`❌ Failed to find conversation for source ${source.id}:`, srcError);
+    throw new Error(`No conversation found for source ${source.id}`);
   }
-  
+  const conversationId = sourceRow.conversation_id;
+
   // Validate that the conversation exists
   const { data: conversation, error: convCheckError } = await supabase
     .from('conversations')
@@ -115,27 +105,7 @@ async function crawlSource(job: CrawlJob, source: Source) {
   
   if (convCheckError || !conversation) {
     console.error(`❌ Conversation ${conversationId} does not exist! Error:`, convCheckError);
-    const { data: sourceRow } = await supabase
-      .from('sources')
-      .select('conversation_id')
-      .eq('id', source.id)
-      .single();
-
-    if (sourceRow?.conversation_id && sourceRow.conversation_id !== conversationId) {
-      await supabase
-        .from('crawl_jobs')
-        .update({ conversation_id: sourceRow.conversation_id })
-        .eq('id', job.id);
-      conversationId = sourceRow.conversation_id;
-    } else {
-      throw new Error(`Conversation ${conversationId} does not exist for source ${source.id}`);
-    }
-  }
-  
-  
-  // Double-check: verify the conversation_id matches what's in the job
-  if (job.conversation_id && job.conversation_id !== conversationId) {
-    /* mismatch acceptable; no-op */
+    throw new Error(`Conversation ${conversationId} does not exist for source ${source.id}`);
   }
 
   return crawlSourceWithConversationId(job, source, conversationId);
@@ -167,11 +137,12 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
     (rawDepth ? MAX_PAGES[rawDepth as Source['crawl_depth']] : undefined) ??
     (rawDepth === 'dynamic' ? 1 : 15);
 
-  // For recrawl of dynamic sources, job.seed_urls contains all page URLs to re-crawl
+  // When explicit_crawl_urls is set, use those URLs (recrawl or add-page). Otherwise use source.url
+  const explicitKey = (job as { explicit_crawl_urls?: string[] | null }).explicit_crawl_urls;
   const seedUrls: string[] =
-    job.seed_urls && job.seed_urls.length > 0
-      ? job.seed_urls.map((u) => normalizeUrlForCrawl(u))
-      : [normalizeUrlForCrawl(source.url)];
+    explicitKey && explicitKey.length > 0
+      ? explicitKey.map((u) => normalizeUrlForCrawl(u))
+      : [normalizeUrlForCrawl(source.initial_url)];
 
   if (seedUrls.length > maxPages) {
     maxPages = seedUrls.length;
@@ -189,7 +160,6 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
   }));
   seedUrls.forEach((u) => discovered.add(u));
   const directLinksFromStart: string[] = []; // Links directly from the starting page
-  let linksCount = 0;
 
 
   // Update source title from first page crawled
@@ -306,7 +276,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       const linksWithContext = isDynamic ? extractLinksWithContext(html, normalizedUrl, source) : [];
 
       const newLinks: string[] = [];
-      const edgesToInsert: Array<{conversation_id: string; source_id: string; from_page_id: string; from_url: string; to_url: string; owner_id: string}> = [];
+      const edgesToInsert: Array<{from_page_id: string; from_url: string; to_url: string; owner_id: string}> = [];
       
       const linksToProcess = links.slice(0, 200);
 
@@ -316,8 +286,6 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
           .filter((l) => l.contextSnippet.length > 0)
           .slice(0, 500)
           .map((l) => ({
-            conversation_id: conversationId,
-            source_id: source.id,
             from_page_id: page.id,
             to_url: l.url,
             anchor_text: l.anchorText || null,
@@ -325,7 +293,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
             owner_id: source.owner_id,
           }));
         const { error: dlError } = await supabase.from('discovered_links').upsert(toInsert, {
-          onConflict: 'conversation_id,source_id,to_url',
+          onConflict: 'from_page_id,to_url',
           ignoreDuplicates: true,
         });
         if (dlError) {
@@ -351,8 +319,6 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
           // Add edge to batch (isolated per conversation)
           // from_page_id lets the frontend match "from" by ID; to_url matched by URL when page is indexed
           edgesToInsert.push({
-            conversation_id: conversationId,
-            source_id: source.id,
             from_page_id: page.id,
             from_url: normalizedUrl,
             to_url: normalizedLink,
@@ -429,13 +395,10 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
             }
           }
           
-          linksCount += successCount;
         } catch (edgeError: unknown) {
           const err = edgeError as { message?: string };
           console.error(`[crawl] EDGE INSERT ERROR`, err?.message || edgeError);
           // CRITICAL: Log error but continue crawling - edges are not critical
-          // Estimate links count so crawl can continue
-          linksCount += Math.floor(edgesToInsert.length * 0.8);
         }
       }
 
@@ -443,11 +406,10 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       const updatePayload = {
         discovered_count: discovered.size,
         indexed_count: visited.size,
-        links_count: linksCount,
         last_activity_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
-      console.log(`[D/I] JOB UPDATE writing discovered=${updatePayload.discovered_count} indexed=${updatePayload.indexed_count} links=${updatePayload.links_count} jobId=${job.id?.slice(0, 8)}`);
+      console.log(`[D/I] JOB UPDATE writing discovered=${updatePayload.discovered_count} indexed=${updatePayload.indexed_count} jobId=${job.id?.slice(0, 8)}`);
       await supabase
         .from('crawl_jobs')
         .update(updatePayload)
@@ -484,7 +446,6 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
       total_pages: visited.size,
       discovered_count: discovered.size,
       indexed_count: visited.size,
-      links_count: linksCount,
       status: 'completed',
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -492,7 +453,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
     .eq('id', job.id);
 
   const exitReason = queue.length === 0 ? 'queue empty' : `visited >= maxPages (${visited.size} >= ${maxPages})`;
-  console.log(`[crawl] END source=${sourceShort} visited=${visited.size} exit=${exitReason} linksCount=${linksCount} iterations=${loopIterations}`);
+  console.log(`[crawl] END source=${sourceShort} visited=${visited.size} exit=${exitReason} iterations=${loopIterations}`);
   console.log(`[D/I] FINAL discovered=${discovered.size} indexed=${visited.size} (this is what job will have after final update)`);
 
   if (loopIterations === 0) {
@@ -509,8 +470,7 @@ async function crawlSourceWithConversationId(job: CrawlJob, source: Source, conv
   // Final verification: Check if any pages were actually inserted
   const { data: insertedPages, error: verifyError } = await supabase
     .from('pages')
-    .select('id, conversation_id, url')
-    .eq('conversation_id', conversationId)
+    .select('id, url')
     .eq('source_id', source.id)
     .limit(5);
   
@@ -566,16 +526,8 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
     const urlObj = new URL(url);
     const path = urlObj.pathname + urlObj.search;
 
-    // Insert page into database with conversation_id (isolated per conversation)
-    if (!conversationId) {
-      console.error(`❌ conversationId is null/undefined in crawlPage for URL: ${url}`);
-      throw new Error(`conversationId is required but was: ${conversationId}`);
-    }
-    
-    
     const insertData = {
       source_id: source.id,
-      conversation_id: conversationId,
       url: url,
       title: title,
       path: path,
@@ -591,7 +543,7 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
       .single();
 
     if (error) {
-      // FK violation on conversation_id = conversation was deleted; fail job immediately
+      // FK violation (e.g. source/conversation deleted); fail job immediately
       const detailsStr = typeof error.details === 'string' ? error.details : JSON.stringify(error.details || '');
       const isConvFk = error.code === '23503' && (detailsStr.includes('conversations') || (error.message || '').includes('conversations'));
       if (isConvFk) {
@@ -606,17 +558,15 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
       console.error(`❌ Error hint: ${error.hint}`);
       console.error(`❌ Insert data:`, JSON.stringify({
         source_id: insertData.source_id?.substring(0, 8),
-        conversation_id: insertData.conversation_id?.substring(0, 8),
         url: insertData.url?.substring(0, 50),
         hasContent: !!insertData.content,
         contentLength: insertData.content?.length || 0,
       }, null, 2));
       console.error(`❌ ========== END PAGE INSERTION ERROR ==========\n`);
-      // Might be duplicate, try to get existing (check by conversation_id too)
+      // Might be duplicate, try to get existing
       const { data: existing } = await supabase
         .from('pages')
         .select('*')
-        .eq('conversation_id', conversationId)
         .eq('source_id', source.id)
         .eq('url', url)
         .single();
@@ -632,7 +582,6 @@ async function crawlPage(url: string, source: Source, job: CrawlJob, conversatio
         hint: error.hint,
         insertData: {
           source_id: insertData.source_id?.substring(0, 8),
-          conversation_id: insertData.conversation_id?.substring(0, 8),
           url: insertData.url?.substring(0, 50),
           hasContent: !!insertData.content,
           status: insertData.status,
@@ -744,7 +693,7 @@ export function extractLinksWithContext(
           if (!isSameDomain) return;
         }
 
-        if (!source.include_pdfs && linkUrl.pathname.endsWith('.pdf')) return;
+        if (linkUrl.pathname.endsWith('.pdf')) return;
         if (linkUrl.protocol !== 'http:' && linkUrl.protocol !== 'https:') return;
 
         const anchorText = $(element).text().trim().replace(/\s+/g, ' ').substring(0, 100);
@@ -877,7 +826,7 @@ function extractLinks(html: string, pageUrl: string, source: Source): string[] {
           if (!isSameDomain) return;
         }
 
-        if (!source.include_pdfs && linkUrl.pathname.endsWith('.pdf')) return;
+        if (linkUrl.pathname.endsWith('.pdf')) return;
         if (linkUrl.protocol !== 'http:' && linkUrl.protocol !== 'https:') return;
 
         links.push(normalizedUrl);
@@ -970,7 +919,7 @@ export async function claimJob(): Promise<CrawlJob | null> {
     if (shouldLog) {
       const { data: allJobs, error: allError } = await supabase
         .from('crawl_jobs')
-        .select('id, status, source_id, conversation_id, created_at')
+        .select('id, status, source_id, created_at')
         .order('created_at', { ascending: false })
         .limit(10);
     if (allError) {

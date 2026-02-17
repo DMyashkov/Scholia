@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 
 export interface UserSettings {
-  user_id: string;
+  owner_id: string;
   sidebar_width: number;
   copy_include_evidence: boolean;
   updated_at: string;
@@ -12,7 +12,7 @@ export const userSettingsApi = {
     const { data, error } = await supabase
       .from('user_settings')
       .select('*')
-      .eq('user_id', userId)
+      .eq('owner_id', userId)
       .single();
 
     if (error) {
@@ -28,12 +28,12 @@ export const userSettingsApi = {
       .from('user_settings')
       .upsert(
         {
-          user_id: userId,
+          owner_id: userId,
           sidebar_width: Math.round(sidebarWidth),
           copy_include_evidence: current?.copy_include_evidence ?? true,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: 'user_id' }
+        { onConflict: 'owner_id' }
       );
 
     if (error) throw error;
@@ -45,12 +45,12 @@ export const userSettingsApi = {
       .from('user_settings')
       .upsert(
         {
-          user_id: userId,
+          owner_id: userId,
           sidebar_width: current?.sidebar_width ?? 600,
           copy_include_evidence: copyIncludeEvidence,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: 'user_id' }
+        { onConflict: 'owner_id' }
       );
 
     if (error) throw error;

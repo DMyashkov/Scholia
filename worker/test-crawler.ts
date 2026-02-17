@@ -34,8 +34,6 @@ async function testCrawler() {
           domain: domain,
           crawl_depth: 'medium', // 15 pages
           same_domain_only: true,
-          include_subpages: true,
-          include_pdfs: false,
         })
         .select()
         .single();
@@ -52,10 +50,8 @@ async function testCrawler() {
       .insert({
         source_id: source.id,
         status: 'queued',
-        pages_indexed: 0,
         indexed_count: 0,
         discovered_count: 0,
-        links_count: 0,
         total_pages: null,
         error_message: null,
         started_at: null,

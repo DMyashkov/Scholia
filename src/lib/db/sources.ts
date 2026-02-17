@@ -2,12 +2,12 @@ import { supabase } from '@/lib/supabase';
 import type { Source, SourceInsert } from './types';
 
 export const sourcesApi = {
-  async list(userId: string) {
+  async listByConversation(conversationId: string) {
     const { data, error } = await supabase
       .from('sources')
       .select('*')
-      .eq('owner_id', userId)
-      .order('created_at', { ascending: false });
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
     if (error) throw error;
     return data as Source[];
   },
@@ -23,7 +23,7 @@ export const sourcesApi = {
     return data as Source;
   },
 
-  async create(source: SourceInsert) {
+  async create(source: SourceInsert & { conversation_id: string }) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Authentication required');
     const insertData = { ...source, owner_id: user.id };
@@ -50,12 +50,26 @@ export const sourcesApi = {
   },
 
   async delete(id: string) {
-    const { error } = await supabase
-      .from('sources')
-      .delete()
-      .eq('id', id);
-
+    const { error } = await supabase.from('sources').delete().eq('id', id);
     if (error) throw error;
+  },
+
+  /** Find conversations that have a source with this URL (excluding optional conversation) */
+  async findConversationsWithUrl(url: string, excludeConversationId?: string) {
+    let query = supabase
+      .from('sources')
+      .select('conversation_id, conversation:conversations(id, title, created_at)')
+      .eq('url', url);
+    if (excludeConversationId) {
+      query = query.neq('conversation_id', excludeConversationId);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    type Row = { conversation_id: string; conversation: { id: string; title: string | null; created_at: string } | null };
+    return ((data || []) as Row[]).map((item) => ({
+      conversationId: item.conversation_id,
+      conversation: item.conversation,
+    }));
   },
 };
 

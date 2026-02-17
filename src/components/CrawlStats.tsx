@@ -79,7 +79,7 @@ export const CrawlStats = ({
                   <StatItem
                     label="Encoded Discovered"
                     value={Math.max(encodedDiscoveredCount, encodingDiscoveredDone)}
-                    highlight={isEncodingDiscoveredPhase || (isIndexing && encodingDiscoveredTotal > 0)}
+                    highlight={isResponding || isEncodingDiscoveredPhase || (isIndexing && encodingDiscoveredTotal > 0)}
                   />
                 </div>
               </TooltipTrigger>

@@ -412,10 +412,10 @@ Deno.serve(async (req) => {
 
     if (!appendToMessageId && cantAnswer && dynamicMode) {
       const { data: convSources } = await supabase
-        .from('conversation_sources')
-        .select('source_id')
+        .from('sources')
+        .select('id')
         .eq('conversation_id', conversationId);
-      const allSourceIds = (convSources || []).map((cs: { source_id: string }) => cs.source_id);
+      const allSourceIds = (convSources || []).map((s: { id: string }) => s.id);
       if (allSourceIds.length > 0) {
         try {
           const suggestionQueries = [

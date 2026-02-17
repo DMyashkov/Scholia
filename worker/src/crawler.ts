@@ -93,24 +93,17 @@ async function crawlSource(job: CrawlJob, source: Source) {
   
   if (!conversationId) {
     console.error(`❌ conversation_id is missing from crawl job ${job.id}`);
-    // Fallback: try to get it from conversation_sources
-    const { data: convSources, error: convError } = await supabase
-      .from('conversation_sources')
+    const { data: sourceRow, error: srcError } = await supabase
+      .from('sources')
       .select('conversation_id')
-      .eq('source_id', source.id)
-      .limit(1);
+      .eq('id', source.id)
+      .single();
 
-    if (convError || !convSources || convSources.length === 0) {
-      console.error(`❌ Failed to find conversation for source ${source.id}:`, convError);
+    if (srcError || !sourceRow?.conversation_id) {
+      console.error(`❌ Failed to find conversation for source ${source.id}:`, srcError);
       throw new Error(`No conversation found for source ${source.id}`);
     }
-
-    const fallbackConversationId = convSources[0]?.conversation_id;
-    if (!fallbackConversationId) {
-      throw new Error(`conversation_id is null for source ${source.id}`);
-    }
-    
-    conversationId = fallbackConversationId;
+    conversationId = sourceRow.conversation_id;
   }
   
   // Validate that the conversation exists
@@ -122,25 +115,20 @@ async function crawlSource(job: CrawlJob, source: Source) {
   
   if (convCheckError || !conversation) {
     console.error(`❌ Conversation ${conversationId} does not exist! Error:`, convCheckError);
-    // Try to find the correct conversation from conversation_sources
-    const { data: convSources } = await supabase
-      .from('conversation_sources')
+    const { data: sourceRow } = await supabase
+      .from('sources')
       .select('conversation_id')
-      .eq('source_id', source.id)
-      .limit(1);
-    
-    if (convSources && convSources.length > 0) {
-      const correctConversationId = convSources[0].conversation_id;
-      
-      // Update the crawl job with the correct conversation_id
+      .eq('id', source.id)
+      .single();
+
+    if (sourceRow?.conversation_id && sourceRow.conversation_id !== conversationId) {
       await supabase
         .from('crawl_jobs')
-        .update({ conversation_id: correctConversationId })
+        .update({ conversation_id: sourceRow.conversation_id })
         .eq('id', job.id);
-      
-      conversationId = correctConversationId;
+      conversationId = sourceRow.conversation_id;
     } else {
-      throw new Error(`Conversation ${conversationId} does not exist and no alternative found for source ${source.id}`);
+      throw new Error(`Conversation ${conversationId} does not exist for source ${source.id}`);
     }
   }
   

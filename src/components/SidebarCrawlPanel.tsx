@@ -365,7 +365,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
               <StatItem
                 label="Encoded Discovered"
                 value={Math.max(totalEncodedDiscovered, encDiscoveredDone)}
-                highlight={encodingPhase === 'encoding-discovered' || ((isIndexingFromJob || isAddPageEncoding) && encDiscoveredTotal > 0)}
+                highlight={isAddPageResponding || encodingPhase === 'encoding-discovered' || ((isIndexingFromJob || isAddPageEncoding) && encDiscoveredTotal > 0)}
                 tooltip="Links with embedded context; used for AI suggestions when adding pages."
               />
             )}

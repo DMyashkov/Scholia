@@ -35,6 +35,7 @@ export interface Message {
 export interface Source {
   id: string;
   owner_id: string;
+  conversation_id: string;
   url: string;
   domain: string;
   source_label?: string | null; // Human-readable label from first page (e.g. "Joe Biden"). domain = hostname.

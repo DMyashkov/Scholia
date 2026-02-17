@@ -25,9 +25,6 @@ export const useConversationSources = (conversationId: string | null) => {
   });
 };
 
-/**
- * Check if a source URL already exists in other conversations
- */
 export const useCheckExistingSource = () => {
   return useMutation({
     mutationFn: async ({
@@ -58,41 +55,27 @@ export const useAddSourceToConversation = () => {
       if (!user) throw new Error('Authentication required');
       const normalizedUrl = normalizeSourceUrl(sourceData.url || '');
       const sourceDataNorm = { ...sourceData, url: normalizedUrl };
-      const existingSources = await sourcesApi.list(user.id);
-      let source = existingSources.find(s => s.url === normalizedUrl);
 
-      if (!source) {
-        source = await sourcesApi.create(sourceDataNorm);
-      } else {
-        source = await sourcesApi.update(source.id, sourceDataNorm);
-      }
-
-      // Prevent adding the same source twice to the same conversation
-      const convSources = await conversationSourcesApi.list(conversationId);
-      const alreadyAdded = convSources.some(
-        (cs) => (cs.source as { url?: string }).url === normalizedUrl || cs.source_id === source.id
-      );
+      const existingSources = await sourcesApi.listByConversation(conversationId);
+      const alreadyAdded = existingSources.some((s) => s.url === normalizedUrl);
       if (alreadyAdded) {
         throw new Error('This source is already added to this conversation');
       }
 
-      console.log('[addSource] calling conversationSourcesApi.add', {
-        conversationId: conversationId.slice(0, 8),
-        sourceId: source.id.slice(0, 8),
-        url: normalizedUrl?.slice(0, 60),
-      });
+      const source = await sourcesApi.create({
+        ...sourceDataNorm,
+        conversation_id: conversationId,
+      } as SourceInsert & { conversation_id: string });
+
       await conversationSourcesApi.add(conversationId, source.id, false);
-      console.log('[addSource] add complete', { sourceId: source.id.slice(0, 8) });
       return source;
     },
     onSuccess: (newSource, variables) => {
-      // Optimistically add the new source to the conversation-sources cache so the list
-      // includes it immediately (avoids source=null in SourceDrawer until refetch completes).
       queryClient.setQueryData(
         ['conversation-sources', variables.conversationId],
         (prev: Array<{ conversation_id: string; source_id: string; created_at: string; source: typeof newSource }> | undefined) => {
           const list = prev ?? [];
-          if (list.some(cs => cs.source_id === newSource.id)) return list;
+          if (list.some((cs) => cs.source_id === newSource.id)) return list;
           return [
             ...list,
             {

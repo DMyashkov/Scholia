@@ -135,9 +135,9 @@ export const ChatMessage = ({
           )}
 
           {/* "Would you like to index X?" when context can't answer (hidden when follow-up exists) */}
-          {!isUser && !isStreaming && !followUp && message.suggestedPages && message.suggestedPages.length > 0 && onAddSuggestedPage && conversationId && (
+          {!isUser && !isStreaming && !followUp && message.suggestedPage && onAddSuggestedPage && conversationId && (
             <IndexSuggestionCard
-              suggestedPages={message.suggestedPages}
+              suggestedPage={message.suggestedPage}
               messageId={message.id}
               onAddAndReask={onAddSuggestedPage}
             />
@@ -293,19 +293,18 @@ function getDomainDisplay(url: string): string {
 }
 
 function IndexSuggestionCard({
-  suggestedPages,
+  suggestedPage,
   messageId,
   onAddAndReask,
 }: {
-  suggestedPages: SuggestedPage[];
+  suggestedPage: SuggestedPage;
   messageId: string;
   onAddAndReask: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string) => Promise<void>;
 }) {
   const [adding, setAdding] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
 
-  const sp = suggestedPages[0];
-  if (!sp) return null;
+  const sp = suggestedPage;
 
   const key = `${sp.sourceId}:${sp.url}`;
   const isAdding = adding === key;

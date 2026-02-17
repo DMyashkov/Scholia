@@ -329,10 +329,10 @@ Deno.serve(async (req) => {
 
     if (appendToMessageId) {
       // Insert new assistant message as follow-up (add-page + re-ask flow)
-      // Clear suggested_pages on the original message
+      // Clear suggested_page on the original message
       await supabase
         .from('messages')
-        .update({ suggested_pages: null })
+        .update({ suggested_page: null })
         .eq('id', appendToMessageId);
       console.log('[RAG-2ROUND] inserting follow-up message:', { follows: appendToMessageId, indexedPageDisplay });
       const { data: insertedMsg, error: msgInsertErr } = await supabase
@@ -406,7 +406,7 @@ Deno.serve(async (req) => {
     }
 
     // Page suggestion: only when answer indicates context doesn't include the info (skip when appending)
-    let suggestedPages: { url: string; title: string; contextSnippet: string; sourceId: string; promptedByQuestion?: string }[] = [];
+    let suggestedPage: { url: string; title: string; contextSnippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string } | null = null;
     const cantAnswer = indicatesCantAnswer(chatResult.content);
     const dynamicMode = (conv as { dynamic_mode?: boolean } | null)?.dynamic_mode !== false;
 
@@ -460,14 +460,14 @@ Deno.serve(async (req) => {
               const { data: fromPage } = await supabase.from('pages').select('title').eq('id', top.from_page_id).single();
               fromPageTitle = (fromPage as { title: string | null } | null)?.title ?? undefined;
             }
-            suggestedPages = [{
+            suggestedPage = {
               url: top.to_url,
               title: top.anchor_text?.trim() || deriveTitleFromUrl(top.to_url),
               contextSnippet: top.context_snippet,
               sourceId: top.source_id,
               promptedByQuestion: userMessage.trim(),
               fromPageTitle,
-            }];
+            };
           }
         } catch (e) {
           console.warn('[RAG] match_discovered_links failed:', e);
@@ -475,10 +475,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (suggestedPages.length > 0) {
+    if (suggestedPage) {
       await supabase
         .from('messages')
-        .update({ suggested_pages: suggestedPages })
+        .update({ suggested_page: suggestedPage })
         .eq('id', assistantRow.id);
     }
 
@@ -498,7 +498,7 @@ Deno.serve(async (req) => {
       }
     }
 
-      await emit({ done: true, message: assistantRow, quotes: quotesOut, suggestedPages, ...(suggestedTitle ? { suggestedTitle } : {}) });
+      await emit({ done: true, message: assistantRow, quotes: quotesOut, suggestedPage: suggestedPage ?? undefined, ...(suggestedTitle ? { suggestedTitle } : {}) });
   } catch (e) {
     console.error(e);
       await emit({ error: (e as Error).message });

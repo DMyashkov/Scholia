@@ -18,9 +18,9 @@ import {
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Settings, Trash2 } from 'lucide-react';
-import { getCopyIncludeEvidence, setCopyIncludeEvidence, COPY_SETTING_CHANGED } from '@/lib/copySettings';
+import { useCopyIncludeEvidence } from '@/hooks/useCopyIncludeEvidence';
 import { useDeleteAllConversations } from '@/hooks/useConversations';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 
 export const SettingsSheet = ({
@@ -32,29 +32,12 @@ export const SettingsSheet = ({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) => {
-  const [includeEvidence, setIncludeEvidence] = useState(getCopyIncludeEvidence);
+  const { copyIncludeEvidence: includeEvidence, setCopyIncludeEvidence } = useCopyIncludeEvidence();
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const deleteAllMutation = useDeleteAllConversations();
 
-  useEffect(() => {
-    setIncludeEvidence(getCopyIncludeEvidence());
-  }, [open]);
-
-  useEffect(() => {
-    const handler = (e: CustomEvent<boolean>) => setIncludeEvidence(e.detail);
-    window.addEventListener(COPY_SETTING_CHANGED, handler as EventListener);
-    return () => window.removeEventListener(COPY_SETTING_CHANGED, handler as EventListener);
-  }, []);
-
-  const handleWithEvidence = () => {
-    setCopyIncludeEvidence(true);
-    setIncludeEvidence(true);
-  };
-
-  const handleWithoutEvidence = () => {
-    setCopyIncludeEvidence(false);
-    setIncludeEvidence(false);
-  };
+  const handleWithEvidence = () => setCopyIncludeEvidence(true);
+  const handleWithoutEvidence = () => setCopyIncludeEvidence(false);
 
   const handleDeleteAll = async () => {
     try {

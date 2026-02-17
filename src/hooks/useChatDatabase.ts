@@ -30,7 +30,7 @@ const dbConversationToUI = (db: DBConversation & { dynamic_mode?: boolean }, mes
 const dbMessageToUI = (db: DBMessage): Message => {
   const extended = db as DBMessage & {
     quotes?: { id: string; sourceId: string; pageId: string; snippet: string; pageTitle: string; pagePath: string; domain: string; contextBefore?: string; contextAfter?: string }[];
-    suggested_pages?: { url: string; title: string; contextSnippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string }[];
+    suggested_page?: { url: string; title: string; contextSnippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string } | null;
     follows_message_id?: string | null;
     indexed_page_display?: string | null;
   };
@@ -43,7 +43,7 @@ const dbMessageToUI = (db: DBMessage): Message => {
     quotes: quotes as Message['quotes'],
     sourcesUsed: [...new Set(quotes.map((q) => q.sourceId))],
     wasMultiStep: db.was_multi_step ?? false,
-    suggestedPages: extended.suggested_pages,
+    suggestedPage: extended.suggested_page ?? undefined,
     followsMessageId: extended.follows_message_id ?? undefined,
     indexedPageDisplay: extended.indexed_page_display ?? undefined,
   };
@@ -332,11 +332,11 @@ export const useChatDatabase = () => {
     const functionsUrl = getFunctionsUrl();
     if (!functionsUrl) throw new Error('Functions URL not configured');
 
-    // Clear suggested_pages immediately so the card disappears (persists on reload)
+    // Clear suggested_page immediately so the card disappears (persists on reload)
     await updateMessageMutation.mutateAsync({
       id: messageId,
       conversationId,
-      updates: { suggested_pages: null },
+      updates: { suggested_page: null },
     });
 
     await addPageToSource(conversationId, sourceId, url);

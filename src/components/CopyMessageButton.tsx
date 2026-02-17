@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Message } from '@/types/chat';
 import { Quote } from '@/types/source';
-import { getCopyIncludeEvidence, setCopyIncludeEvidence, COPY_SETTING_CHANGED } from '@/lib/copySettings';
+import { useCopyIncludeEvidence } from '@/hooks/useCopyIncludeEvidence';
 
 const COPIED_DURATION_MS = 2000;
 
@@ -44,7 +44,7 @@ interface CopyMessageButtonProps {
 
 export const CopyMessageButton = ({ message, className }: CopyMessageButtonProps) => {
   const [justCopied, setJustCopied] = useState(false);
-  const [, forceUpdate] = useState(0);
+  const { copyIncludeEvidence: includeEvidence, setCopyIncludeEvidence } = useCopyIncludeEvidence();
 
   useEffect(() => {
     if (!justCopied) return;
@@ -52,15 +52,8 @@ export const CopyMessageButton = ({ message, className }: CopyMessageButtonProps
     return () => clearTimeout(t);
   }, [justCopied]);
 
-  useEffect(() => {
-    const handler = () => forceUpdate((n) => n + 1);
-    window.addEventListener(COPY_SETTING_CHANGED, handler);
-    return () => window.removeEventListener(COPY_SETTING_CHANGED, handler);
-  }, []);
-
   const isUser = message.role === 'user';
   const quotes = message.quotes ?? [];
-  const includeEvidence = getCopyIncludeEvidence();
 
   const doCopy = () => {
     const withEvidence = isUser ? true : includeEvidence;
@@ -73,10 +66,7 @@ export const CopyMessageButton = ({ message, className }: CopyMessageButtonProps
     );
   };
 
-  const setMode = (withEvidence: boolean) => {
-    setCopyIncludeEvidence(withEvidence);
-    forceUpdate((n) => n + 1);
-  };
+  const setMode = (withEvidence: boolean) => setCopyIncludeEvidence(withEvidence);
 
   if (isUser) {
     return (

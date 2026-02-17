@@ -19,7 +19,7 @@ export interface Message {
   quotes?: Quote[];
   sourcesUsed?: string[];
   wasMultiStep?: boolean;
-  suggestedPages?: SuggestedPage[];
+  suggestedPage?: SuggestedPage | null;
   /** Points to the previous message this is a follow-up of (add page + re-answer) */
   followsMessageId?: string;
   /** Display text for divider: "Indexed American Horses - Wikipedia" */

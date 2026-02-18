@@ -1,7 +1,9 @@
 // Supabase Edge Function: chat-with-rag
 // Embeds user message, retrieves relevant chunks, calls OpenAI Chat, creates assistant message + citations.
 // Supports 2-round retrieval for complex questions. Streams step progress as NDJSON.
+/// <reference path="./deno_types.d.ts" />
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const corsHeaders = {
@@ -94,7 +96,7 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get('Authorization');
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: authHeader ? { Authorization: authHeader } : {} },
-    });
+    }) as SupabaseClient;
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {

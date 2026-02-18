@@ -424,17 +424,17 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
             </span>
             {source.crawlDepth === 'dynamic' && (
               <span className="shrink-0 inline-flex items-center gap-1.5">
-                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-primary/15 text-primary border border-primary/20">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-primary/15 text-primary border border-primary/20">
                   <Zap className="h-2.5 w-2.5" />
                   Dynamic
                 </span>
                 {source.suggestionMode === 'dive' ? (
-                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/20" title="Dive - fetches each linked page">
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20" title="Dive - checks each linked page">
                     <Anchor className="h-2.5 w-2.5" />
                     Dive
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20" title="Surface - uses link context">
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/20" title="Surface - uses link context">
                     <Waves className="h-2.5 w-2.5" />
                     Surface
                   </span>

@@ -123,19 +123,16 @@ const SourceChip = ({
             <span className="text-xs text-foreground/80 group-hover:text-foreground max-w-[160px] truncate">
               {displayName}
             </span>
-            {/* Dynamic source indicator - lightning bolt + Surface/Dive badge */}
+            {/* Dynamic source indicator - lightning bolt + Surface/Dive icon */}
             {source.crawlDepth === 'dynamic' && (
-              <span
-                className="inline-flex items-center gap-1 shrink-0"
-                title={source.suggestionMode === 'dive' ? 'Dynamic · Dive (fetches each linked page)' : 'Dynamic · Surface (uses link context)'}
-              >
-                <Zap className="h-3 w-3 text-primary/80" />
+              <>
+                <Zap className="h-3 w-3 text-amber-500 dark:text-amber-400 shrink-0" title="Dynamic" />
                 {source.suggestionMode === 'dive' ? (
-                  <Anchor className="h-3 w-3 text-teal-500 dark:text-teal-400" />
+                  <Anchor className="h-3 w-3 text-amber-500 dark:text-amber-400 shrink-0" title="Dive" />
                 ) : (
-                  <Waves className="h-3 w-3 text-blue-500 dark:text-blue-400" />
+                  <Waves className="h-3 w-3 text-amber-500 dark:text-amber-400 shrink-0" title="Surface" />
                 )}
-              </span>
+              </>
             )}
             
             {/* Status icon (only for non-crawling states) */}

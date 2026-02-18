@@ -8,12 +8,17 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from '@/components/ui/hover-card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { Globe, Layers, Database, Zap, FileText, Waves, Anchor } from 'lucide-react';
+import { Globe, Layers, Database, Zap, FileText, Waves, Anchor, Info } from 'lucide-react';
 import type { SuggestionMode } from '@/types/source';
 
 interface AddSourceModalProps {
@@ -164,36 +169,54 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
                   <span className="text-sm font-medium">{dynamicOption.label}</span>
                   <span className="text-[10px] text-muted-foreground block">{dynamicOption.description}</span>
                   {depth === dynamicOption.value && (
-                    <div className="flex gap-2 mt-3">
+                    <div className="flex flex-wrap items-center gap-y-2 gap-x-1.5 mt-3">
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); setSuggestionMode('surface'); }}
                         className={cn(
-                          'flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium border transition-colors',
+                          'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium border transition-colors',
                           suggestionMode === 'surface'
-                            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                            ? 'bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30'
                             : 'bg-background/50 text-muted-foreground border-border hover:border-border/80'
                         )}
                       >
-                        <Waves className="h-3 w-3" />
+                        <Waves className="h-3.5 w-3.5" />
                         Surface
                       </button>
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); setSuggestionMode('dive'); }}
                         className={cn(
-                          'flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium border transition-colors',
+                          'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium border transition-colors',
                           suggestionMode === 'dive'
-                            ? 'bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30'
+                            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
                             : 'bg-background/50 text-muted-foreground border-border hover:border-border/80'
                         )}
                       >
-                        <Anchor className="h-3 w-3" />
+                        <Anchor className="h-3.5 w-3.5" />
                         Dive
                       </button>
-                      <span className="text-[10px] text-muted-foreground self-center ml-1">
-                        {suggestionMode === 'surface' ? 'Faster' : 'Slower, fetches each page'}
-                      </span>
+                      <HoverCard openDelay={200} closeDelay={100}>
+                        <HoverCardTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={(e) => e.stopPropagation()}
+                            className="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                            aria-label="Learn about Surface vs Dive"
+                          >
+                            <Info className="h-3.5 w-3.5" />
+                          </button>
+                        </HoverCardTrigger>
+                        <HoverCardContent side="top" align="start" className="w-72 text-xs space-y-2.5 p-3">
+                          <p className="font-medium text-foreground">Surface vs Dive</p>
+                          <p className="text-muted-foreground">
+                            <span className="text-teal-600 dark:text-teal-400 font-medium">Surface</span> - Faster. Uses text near links on pages you&apos;ve added to make suggestions.
+                          </p>
+                          <p className="text-muted-foreground">
+                            <span className="text-blue-600 dark:text-blue-400 font-medium">Dive</span> - Slower. Opens each link and reads its intro for better suggestions.
+                          </p>
+                        </HoverCardContent>
+                      </HoverCard>
                     </div>
                   )}
                 </div>

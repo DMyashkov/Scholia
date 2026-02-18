@@ -20,7 +20,8 @@ interface ChatAreaProps {
   sources: Source[];
   isLoading: boolean;
   streamingMessage: string;
-  onSendMessage: (message: string) => void;
+  ragStepProgress?: Array<{ current: number; total: number; label: string }>;
+  onSendMessage: (message: string, options?: { unfoldMode?: 'unfold' | 'direct' }) => void;
   onAddSource: (url: string, depth: CrawlDepth, options: { sameDomainOnly: boolean; suggestionMode?: 'surface' | 'dive' }) => Promise<Source | null>;
   onRemoveSource: (sourceId: string) => void;
   onRecrawlSource: (sourceId: string) => void;
@@ -31,7 +32,7 @@ interface ChatAreaProps {
   /** Called when a guest tries to add a source or start a conversation */
   onGuestRequired?: () => void;
   onDynamicModeChange?: (enabled: boolean) => void;
-  onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string) => Promise<void>;
+  onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string, unfoldMode?: 'unfold' | 'direct' | 'auto') => Promise<void>;
   addingPageSourceId?: string | null;
 }
 
@@ -40,6 +41,7 @@ export const ChatArea = ({
   sources,
   isLoading,
   streamingMessage,
+  ragStepProgress = [],
   onSendMessage,
   onAddSource,
   onRemoveSource,
@@ -248,7 +250,7 @@ export const ChatArea = ({
                 />
               )}
               {(isLoading && !streamingMessage) || addingPageSourceId ? (
-                <TypingIndicator minimal={!!addingPageSourceId} />
+                <TypingIndicator minimal={!!addingPageSourceId} stepLabels={ragStepProgress} />
               ) : null}
             </div>
           </ScrollArea>

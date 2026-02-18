@@ -21,7 +21,7 @@ interface ChatMessageProps {
   sources?: { id: string; domain: string }[];
   onQuoteClick?: (quote: Quote) => void;
   onSourceClick?: (sourceId: string) => void;
-  onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string) => Promise<void>;
+  onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string, unfoldMode?: 'unfold' | 'direct' | 'auto') => Promise<void>;
   conversationId?: string | null;
 }
 
@@ -71,13 +71,13 @@ export const ChatMessage = ({
                         tabIndex={0}
                       >
                         <Layers className="h-3 w-3" />
-                        2-step
+                        Unfolded
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" className="max-w-[240px]">
-                      <p className="font-medium">2-step query</p>
+                      <p className="font-medium">Unfolded</p>
                       <p className="text-muted-foreground text-xs mt-0.5">
-                        Complex questions use a second retrieval round to gather more context before answering. This produces better answers but uses more credits.
+                        Took additional steps to unfold complex query.
                       </p>
                     </TooltipContent>
                   </Tooltip>
@@ -299,7 +299,7 @@ function IndexSuggestionCard({
 }: {
   suggestedPage: SuggestedPage;
   messageId: string;
-  onAddAndReask: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string) => Promise<void>;
+  onAddAndReask: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string, unfoldMode?: 'unfold' | 'direct' | 'auto') => Promise<void>;
 }) {
   const [adding, setAdding] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
@@ -315,7 +315,7 @@ function IndexSuggestionCard({
     setAdding(key);
     console.log('[IndexSuggestion] Yes clicked', { url: sp.url, sourceId: sp.sourceId, question: sp.promptedByQuestion });
     try {
-      await onAddAndReask(sp.url, sp.sourceId, sp.promptedByQuestion, messageId, indexedPageDisplay);
+      await onAddAndReask(sp.url, sp.sourceId, sp.promptedByQuestion, messageId, indexedPageDisplay, sp.unfoldMode);
       console.log('[IndexSuggestion] onAddAndReask completed successfully');
       setAdded(true);
     } catch (err) {
@@ -368,9 +368,13 @@ function IndexSuggestionCard({
 interface TypingIndicatorProps {
   /** When true, show only three dots (no icon/name). Used when adding suggested page + waiting for answer. */
   minimal?: boolean;
+  /** RAG step progress labels (e.g. "Gathering context", "Extracting...") */
+  stepLabels?: Array<{ current: number; total: number; label: string }>;
 }
 
-export const TypingIndicator = ({ minimal = false }: TypingIndicatorProps) => {
+export const TypingIndicator = ({ minimal = false, stepLabels = [] }: TypingIndicatorProps) => {
+  const currentStep = stepLabels.length > 0 ? stepLabels[stepLabels.length - 1] : null;
+
   if (minimal) {
     return (
       <div className="flex gap-4 px-4 py-3 bg-chat-assistant animate-fade-in">
@@ -393,11 +397,15 @@ export const TypingIndicator = ({ minimal = false }: TypingIndicatorProps) => {
         </div>
         <div className="flex-1 space-y-2">
           <p className="text-sm font-medium text-muted-foreground">Scholia</p>
-          <div className="flex gap-1 py-2">
-            <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
-            <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
-            <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
-          </div>
+          {currentStep ? (
+            <p className="text-xs text-muted-foreground">{currentStep.label}</p>
+          ) : (
+            <div className="flex gap-1 py-2">
+              <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+              <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+              <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+            </div>
+          )}
         </div>
       </div>
     </div>

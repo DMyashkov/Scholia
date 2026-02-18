@@ -54,7 +54,7 @@ const mapQuoteDbToUI = (q: DbQuoteRow): MessageQuote => ({
 const dbMessageToUI = (db: DBMessage): Message => {
   const extended = db as DBMessage & {
     quotes?: DbQuoteRow[] | null;
-    suggested_page?: { url: string; title: string; snippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string } | null;
+    suggested_page?: { url: string; title: string; snippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string; unfoldMode?: 'unfold' | 'direct' | 'auto' } | null;
     follows_message_id?: string | null;
     indexed_page_display?: string | null;
   };
@@ -350,7 +350,8 @@ export const useChatDatabase = () => {
     url: string,
     messageId: string,
     userMessage: string,
-    indexedPageDisplay?: string
+    indexedPageDisplay?: string,
+    unfoldMode?: 'unfold' | 'direct' | 'auto'
   ) => {
     const functionsUrl = getFunctionsUrl();
     if (!functionsUrl) throw new Error('Functions URL not configured');
@@ -377,6 +378,7 @@ export const useChatDatabase = () => {
         userMessage: userMessage.trim(),
         appendToMessageId: messageId,
         indexedPageDisplay: indexedPageDisplay ?? undefined,
+        unfoldMode: unfoldMode ?? 'auto',
       }),
     });
     if (!res.ok) {
@@ -424,7 +426,7 @@ export const useChatDatabase = () => {
     queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
   }, [queryClient, addPageToSource, updateMessageMutation]);
 
-  const sendMessage = useCallback(async (content: string) => {
+  const sendMessage = useCallback(async (content: string, options?: { unfoldMode?: 'unfold' | 'direct' }) => {
     if (!content.trim() || isLoading) {
       console.log('[sendMessage] early return', { hasContent: !!content?.trim(), isLoading });
       return;
@@ -475,6 +477,7 @@ export const useChatDatabase = () => {
           body: JSON.stringify({
             conversationId,
             userMessage: content.trim(),
+            unfoldMode: options?.unfoldMode ?? 'auto',
           }),
         });
         if (!res.ok) {

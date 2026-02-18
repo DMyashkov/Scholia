@@ -9,6 +9,8 @@ export interface SuggestedPage {
   promptedByQuestion?: string;
   /** Title of the page this link was discovered from (for "branching out from X") */
   fromPageTitle?: string;
+  /** Preserved from original request for re-ask flow */
+  unfoldMode?: 'unfold' | 'direct' | 'auto';
 }
 
 export interface Message {

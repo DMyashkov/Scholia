@@ -3,7 +3,11 @@
 // Supports 2-round retrieval for complex questions. Streams step progress as NDJSON.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { corsHeaders } from 'jsr:@supabase/supabase-js@2/cors';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
 
 const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 const OPENAI_CHAT_MODEL = 'gpt-4o-mini';
@@ -71,8 +75,9 @@ Deno.serve(async (req) => {
       userMessage: string;
       appendToMessageId?: string;
       indexedPageDisplay?: string;
+      unfoldMode?: 'auto' | 'unfold' | 'direct';
     };
-    const { conversationId, userMessage, appendToMessageId, indexedPageDisplay } = body;
+    const { conversationId, userMessage, appendToMessageId, indexedPageDisplay, unfoldMode = 'auto' } = body;
     if (!conversationId || !userMessage?.trim()) {
         await emit({ error: 'conversationId and userMessage required' });
         return;
@@ -145,10 +150,28 @@ Deno.serve(async (req) => {
         decomposeResult = { queries: [userMessage.trim()] };
       }
 
-      const { queries: searchQueries, needsSecondRound, round2 } = decomposeResult;
+      let { queries: searchQueries, needsSecondRound, round2 } = decomposeResult;
+
+      // Apply unfoldMode overrides (decomposition always runs for reformulated queries)
+      if (unfoldMode === 'direct') {
+        needsSecondRound = false;
+        round2 = undefined;
+        console.log('[RAG-2ROUND] unfoldMode=direct: forcing single round');
+      } else if (unfoldMode === 'unfold') {
+        needsSecondRound = true;
+        if (!round2) {
+          round2 = {
+            extractionPrompt: 'Extract key entities, topics, or items from the context that are relevant to answering the question. Output JSON: {"items": ["...", ...]}',
+            queryInstructions: 'For each item, create a search query combining the item with the question to find supporting details.',
+          };
+          console.log('[RAG-2ROUND] unfoldMode=unfold: using generic round2 fallback');
+        }
+      }
+
       const totalSteps = needsSecondRound && round2 ? 3 : 2;
 
       console.log('[RAG-2ROUND] decomposition:', {
+        unfoldMode,
         needsSecondRound,
         hasRound2: !!round2,
         queriesCount: searchQueries.length,
@@ -185,7 +208,7 @@ Deno.serve(async (req) => {
       if (needsSecondRound && round2 && combined.length > 0) {
         didSecondRound = true;
         console.log('[RAG-2ROUND] entering round 2');
-        await emit({ step: 2, totalSteps, label: 'Analyzing' });
+        await emit({ step: 2, totalSteps, label: 'Extracting...' });
 
         const contextStr = combined.map(chunkShape).join('\n\n---\n\n');
         let extracted: Record<string, unknown> = {};
@@ -405,7 +428,7 @@ Deno.serve(async (req) => {
     }
 
     // Page suggestion: only when answer indicates context doesn't include the info (skip when appending)
-    let suggestedPage: { url: string; title: string; snippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string } | null = null;
+    let suggestedPage: { url: string; title: string; snippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string; unfoldMode?: 'unfold' | 'direct' | 'auto' } | null = null;
     const cantAnswer = indicatesCantAnswer(chatResult.content);
     const dynamicMode = (conv as { dynamic_mode?: boolean } | null)?.dynamic_mode !== false;
     console.log('[RAG-SUGGEST] evaluating', JSON.stringify({ appendToMessageId, cantAnswer, dynamicMode, conversationId }));
@@ -481,6 +504,7 @@ Deno.serve(async (req) => {
               sourceId: top.source_id,
               promptedByQuestion: userMessage.trim(),
               fromPageTitle,
+              unfoldMode: unfoldMode === 'unfold' || unfoldMode === 'direct' ? unfoldMode : 'auto',
             };
             console.log('[RAG-SUGGEST] suggested page set:', top.to_url);
           } else {
@@ -581,12 +605,12 @@ function extractQueryTerms(query: string): string[] {
 }
 
 /** Partition: pages whose URL/anchor matches query terms go first (e.g. American_Quarter_Horse for "quarter horse") */
-function partitionByTermMatch(
-  list: { to_url: string; anchor_text: string | null }[],
+function partitionByTermMatch<T extends { to_url: string; anchor_text: string | null }>(
+  list: T[],
   terms: string[]
-): { withMatch: typeof list; withoutMatch: typeof list } {
-  const withMatch: typeof list = [];
-  const withoutMatch: typeof list = [];
+): { withMatch: T[]; withoutMatch: T[] } {
+  const withMatch: T[] = [];
+  const withoutMatch: T[] = [];
   for (const m of list) {
     const urlNorm = (m.to_url + ' ' + (m.anchor_text || '') + ' ' + deriveTitleFromUrl(m.to_url)).toLowerCase().replace(/_/g, ' ');
     const matches = terms.some((term) => urlNorm.includes(term));
@@ -609,41 +633,16 @@ async function embedBatch(apiKey: string, texts: string[]): Promise<number[][]> 
 }
 
 async function decomposeAndReformulate(apiKey: string, userMessage: string): Promise<DecomposeResult> {
-  const sys = `You plan semantic search for answering a user question over indexed documents (e.g. Wikipedia).
+  const sys = `Plan semantic search for a question over indexed documents.
 
-You can run 1 or 2 rounds of search:
-- Round 1: search with the queries you specify.
-- Round 2 (optional): after seeing round 1 results, extract entities/data from round 1, then run targeted searches. Use when the question requires discovering entities first, then searching for details about each.
+Single-step: Use multiple queries to cover the question—e.g. ["achievements", "earnings"] for "What were X's achievements and earnings?". Most questions need only this.
 
-Use 2 rounds when the question requires BOTH:
-1. Discovering a list or set of entities from the documents (offices, people, topics, events, etc.), AND
-2. Getting more specific information about each of those entities.
-
-Examples that need 2 rounds:
-- "For each office X held, find when elected and main achievement" → round 1 finds the person and lists offices; round 2 searches each office + "elected when achievement".
-- "Compare A, B, C on criteria X, Y" when A,B,C are not fully known → round 1 finds them, round 2 gets comparison data per entity.
-- "What are the main themes and how does each relate to Z?" → round 1 finds themes, round 2 searches each theme + Z.
-- "List the key events, then for each find the cause" → round 1 finds events, round 2 searches each event + cause.
-- Any question that says "for each", "per", "respectively", "in turn" when the list comes from the documents.
-- Cross-product: "For each X and each Y, assess Z" → round 1 finds X and Y, round 2 combines them.
-
-Use 1 round when:
-- Single factual question (all entities already mentioned).
-- The question is specific enough that round 1 queries can retrieve everything needed.
-- The user is asking about one thing, not a list of things each requiring separate lookup.
+Multi-step (unfold): Use when the question has a dependency—you must first retrieve info from the docs to reformulate the search. Example: "From this children's book, what are the two things little Jake most loved? Then find their ancient archetype from this research paper." Here you must: (1) search the children's book for Jake's two loved things; (2) extract them; (3) search the research paper for archetype of each. The second search depends on what the first finds. Another: "List the offices X held, then for each find when elected" → first find offices, then search each for election date. Multi-step only when the question cannot be answered without first discovering something from the docs that enables a follow-up search.
 
 Output JSON:
-{
-  "queries": ["search query 1", "search query 2", ...],
-  "needsSecondRound": true or false,
-  "round2": {
-    "extractionPrompt": "Instructions for extracting structured data from round 1 context. Be specific: what JSON shape? E.g. 'Extract the list of offices/roles. Output: {"items": ["office1", "office2", ...]}'",
-    "queryInstructions": "How to build round 2 search queries from the extracted data. E.g. 'For each item, create a query: item + "elected when main achievement"'"
-  }
-}
-
-If needsSecondRound is false, omit round2 or set to null.
-Round 1 queries should be broad enough to find the entities or overview.`;
+{"queries": ["q1","q2",...], "needsSecondRound": false}
+If needsSecondRound true, add "round2": {"extractionPrompt":"...","queryInstructions":"..."}
+Omit round2 when false.`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -771,30 +770,20 @@ async function chat(
   const titleInstruction = requestTitle
     ? '\n- Include a "title" field: a 3-6 word phrase summarizing this conversation topic (e.g. "Quarter Horse Racing History", "Miss Meyers Career").'
     : '';
-  const systemPrompt = `You answer the user's question using ONLY the provided source context below. The context is from the user's indexed pages (e.g. Wikipedia).
+  const systemPrompt = `Answer using ONLY the context below. No inference. If context lacks info, say "The context does not include..." and leave quotes empty.
 
-CRITICAL: Do NOT infer, extrapolate, or assume. Only state facts that are EXPLICITLY written in the context. If the user asks "does X have a museum" and the context only mentions "Hall of Fame" or "inducted into X" without explicitly stating there is a museum, you MUST say "The context does not include information about whether..." or "The provided context does not mention a museum." Do not guess or use external knowledge—stick strictly to what the text says.
-When the context truly does NOT contain the information needed, say clearly: "The context does not include..." or "The provided context does not list..." Be concise. This allows the system to suggest indexing another page.
-
-Context from indexed pages:
+Context:
 ---
 ${context}
 ---
 
-Output a JSON object with this structure only (no other text):
-{"content":"your answer in markdown with inline citations","quotes":[{"snippet":"verbatim passage","pageId":"uuid","ref":1}]}${requestTitle ? ',"title":"3-6 word summary"' : ''}
+Output JSON only:
+{"content":"answer in markdown","quotes":[{"snippet":"verbatim passage","pageId":"uuid","ref":1}]}${requestTitle ? ',"title":"3-6 word summary"' : ''}
 
-Rules:
-- Use INLINE numbered citations: place [1], [2], [3] etc. immediately after EACH claim. Format: "Statement [1]. Another fact [2]." You MUST add a citation marker after every factual claim. If you have 4 quotes, the content must include [1], [2], [3], [4]—one after each claim, not just [1] at the end. Never cite only once for multiple claims.
-- Each quote MUST include "ref" (1-based number) matching its citation: the quote that supports [3] in the text must have "ref":3.
-- The snippet you cite MUST DIRECTLY support the claim. If you state "there is a museum," the snippet must explicitly mention a museum—not just a related term like "Hall of Fame" unless the context clearly equates them.
-- NEVER cite meta-statements as evidence. Do NOT add a quote when your answer is "The context does not include...", "The provided context does not mention...", or similar—these are YOUR words, not from the source. Only cite verbatim passages from the context. When the context lacks information, say so clearly but leave "quotes" empty or omit that part.
-- Only use citation numbers for which you have a quote.
-- Answer using ONLY the context above. Each context block has a first line "page_id: " followed by a UUID. Put that exact UUID in "pageId" when citing that block.
-- For "snippet": you MUST copy-paste a verbatim sentence or phrase from the context—do not paraphrase.
-- For every factual claim, add one entry to "quotes" with snippet = verbatim text and pageId = that block's UUID. You MUST include at least one quote when your answer comes from the context.
-- When the context contains BOTH overview/list info (e.g. list of roles, offices) AND detailed info (e.g. dates, achievements per role), you MUST cite BOTH. Add [n] after list items AND after each detailed claim. Every factual statement needs its own citation—do not skip citing the overview just because you also cite details.${titleInstruction}
-- Output only valid JSON.`;
+Citation rules:
+- Every factual claim needs [n] immediately after it. Put the marker right after the sentence it supports—never group citations at the end. WRONG: "Answer 1. Answer 2. [1][2]" RIGHT: "Answer 1 [1]. Answer 2 [2]." For multi-question responses, cite each answer inline.
+- ref:N = the passage supporting [N]. Match by claim. snippet = verbatim from context. Numbers exact. Don't cite a different fact for a claim. Use page_id from blocks.
+- No quotes for "The context does not...".${titleInstruction}`;
 
   const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
     { role: 'system', content: systemPrompt },
@@ -845,17 +834,15 @@ Rules:
     resolved.sort((a, b) => (a.ref ?? 999) - (b.ref ?? 999));
   }
   parsed.quotes = resolved.map(({ snippet, pageId }) => ({ snippet, pageId }));
-  // Ensure every quote has a matching [n] in content. If model omits some, append missing markers.
+  // Only append missing refs when model cited zero—otherwise appending worsens placement.
   if (resolved.length > 0 && parsed.content) {
     const refsInContent = new Set<number>();
-    const refMatch = parsed.content.matchAll(/\[(\d+)\]/g);
-    for (const m of refMatch) refsInContent.add(parseInt(m[1], 10));
-    const missing = [];
-    for (let i = 1; i <= resolved.length; i++) {
-      if (!refsInContent.has(i)) missing.push(`[${i}]`);
-    }
-    if (missing.length > 0) {
+    for (const m of parsed.content.matchAll(/\[(\d+)\]/g)) refsInContent.add(parseInt(m[1], 10));
+    if (refsInContent.size === 0) {
+      const missing = Array.from({ length: resolved.length }, (_, i) => `[${i + 1}]`);
       parsed.content = parsed.content.trimEnd() + ' ' + missing.join(' ');
+    } else if (refsInContent.size < resolved.length) {
+      console.warn('[RAG] Model cited', refsInContent.size, 'refs but', resolved.length, 'quotes—some refs missing');
     }
   }
   return parsed;

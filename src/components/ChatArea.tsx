@@ -21,7 +21,7 @@ interface ChatAreaProps {
   isLoading: boolean;
   streamingMessage: string;
   onSendMessage: (message: string) => void;
-  onAddSource: (url: string, depth: CrawlDepth, options: { sameDomainOnly: boolean }) => Promise<Source | null>;
+  onAddSource: (url: string, depth: CrawlDepth, options: { sameDomainOnly: boolean; suggestionMode?: 'surface' | 'dive' }) => Promise<Source | null>;
   onRemoveSource: (sourceId: string) => void;
   onRecrawlSource: (sourceId: string) => void;
   sidebarOpen: boolean;

@@ -12,7 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { RefreshCw, Trash2, Check, Loader2, Clock, AlertTriangle, ExternalLink } from 'lucide-react';
+import { RefreshCw, Trash2, Check, Loader2, Clock, AlertTriangle, ExternalLink, Zap, Waves, Anchor } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ForceGraph } from './graph';
 import { CrawlStats } from './CrawlStats';
@@ -309,13 +309,34 @@ export const SourceDrawer = ({
                     Loading graph...
                   </div>
                 ) : (
-                  <ForceGraph
-                    pages={displayPages}
-                    pagesIndexed={pagesIndexed}
-                    domain={source.domain}
-                    edges={sourceEdges}
-                    className="h-[200px]"
-                  />
+                  <div className="relative">
+                    <ForceGraph
+                      pages={displayPages}
+                      pagesIndexed={pagesIndexed}
+                      domain={source.domain}
+                      edges={sourceEdges}
+                      className="h-[200px]"
+                    />
+                    {source.crawlDepth === 'dynamic' && (
+                      <div className="absolute bottom-2 left-2 flex gap-1.5">
+                        <span className="inline-flex items-center gap-0.5 px-2 py-1 rounded text-[9px] font-medium bg-primary/15 text-primary border border-primary/20">
+                          <Zap className="h-2.5 w-2.5" />
+                          Dynamic
+                        </span>
+                        {source.suggestionMode === 'dive' ? (
+                          <span className="inline-flex items-center gap-0.5 px-2 py-1 rounded text-[9px] font-medium bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/20">
+                            <Anchor className="h-2.5 w-2.5" />
+                            Dive
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-0.5 px-2 py-1 rounded text-[9px] font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                            <Waves className="h-2.5 w-2.5" />
+                            Surface
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -327,6 +348,24 @@ export const SourceDrawer = ({
                     <span>Depth:</span>
                     <span className="text-foreground">{getDepthLabel(source.crawlDepth)}</span>
                   </div>
+                  {source.crawlDepth === 'dynamic' && (
+                    <div className="flex justify-between items-center">
+                      <span>Suggestion:</span>
+                      <span className="inline-flex items-center gap-1">
+                        {source.suggestionMode === 'dive' ? (
+                          <>
+                            <Anchor className="h-3 w-3 text-teal-500" />
+                            <span className="text-foreground">Dive</span>
+                          </>
+                        ) : (
+                          <>
+                            <Waves className="h-3 w-3 text-blue-500" />
+                            <span className="text-foreground">Surface</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span>Same domain only:</span>
                     <span className="text-foreground">{source.sameDomainOnly ? 'Yes' : 'No'}</span>

@@ -107,6 +107,7 @@ export const useSources = () => {
       domain,
       status: 'crawling',
       crawlDepth: depth,
+      suggestionMode: 'surface',
       sameDomainOnly: options.sameDomainOnly,
       pagesIndexed: 0,
       totalPages,

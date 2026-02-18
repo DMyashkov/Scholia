@@ -13,7 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { Globe, Layers, Database, Zap, FileText } from 'lucide-react';
+import { Globe, Layers, Database, Zap, FileText, Waves, Anchor } from 'lucide-react';
+import type { SuggestionMode } from '@/types/source';
 
 interface AddSourceModalProps {
   open: boolean;
@@ -21,7 +22,7 @@ interface AddSourceModalProps {
   onAddSource: (
     url: string,
     depth: CrawlDepth,
-    options: { sameDomainOnly: boolean }
+    options: { sameDomainOnly: boolean; suggestionMode?: SuggestionMode }
   ) => void | Promise<unknown>;
   /** Optional message to show at top (e.g. "Add source first") */
   promptMessage?: string | null;
@@ -39,6 +40,7 @@ const dynamicOption = { value: 'dynamic' as const, label: 'Dynamic', description
 export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage }: AddSourceModalProps) => {
   const [url, setUrl] = useState('');
   const [depth, setDepth] = useState<CrawlDepth>('shallow');
+  const [suggestionMode, setSuggestionMode] = useState<SuggestionMode>('surface');
   const [sameDomainOnly, setSameDomainOnly] = useState(true);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -51,10 +53,12 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
     try {
       const result = onAddSource(url.trim(), depth, {
         sameDomainOnly,
+        suggestionMode: depth === 'dynamic' ? suggestionMode : undefined,
       });
       await (typeof result?.then === 'function' ? result : Promise.resolve(result));
       setUrl('');
       setDepth('shallow');
+      setSuggestionMode('surface');
       setSameDomainOnly(true);
       onOpenChange(false);
     } catch (err) {
@@ -156,9 +160,42 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
                 )}>
                   {dynamicOption.icon}
                 </div>
-                <div className="text-left">
+                <div className="text-left flex-1">
                   <span className="text-sm font-medium">{dynamicOption.label}</span>
                   <span className="text-[10px] text-muted-foreground block">{dynamicOption.description}</span>
+                  {depth === dynamicOption.value && (
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setSuggestionMode('surface'); }}
+                        className={cn(
+                          'flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium border transition-colors',
+                          suggestionMode === 'surface'
+                            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                            : 'bg-background/50 text-muted-foreground border-border hover:border-border/80'
+                        )}
+                      >
+                        <Waves className="h-3 w-3" />
+                        Surface
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setSuggestionMode('dive'); }}
+                        className={cn(
+                          'flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium border transition-colors',
+                          suggestionMode === 'dive'
+                            ? 'bg-teal-500/15 text-teal-600 dark:text-teal-400 border-teal-500/30'
+                            : 'bg-background/50 text-muted-foreground border-border hover:border-border/80'
+                        )}
+                      >
+                        <Anchor className="h-3 w-3" />
+                        Dive
+                      </button>
+                      <span className="text-[10px] text-muted-foreground self-center ml-1">
+                        {suggestionMode === 'surface' ? 'Faster' : 'Slower, fetches each page'}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </button>
             </div>

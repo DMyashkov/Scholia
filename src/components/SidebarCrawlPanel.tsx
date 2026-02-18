@@ -9,7 +9,7 @@ import { useAddPageJob } from '@/hooks/useAddPageJob';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import type { CrawlJob } from '@/lib/db/types';
 import { useQuery } from '@tanstack/react-query';
-import { Zap } from 'lucide-react';
+import { Zap, Waves, Anchor } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
@@ -423,9 +423,22 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
               {getSourceDisplayLabel(source)}
             </span>
             {source.crawlDepth === 'dynamic' && (
-              <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-primary/15 text-primary border border-primary/20">
-                <Zap className="h-2.5 w-2.5" />
-                dynamic
+              <span className="shrink-0 inline-flex items-center gap-1.5">
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-primary/15 text-primary border border-primary/20">
+                  <Zap className="h-2.5 w-2.5" />
+                  Dynamic
+                </span>
+                {source.suggestionMode === 'dive' ? (
+                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/20" title="Dive - fetches each linked page">
+                    <Anchor className="h-2.5 w-2.5" />
+                    Dive
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20" title="Surface - uses link context">
+                    <Waves className="h-2.5 w-2.5" />
+                    Surface
+                  </span>
+                )}
               </span>
             )}
             <span 

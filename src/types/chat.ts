@@ -3,7 +3,7 @@ import { Quote, Source } from './source';
 export interface SuggestedPage {
   url: string;
   title: string;
-  contextSnippet: string;
+  snippet: string;
   sourceId: string;
   /** When present: "can't answer" flow - add page then re-ask this question */
   promptedByQuestion?: string;

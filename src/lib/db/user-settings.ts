@@ -55,4 +55,5 @@ export const userSettingsApi = {
 
     if (error) throw error;
   },
+
 };

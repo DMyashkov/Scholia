@@ -3,6 +3,7 @@
  * Called once per conversation after a crawl completes (bulk).
  */
 import { supabase } from './db';
+import { fetchTargetPageLead } from './targetLead';
 
 // Align with supabase/functions/add-page: same chunk params and progress batch sizes
 const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
@@ -181,12 +182,14 @@ export async function indexSinglePageForRag(
 }
 
 /** Embed encoded_discovered for a single page (add-page flow) and report progress to crawl_jobs.
- * Skips links pointing to already-indexed pages - we never suggest those. */
+ * Skips links pointing to already-indexed pages - we never suggest those.
+ * In dive mode: fetches each target page, gets lead, then embeds (progress = fetch+encode per link). */
 export async function embedDiscoveredLinksForPage(
   conversationId: string,
   pageId: string,
   apiKey: string,
-  crawlJobId: string
+  crawlJobId: string,
+  ownerId: string
 ): Promise<number> {
   console.log('[indexer] embedDiscoveredLinksForPage ENTRY', { pageId: pageId.slice(0, 8), crawlJobId: crawlJobId.slice(0, 8) });
 
@@ -206,7 +209,7 @@ export async function embedDiscoveredLinksForPage(
 
   const { data: links, error: fetchError } = await supabase
     .from('encoded_discovered')
-    .select('id, context_snippet, page_edge_id')
+    .select('id, snippet, page_edge_id')
     .in('page_edge_id', edgeIds)
     .is('embedding', null);
 
@@ -227,7 +230,7 @@ export async function embedDiscoveredLinksForPage(
     const url = edgeIdToUrl.get(l.page_edge_id) || '';
     return !indexedUrls.has(normalizeUrlForCompare(url));
   });
-  const total = links.length;
+  const total = toEmbed.length;
   if (crawlJobId && total > 0) {
     await supabase
       .from('crawl_jobs')
@@ -247,35 +250,59 @@ export async function embedDiscoveredLinksForPage(
     return 0;
   }
 
-  const texts = toEmbed.map((l) => l.context_snippet);
-  const embeddings = await embedBatch(apiKey, texts);
-  if (embeddings.length !== texts.length) {
-    console.log('[indexer] embedDiscoveredLinksForPage EARLY_RETURN: embedBatch mismatch', {
-      requested: texts.length,
-      received: embeddings.length,
-    });
-    return 0;
-  }
+  const { data: pageRow } = await supabase.from('pages').select('source_id').eq('id', pageId).single();
+  const sourceId = (pageRow as { source_id?: string } | null)?.source_id;
+  const { data: sourceRow } = sourceId
+    ? await supabase.from('sources').select('suggestion_mode').eq('id', sourceId).single()
+    : { data: null };
+  const useDive = (sourceRow as { suggestion_mode?: string } | null)?.suggestion_mode === 'dive';
+  if (useDive) console.log('[indexer] embedDiscoveredLinksForPage mode=dive: fetch+encode per link');
 
+  const BATCH_SIZE = useDive ? 1 : EMBED_BATCH_SIZE;
   let updated = 0;
   let lastProgressUpdate = Date.now();
-  for (let i = 0; i < toEmbed.length; i++) {
-    const { error } = await supabase
-      .from('encoded_discovered')
-      .update({ embedding: embeddings[i] })
-      .eq('id', toEmbed[i].id);
-    if (!error) updated++;
-    const now = Date.now();
-    if (now - lastProgressUpdate >= DISCOVERED_PROGRESS_INTERVAL_MS) {
-      await supabase
-        .from('crawl_jobs')
-        .update({
-          encoding_discovered_done: updated,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', crawlJobId);
-      lastProgressUpdate = now;
+
+  for (let i = 0; i < toEmbed.length; i += BATCH_SIZE) {
+    const batch = toEmbed.slice(i, i + BATCH_SIZE);
+    const texts: string[] = [];
+
+    for (const item of batch) {
+      let text = item.snippet;
+      if (useDive) {
+        const url = edgeIdToUrl.get(item.page_edge_id) || '';
+        const lead = await fetchTargetPageLead(url);
+        if (lead) {
+          text = lead;
+          await supabase
+            .from('encoded_discovered')
+            .update({ snippet: text })
+            .eq('id', item.id);
+          console.log('[indexer] dive', `[${updated + 1}/${toEmbed.length}]`, url.slice(0, 50) + '...', '→', lead.slice(0, 60) + (lead.length > 60 ? '...' : ''));
+        }
+      }
+      texts.push(text || 'Link from page');
     }
+
+    const embeddings = await embedBatch(apiKey, texts);
+    if (embeddings.length !== batch.length) break;
+
+    for (let j = 0; j < batch.length; j++) {
+      const { error } = await supabase
+        .from('encoded_discovered')
+        .update({ embedding: embeddings[j] })
+        .eq('id', batch[j].id);
+      if (!error) updated++;
+    }
+
+    const now = Date.now();
+    await supabase
+      .from('crawl_jobs')
+      .update({
+        encoding_discovered_done: updated,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', crawlJobId);
+    if (now - lastProgressUpdate >= DISCOVERED_PROGRESS_INTERVAL_MS) lastProgressUpdate = now;
   }
   if (updated > 0) {
     await supabase
@@ -351,9 +378,10 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
   const indexedUrls = await getIndexedPageUrls(conversationId);
   const { data: sources } = await supabase
     .from('sources')
-    .select('id')
+    .select('id, suggestion_mode')
     .eq('conversation_id', conversationId);
   const sourceIds = (sources ?? []).map((s) => s.id);
+  const sourceModeMap = new Map((sources ?? []).map((s) => [s.id, (s as { suggestion_mode?: string }).suggestion_mode]));
   if (sourceIds.length === 0) return 0;
   const { data: pages } = await supabase
     .from('pages')
@@ -363,24 +391,37 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
   if (pageIds.length === 0) return 0;
   const { data: edgeRows } = await supabase
     .from('page_edges')
-    .select('id, to_url')
+    .select('id, to_url, from_page_id')
     .in('from_page_id', pageIds);
   const edgeIds = (edgeRows ?? []).map((r) => r.id);
   if (edgeIds.length === 0) return 0;
   const { data: links, error: fetchError } = await supabase
     .from('encoded_discovered')
-    .select('id, context_snippet, page_edge_id')
+    .select('id, snippet, page_edge_id, owner_id')
     .in('page_edge_id', edgeIds)
     .is('embedding', null);
 
   if (fetchError || !links?.length) return 0;
 
   const edgeIdToUrl = new Map((edgeRows ?? []).map((r) => [r.id, r.to_url]));
+  const fromPageIds = [...new Set((edgeRows ?? []).map((r) => (r as { from_page_id?: string }).from_page_id).filter(Boolean))];
+  const { data: pagesWithSource } = await supabase
+    .from('pages')
+    .select('id, source_id')
+    .in('id', fromPageIds);
+  const pageToSource = new Map((pagesWithSource ?? []).map((p) => [p.id, p.source_id]));
+  const edgeIdToUseDive = new Map<string, boolean>();
+  for (const r of edgeRows ?? []) {
+    const fromPageId = (r as { from_page_id?: string }).from_page_id;
+    const sourceId = fromPageId ? pageToSource.get(fromPageId) : undefined;
+    const mode = sourceId ? sourceModeMap.get(sourceId) : undefined;
+    edgeIdToUseDive.set(r.id, mode === 'dive');
+  }
   const toEmbed = links.filter((l) => {
     const url = edgeIdToUrl.get(l.page_edge_id) || '';
     return !indexedUrls.has(normalizeUrlForCompare(url));
   });
-  const total = links.length;
+  const total = toEmbed.length;
   if (crawlJobId && total > 0) {
     await supabase
       .from('crawl_jobs')
@@ -396,33 +437,65 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
     return 0;
   }
 
-  const texts = toEmbed.map((l) => l.context_snippet);
-  const embeddings = await embedBatch(apiKey, texts);
-  if (embeddings.length !== texts.length) return 0;
+  const diveCount = toEmbed.filter((l) => edgeIdToUseDive.get(l.page_edge_id)).length;
+  const surfaceCount = toEmbed.length - diveCount;
+  console.log('[indexer] embedDiscoveredLinks mode=surface|dive', { surface: surfaceCount, dive: diveCount, total: toEmbed.length });
 
+  // Process in batches; for dive mode we fetch each target before embedding (progress = fetch+encode per link)
+  const hasAnyDive = diveCount > 0;
+  const BATCH_SIZE = hasAnyDive ? 1 : EMBED_BATCH_SIZE;
   let updated = 0;
   let lastProgressUpdate = Date.now();
-  for (let i = 0; i < toEmbed.length; i++) {
-    const { error } = await supabase
-      .from('encoded_discovered')
-      .update({ embedding: embeddings[i] })
-      .eq('id', toEmbed[i].id);
-    if (!error) updated++;
-    const now = Date.now();
-    if (crawlJobId && now - lastProgressUpdate >= DISCOVERED_PROGRESS_INTERVAL_MS) {
+
+  for (let i = 0; i < toEmbed.length; i += BATCH_SIZE) {
+    const batch = toEmbed.slice(i, i + BATCH_SIZE);
+    const texts: string[] = [];
+
+    for (const item of batch) {
+      let text = item.snippet;
+      const useDive = edgeIdToUseDive.get(item.page_edge_id);
+      if (useDive) {
+        const url = edgeIdToUrl.get(item.page_edge_id) || '';
+        const lead = await fetchTargetPageLead(url);
+        if (lead) {
+          text = lead;
+          await supabase
+            .from('encoded_discovered')
+            .update({ snippet: text })
+            .eq('id', item.id);
+          if (updated % 5 === 0 || updated < 3) {
+            console.log('[indexer] dive', `[${updated + 1}/${toEmbed.length}]`, url.slice(0, 50) + '...', '→', lead.slice(0, 60) + (lead.length > 60 ? '...' : ''));
+          }
+        }
+      }
+      texts.push(text || 'Link from page');
+    }
+
+    const embeddings = await embedBatch(apiKey, texts);
+    if (embeddings.length !== batch.length) break;
+
+    for (let j = 0; j < batch.length; j++) {
+      const { error } = await supabase
+        .from('encoded_discovered')
+        .update({ embedding: embeddings[j] })
+        .eq('id', batch[j].id);
+      if (!error) updated++;
+    }
+
+    if (crawlJobId) {
+      const now = Date.now();
       await supabase
         .from('crawl_jobs')
-        .update({ encoding_discovered_done: updated, last_activity_at: new Date().toISOString() })
+        .update({
+          encoding_discovered_done: updated,
+          last_activity_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', crawlJobId);
-      lastProgressUpdate = now;
+      if (now - lastProgressUpdate >= DISCOVERED_PROGRESS_INTERVAL_MS) lastProgressUpdate = now;
     }
   }
-  if (crawlJobId && updated > 0) {
-    await supabase
-      .from('crawl_jobs')
-      .update({ encoding_discovered_done: updated })
-      .eq('id', crawlJobId);
-  }
+
   if (updated > 0) {
     const skipped = links.length - toEmbed.length;
     console.log('[indexer] Embedded', updated, 'encoded_discovered', skipped > 0 ? `(skipped ${skipped} already-indexed)` : '');

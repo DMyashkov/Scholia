@@ -26,6 +26,7 @@ export const SourceDataLoader = ({ source, onDataLoaded }: SourceDataLoaderProps
       : crawlJob?.status === 'failed' ? 'error' 
       : 'ready',
     crawlDepth: source.crawl_depth,
+    suggestionMode: (source as { suggestion_mode?: string }).suggestion_mode === 'dive' ? 'dive' : 'surface',
     sameDomainOnly: source.same_domain_only,
     pagesIndexed: crawlJob?.indexed_count ?? 0,
     totalPages: crawlJob?.total_pages || pages.length || 0,

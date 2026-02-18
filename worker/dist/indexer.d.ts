@@ -6,6 +6,7 @@ export declare function indexSinglePageForRag(pageId: string, content: string, o
     chunksCreated: number;
 }>;
 /** Embed encoded_discovered for a single page (add-page flow) and report progress to crawl_jobs.
- * Skips links pointing to already-indexed pages - we never suggest those. */
-export declare function embedDiscoveredLinksForPage(conversationId: string, pageId: string, apiKey: string, crawlJobId: string): Promise<number>;
+ * Skips links pointing to already-indexed pages - we never suggest those.
+ * In dive mode: fetches each target page, gets lead, then embeds (progress = fetch+encode per link). */
+export declare function embedDiscoveredLinksForPage(conversationId: string, pageId: string, apiKey: string, crawlJobId: string, ownerId: string): Promise<number>;
 //# sourceMappingURL=indexer.d.ts.map

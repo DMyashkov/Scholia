@@ -168,7 +168,7 @@ export async function processAddPageJob(job) {
                 .map((l) => ({
                 page_edge_id: urlToEdgeId.get(l.url),
                 anchor_text: l.anchorText || null,
-                context_snippet: l.contextSnippet.substring(0, 500),
+                snippet: (l.snippet || l.anchorText || 'Link from page').substring(0, 500),
                 owner_id: ownerId,
             }));
             if (encodedRows.length > 0) {
@@ -206,7 +206,7 @@ export async function processAddPageJob(job) {
         }
         else {
             console.log('[add-page] calling embedDiscoveredLinksForPage', { conversationId: conversationId.slice(0, 8), newPageId: newPage.id?.slice(0, 8) });
-            await embedDiscoveredLinksForPage(conversationId, newPage.id, apiKey, jobId);
+            await embedDiscoveredLinksForPage(conversationId, newPage.id, apiKey, jobId, ownerId);
         }
         // Clear embeddings for links pointing to the newly added page - we'll never suggest it again
         const { data: edgesToNewPage } = await supabase.from('page_edges').select('id').eq('to_url', normalizedUrl);

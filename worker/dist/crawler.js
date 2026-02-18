@@ -338,9 +338,10 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
                 }
             }
             // Insert encoded_discovered only for dynamic sources (after page_edges exist)
+            // Use source context here; target-lead fetching happens in encoding phase (indexer)
             if (isDynamic && linksWithContext.length > 0 && edgesToInsert.length > 0) {
                 const toEncode = linksWithContext
-                    .filter((l) => l.contextSnippet.length > 0)
+                    .filter((l) => l.snippet.length > 0)
                     .slice(0, 500);
                 if (toEncode.length > 0) {
                     const urls = toEncode.map((l) => l.url);
@@ -355,7 +356,7 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
                         .map((l) => ({
                         page_edge_id: urlToEdgeId.get(l.url),
                         anchor_text: l.anchorText || null,
-                        context_snippet: l.contextSnippet.substring(0, 500),
+                        snippet: l.snippet.substring(0, 500),
                         owner_id: source.owner_id,
                     }));
                     if (encodedToInsert.length > 0) {
@@ -666,34 +667,34 @@ export function extractLinksWithContext(html, pageUrl, source) {
                 // Center on link text; omit leading junk when link at start, trailing when at end
                 const pos = anchorText ? rawText.indexOf(anchorText) : -1;
                 const half = Math.floor(CONTEXT_SNIPPET_LENGTH / 2);
-                let contextSnippet;
+                let snippet;
                 if (pos >= 0) {
                     if (pos < 50)
-                        contextSnippet = rawText.slice(pos, Math.min(rawText.length, pos + CONTEXT_SNIPPET_LENGTH)).trim();
+                        snippet = rawText.slice(pos, Math.min(rawText.length, pos + CONTEXT_SNIPPET_LENGTH)).trim();
                     else if (pos + anchorText.length > rawText.length - 50)
-                        contextSnippet = rawText.slice(Math.max(0, rawText.length - CONTEXT_SNIPPET_LENGTH), rawText.length).trim();
+                        snippet = rawText.slice(Math.max(0, rawText.length - CONTEXT_SNIPPET_LENGTH), rawText.length).trim();
                     else
-                        contextSnippet = rawText.slice(Math.max(0, pos - half), Math.min(rawText.length, pos + anchorText.length + half)).trim();
+                        snippet = rawText.slice(Math.max(0, pos - half), Math.min(rawText.length, pos + anchorText.length + half)).trim();
                 }
                 else {
-                    contextSnippet = rawText.substring(0, CONTEXT_SNIPPET_LENGTH);
+                    snippet = rawText.substring(0, CONTEXT_SNIPPET_LENGTH);
                 }
                 // Don't skip links with short context—use anchor or URL title as fallback to capture all links
-                if (contextSnippet.length < 20) {
+                if (snippet.length < 20) {
                     if (anchorText && anchorText.length >= 5) {
-                        contextSnippet = anchorText.substring(0, CONTEXT_SNIPPET_LENGTH);
+                        snippet = anchorText.substring(0, CONTEXT_SNIPPET_LENGTH);
                     }
                     else {
                         const pathParts = linkUrl.pathname.split('/').filter((p) => p);
                         const wikiTitle = pathParts[0] === 'wiki' && pathParts[1]
                             ? decodeURIComponent(pathParts[1].replace(/_/g, ' '))
                             : linkUrl.pathname;
-                        contextSnippet = wikiTitle ? `Link to ${wikiTitle}`.substring(0, CONTEXT_SNIPPET_LENGTH) : 'Link from page';
+                        snippet = wikiTitle ? `Link to ${wikiTitle}`.substring(0, CONTEXT_SNIPPET_LENGTH) : 'Link from page';
                     }
                 }
                 result.push({
                     url: normalizedUrl,
-                    contextSnippet,
+                    snippet,
                     anchorText,
                 });
             }

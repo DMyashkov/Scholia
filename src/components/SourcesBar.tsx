@@ -1,7 +1,7 @@
 import { Source } from '@/types/source';
 import { cn } from '@/lib/utils';
 import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
-import { Plus, Check, AlertTriangle, Clock, LogIn, Zap } from 'lucide-react';
+import { Plus, Check, AlertTriangle, Clock, LogIn, Zap, Waves, Anchor } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -123,9 +123,19 @@ const SourceChip = ({
             <span className="text-xs text-foreground/80 group-hover:text-foreground max-w-[160px] truncate">
               {displayName}
             </span>
-            {/* Dynamic source indicator - lightning bolt */}
+            {/* Dynamic source indicator - lightning bolt + Surface/Dive badge */}
             {source.crawlDepth === 'dynamic' && (
-              <Zap className="h-3 w-3 text-primary/80 shrink-0" title="Dynamic source" />
+              <span
+                className="inline-flex items-center gap-1 shrink-0"
+                title={source.suggestionMode === 'dive' ? 'Dynamic · Dive (fetches each linked page)' : 'Dynamic · Surface (uses link context)'}
+              >
+                <Zap className="h-3 w-3 text-primary/80" />
+                {source.suggestionMode === 'dive' ? (
+                  <Anchor className="h-3 w-3 text-teal-500 dark:text-teal-400" />
+                ) : (
+                  <Waves className="h-3 w-3 text-blue-500 dark:text-blue-400" />
+                )}
+              </span>
             )}
             
             {/* Status icon (only for non-crawling states) */}

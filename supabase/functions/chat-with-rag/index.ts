@@ -405,7 +405,7 @@ Deno.serve(async (req) => {
     }
 
     // Page suggestion: only when answer indicates context doesn't include the info (skip when appending)
-    let suggestedPage: { url: string; title: string; contextSnippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string } | null = null;
+    let suggestedPage: { url: string; title: string; snippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string } | null = null;
     const cantAnswer = indicatesCantAnswer(chatResult.content);
     const dynamicMode = (conv as { dynamic_mode?: boolean } | null)?.dynamic_mode !== false;
     console.log('[RAG-SUGGEST] evaluating', JSON.stringify({ appendToMessageId, cantAnswer, dynamicMode, conversationId }));
@@ -434,7 +434,7 @@ Deno.serve(async (req) => {
           const uniqueQueries = [...new Set(suggestionQueries)].slice(0, 4);
           const queryEmbs = await embedBatch(openaiKey, uniqueQueries);
 
-          const matchMap = new Map<string, { m: { to_url: string; anchor_text: string | null; context_snippet: string; source_id: string; from_page_id: string | null }; distance: number }>();
+          const matchMap = new Map<string, { m: { to_url: string; anchor_text: string | null; snippet: string; source_id: string; from_page_id: string | null }; distance: number }>();
           for (let i = 0; i < queryEmbs.length; i++) {
             const { data: matches, error: rpcErr } = await supabase.rpc('match_discovered_links', {
               query_embedding: queryEmbs[i],
@@ -444,7 +444,7 @@ Deno.serve(async (req) => {
             if (rpcErr) {
               console.log('[RAG-SUGGEST] match_discovered_links RPC error:', rpcErr.message, '| queryIndex:', i);
             }
-            const list = (matches || []) as { to_url: string; anchor_text: string | null; context_snippet: string; source_id: string; from_page_id: string | null; distance: number }[];
+            const list = (matches || []) as { to_url: string; anchor_text: string | null; snippet: string; source_id: string; from_page_id: string | null; distance: number }[];
             if (list.length === 0 && i === 0) {
               console.log('[RAG-SUGGEST] match_discovered_links returned 0 rows for first query | sourceIds:', allSourceIds.length);
             }
@@ -477,7 +477,7 @@ Deno.serve(async (req) => {
             suggestedPage = {
               url: top.to_url,
               title: top.anchor_text?.trim() || deriveTitleFromUrl(top.to_url),
-              contextSnippet: top.context_snippet,
+              snippet: top.snippet,
               sourceId: top.source_id,
               promptedByQuestion: userMessage.trim(),
               fromPageTitle,

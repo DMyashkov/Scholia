@@ -22,6 +22,7 @@ export interface Source {
   initial_url: string;
   domain: string;
   crawl_depth: 'shallow' | 'medium' | 'deep' | 'singular' | 'dynamic';
+  suggestion_mode?: 'surface' | 'dive';
   same_domain_only: boolean;
   created_at: string;
   updated_at: string;

@@ -1,5 +1,6 @@
 export type SourceStatus = 'ready' | 'crawling' | 'error' | 'outdated';
 export type CrawlDepth = 'shallow' | 'medium' | 'deep' | 'singular' | 'dynamic';
+export type SuggestionMode = 'surface' | 'dive';
 
 export interface DiscoveredPage {
   id: string;
@@ -16,6 +17,7 @@ export interface Source {
   source_label?: string | null; // Human-readable label (e.g. "Joe Biden"). domain = hostname.
   status: SourceStatus;
   crawlDepth: CrawlDepth;
+  suggestionMode: SuggestionMode; // surface = link context (faster), dive = fetch target page lead (slower)
   sameDomainOnly: boolean;
   pagesIndexed: number;
   totalPages: number;

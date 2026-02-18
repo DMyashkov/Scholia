@@ -113,7 +113,7 @@ const Index = () => {
   const handleAddSource = useCallback(async (
     url: string,
     depth: CrawlDepth,
-    options: { sameDomainOnly: boolean }
+    options: { sameDomainOnly: boolean; suggestionMode?: 'surface' | 'dive' }
   ): Promise<Source | null> => {
     if (!user) {
       setGuestModeModalOpen(true);
@@ -128,6 +128,7 @@ const Index = () => {
       domain,
       status: 'crawling',
       crawlDepth: depth,
+      suggestionMode: depth === 'dynamic' ? (options.suggestionMode ?? 'surface') : 'surface',
       sameDomainOnly: options.sameDomainOnly,
       pagesIndexed: 0,
       totalPages: 0,

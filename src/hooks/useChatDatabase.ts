@@ -54,7 +54,7 @@ const mapQuoteDbToUI = (q: DbQuoteRow): MessageQuote => ({
 const dbMessageToUI = (db: DBMessage): Message => {
   const extended = db as DBMessage & {
     quotes?: DbQuoteRow[] | null;
-    suggested_page?: { url: string; title: string; contextSnippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string } | null;
+    suggested_page?: { url: string; title: string; snippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string } | null;
     follows_message_id?: string | null;
     indexed_page_display?: string | null;
   };
@@ -132,6 +132,7 @@ export const useChatDatabase = () => {
       domain: db.domain,
       status: 'crawling' as const, // Default to crawling - SidebarCrawlPanel will update based on actual crawl job
       crawlDepth: db.crawl_depth,
+      suggestionMode: (db as { suggestion_mode?: string }).suggestion_mode === 'dive' ? 'dive' : 'surface',
       sameDomainOnly: db.same_domain_only,
       pagesIndexed: 0, // Will be updated by realtime
       totalPages: 0, // Will be updated by realtime
@@ -205,6 +206,7 @@ export const useChatDatabase = () => {
         initial_url: source.initial_url,
         domain: source.domain,
         crawl_depth: source.crawlDepth,
+        suggestion_mode: source.suggestionMode ?? 'surface',
         same_domain_only: source.sameDomainOnly,
       },
     });
@@ -216,6 +218,7 @@ export const useChatDatabase = () => {
       domain: dbSource.domain,
       status: 'crawling' as const,
       crawlDepth: dbSource.crawl_depth,
+      suggestionMode: (dbSource as { suggestion_mode?: string }).suggestion_mode === 'dive' ? 'dive' : 'surface',
       sameDomainOnly: dbSource.same_domain_only,
       pagesIndexed: 0,
       totalPages: 0,

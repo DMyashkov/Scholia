@@ -35,6 +35,7 @@ export const useSourceWithData = (dbSource: DBSource | null): Source | null => {
     source_label: (dbSource as { source_label?: string | null }).source_label ?? undefined,
     status,
     crawlDepth: dbSource.crawl_depth,
+    suggestionMode: (dbSource as { suggestion_mode?: string }).suggestion_mode === 'dive' ? 'dive' : 'surface',
     sameDomainOnly: dbSource.same_domain_only,
     pagesIndexed,
     totalPages: totalPages || 0,

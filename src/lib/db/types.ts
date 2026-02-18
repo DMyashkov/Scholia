@@ -32,6 +32,8 @@ export interface Message {
   indexed_page_display?: string | null;
 }
 
+export type SuggestionMode = 'surface' | 'dive';
+
 export interface Source {
   id: string;
   owner_id: string;
@@ -40,6 +42,7 @@ export interface Source {
   domain: string;
   source_label?: string | null; // Human-readable label from first page (e.g. "Joe Biden"). domain = hostname.
   crawl_depth: 'shallow' | 'medium' | 'deep' | 'singular' | 'dynamic';
+  suggestion_mode: SuggestionMode; // surface = link context (faster), dive = fetch target page lead (slower)
   same_domain_only: boolean;
   created_at: string;
   updated_at: string;

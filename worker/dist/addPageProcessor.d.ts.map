@@ -1,1 +1,1 @@
-{"version":3,"file":"addPageProcessor.d.ts","sourceRoot":"","sources":["../src/addPageProcessor.ts"],"names":[],"mappings":"AAyCA,wBAAsB,iBAAiB,CAAC,GAAG,EAAE;IAC3C,EAAE,EAAE,MAAM,CAAC;IACX,SAAS,EAAE,MAAM,CAAC;IAClB,mBAAmB,EAAE,MAAM,EAAE,CAAC;CAC/B,GAAG,OAAO,CAAC,IAAI,CAAC,CAoKhB"}
+{"version":3,"file":"addPageProcessor.d.ts","sourceRoot":"","sources":["../src/addPageProcessor.ts"],"names":[],"mappings":"AAyCA,wBAAsB,iBAAiB,CAAC,GAAG,EAAE;IAC3C,EAAE,EAAE,MAAM,CAAC;IACX,SAAS,EAAE,MAAM,CAAC;IAClB,mBAAmB,EAAE,MAAM,EAAE,CAAC;CAC/B,GAAG,OAAO,CAAC,IAAI,CAAC,CA4MhB"}

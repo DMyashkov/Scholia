@@ -97,26 +97,9 @@ export const createGraphData = (
     const linkSet = new Set<string>();
 
     edgesArray.forEach((edge, edgeIdx) => {
-      // Match by page ID when present (worker sends from_page_id), else by URL
+      // Match by page ID when present (worker sends from_page_id)
       let fromPageId: string | undefined = edge.from_page_id && visiblePageIds.has(edge.from_page_id) ? edge.from_page_id : undefined;
       let toPageId: string | undefined = edge.to_page_id && visiblePageIds.has(edge.to_page_id) ? edge.to_page_id : undefined;
-
-      if (!fromPageId && edge.from_url) {
-        const normalizedFromUrl = normalizeUrlForMatching(edge.from_url);
-        fromPageId = urlToPageId.get(normalizedFromUrl)
-          || urlToPageId.get(normalizedFromUrl.toLowerCase())
-          || urlToPageId.get(edge.from_url)
-          || urlToPageId.get(edge.from_url.toLowerCase());
-        if (!fromPageId) {
-          try {
-            const urlObj = new URL(normalizedFromUrl);
-            const withoutProtocol = `${urlObj.hostname}${urlObj.pathname}`;
-            fromPageId = urlToPageId.get(withoutProtocol) || urlToPageId.get(withoutProtocol.toLowerCase());
-          } catch {
-            // ignore
-          }
-        }
-      }
 
       if (!toPageId && edge.to_url) {
         const normalizedToUrl = normalizeUrlForMatching(edge.to_url);

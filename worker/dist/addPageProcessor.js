@@ -120,7 +120,6 @@ export async function processAddPageJob(job) {
         if (seedPages?.length) {
             const edges = seedPages.map((p) => ({
                 from_page_id: p.id,
-                from_url: p.url,
                 to_url: normalizedUrl,
                 owner_id: ownerId,
             }));
@@ -129,48 +128,93 @@ export async function processAddPageJob(job) {
                 ignoreDuplicates: true,
             });
         }
-        // Insert discovered_links
+        // Insert page_edges for new page's outbound links, then encoded_discovered
         const sourceForExtract = {
             same_domain_only: source.same_domain_only ?? true,
         };
         const linksWithContext = extractLinksWithContext(html, normalizedUrl, sourceForExtract);
-        const { data: sourcePages } = await supabase.from('pages').select('id').eq('source_id', sourceId);
-        const pageIds = (sourcePages ?? []).map((p) => p.id);
-        const { data: existingRows } = pageIds.length > 0
-            ? await supabase
-                .from('discovered_links')
-                .select('to_url')
-                .in('from_page_id', pageIds)
-            : { data: [] };
-        const existingUrls = new Set((existingRows ?? []).map((r) => r.to_url));
+        console.log('[add-page] extractLinksWithContext', {
+            linksCount: linksWithContext.length,
+            sameDomainOnly: sourceForExtract.same_domain_only,
+            sampleUrls: linksWithContext.slice(0, 3).map((l) => l.url.slice(0, 60)),
+        });
+        const { data: sourcePageEdges } = await supabase
+            .from('page_edges')
+            .select('to_url')
+            .eq('from_page_id', newPage.id);
+        const existingUrls = new Set((sourcePageEdges ?? []).map((r) => r.to_url));
         const newLinks = linksWithContext.filter((l) => !existingUrls.has(l.url));
+        console.log('[add-page] newLinks after dedup', { newLinksCount: newLinks.length, existingCount: existingUrls.size });
         if (newLinks.length > 0) {
-            const toInsert = newLinks.slice(0, 500).map((l) => ({
+            const edgeRows = newLinks.slice(0, 500).map((l) => ({
                 from_page_id: newPage.id,
                 to_url: l.url,
+                owner_id: ownerId,
+            }));
+            const { error: edgeErr } = await supabase.from('page_edges').upsert(edgeRows, {
+                onConflict: 'from_page_id,to_url',
+                ignoreDuplicates: true,
+            });
+            console.log('[add-page] page_edges upsert', { rowCount: edgeRows.length, error: edgeErr?.message ?? null });
+            const { data: edgeIds } = await supabase
+                .from('page_edges')
+                .select('id, to_url')
+                .eq('from_page_id', newPage.id)
+                .in('to_url', newLinks.slice(0, 500).map((l) => l.url));
+            const urlToEdgeId = new Map((edgeIds ?? []).map((r) => [r.to_url, r.id]));
+            const encodedRows = newLinks
+                .slice(0, 500)
+                .filter((l) => urlToEdgeId.has(l.url))
+                .map((l) => ({
+                page_edge_id: urlToEdgeId.get(l.url),
                 anchor_text: l.anchorText || null,
                 context_snippet: l.contextSnippet.substring(0, 500),
                 owner_id: ownerId,
             }));
-            await supabase.from('discovered_links').upsert(toInsert, {
-                onConflict: 'from_page_id,to_url',
-                ignoreDuplicates: true,
-            });
+            if (encodedRows.length > 0) {
+                const { error: encErr } = await supabase.from('encoded_discovered').upsert(encodedRows, {
+                    onConflict: 'page_edge_id',
+                    ignoreDuplicates: true,
+                });
+                console.log('[add-page] encoded_discovered upsert', {
+                    rowCount: encodedRows.length,
+                    urlToEdgeIdSize: urlToEdgeId.size,
+                    error: encErr?.message ?? null,
+                });
+            }
+            else {
+                console.log('[add-page] encoded_discovered skip: encodedRows.length=0', {
+                    newLinksCount: newLinks.length,
+                    urlToEdgeIdSize: urlToEdgeId.size,
+                    reason: 'urlToEdgeId missing some URLs?',
+                });
+            }
+        }
+        else {
+            console.log('[add-page] no newLinks to insert', { linksWithContextCount: linksWithContext.length });
         }
         // Chunk and embed page content
         await indexSinglePageForRag(newPage.id, content, ownerId, jobId);
-        // Embed discovered_links for this page
+        // Embed encoded_discovered for this page
         const apiKey = process.env.OPENAI_API_KEY;
         const conversationId = source.conversation_id;
-        if (apiKey && conversationId) {
+        if (!apiKey) {
+            console.log('[add-page] SKIP embedDiscoveredLinksForPage: OPENAI_API_KEY not set');
+        }
+        else if (!conversationId) {
+            console.log('[add-page] SKIP embedDiscoveredLinksForPage: source.conversation_id is null/undefined');
+        }
+        else {
+            console.log('[add-page] calling embedDiscoveredLinksForPage', { conversationId: conversationId.slice(0, 8), newPageId: newPage.id?.slice(0, 8) });
             await embedDiscoveredLinksForPage(conversationId, newPage.id, apiKey, jobId);
         }
         // Clear embeddings for links pointing to the newly added page - we'll never suggest it again
-        await supabase
-            .from('discovered_links')
-            .update({ embedding: null })
-            .eq('from_page_id', newPage.id)
-            .eq('to_url', normalizedUrl);
+        const { data: edgesToNewPage } = await supabase.from('page_edges').select('id').eq('to_url', normalizedUrl);
+        const edgeIdsToClear = (edgesToNewPage ?? []).map((r) => r.id);
+        if (edgeIdsToClear.length > 0) {
+            const { error: clearErr } = await supabase.from('encoded_discovered').update({ embedding: null }).in('page_edge_id', edgeIdsToClear);
+            console.log('[add-page] cleared embeddings for links→newPage', { edgeCount: edgeIdsToClear.length, error: clearErr?.message ?? null });
+        }
         await updateCrawlJob(jobId, { status: 'completed' });
         console.log('[add-page] success', newPage.id?.slice(0, 8));
     }

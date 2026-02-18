@@ -154,7 +154,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const activeSource = activeSourceId ? sourcesWithStatus.find(s => s.id === activeSourceId) : null;
   const displaySources = activeSource ? [activeSource] : sourcesWithStatus;
   
-  // Aggregate stats - for dynamic use discovered_links count (includes add-page); else crawl job
+  // Aggregate stats - for dynamic use encoded_discovered count (includes add-page); else crawl job
   const totalDiscovered = displaySources.reduce((sum, s) => {
     const dlCount = discoveredCountsMap[s.id] ?? 0;
     const crawlJob = crawlJobMap.get(s.id);
@@ -184,10 +184,11 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const indexingJob = displaySources.find(s => crawlJobMap.get(s.id)?.status === 'indexing');
   const crawlJob = indexingJob ? crawlJobMap.get(indexingJob.id) : null;
   const isDynamic = displaySources.some(s => s.crawlDepth === 'dynamic');
-  const encChunksDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_done ?? 0) : (crawlJob as CrawlJob | null)?.encoding_chunks_done ?? 0;
-  const encChunksTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_chunks_total ?? 0;
-  const encDiscoveredDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_done ?? 0;
-  const encDiscoveredTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_total ?? 0;
+  const useAddPageProgress = (isAddPageEncoding || isAddPageResponding) && addPageJob;
+  const encChunksDone = useAddPageProgress ? (addPageJob.encoding_chunks_done ?? 0) : (crawlJob as CrawlJob | null)?.encoding_chunks_done ?? 0;
+  const encChunksTotal = useAddPageProgress ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_chunks_total ?? 0;
+  const encDiscoveredDone = useAddPageProgress ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_done ?? 0;
+  const encDiscoveredTotal = useAddPageProgress ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_total ?? 0;
   const encodingPhase = getEncodingPhase(
     isCrawling && !activeSource,
     isIndexingFromJob || isAddPageEncoding,
@@ -351,10 +352,10 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
               tooltip="Links found during crawl; for dynamic sources, grows when you add suggested pages (e.g. 27→34)."
             />
             <StatItem
-              label="Indexed"
+              label="Scraped"
               value={isAddingPageFlow ? progressSources.reduce((s, x) => s + x.pagesIndexed, 0) : totalIndexed}
               highlight={isCrawling && !activeSource}
-              tooltip="Pages in the graph with searchable content."
+              tooltip="Pages scraped and in the graph with searchable content."
             />
             {isDynamic && (
               <StatItem

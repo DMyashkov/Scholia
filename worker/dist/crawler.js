@@ -65,17 +65,19 @@ export async function processCrawlJob(jobId) {
     }
 }
 async function crawlSource(job, source) {
-    // Get conversation_id from source (sources.conversation_id)
-    const { data: sourceRow, error: srcError } = await supabase
-        .from('sources')
-        .select('conversation_id')
-        .eq('id', source.id)
-        .single();
-    if (srcError || !sourceRow?.conversation_id) {
-        console.error(`❌ Failed to find conversation for source ${source.id}:`, srcError);
-        throw new Error(`No conversation found for source ${source.id}`);
+    let conversationId = source.conversation_id;
+    if (!conversationId) {
+        const { data: sourceRow, error: srcError } = await supabase
+            .from('sources')
+            .select('conversation_id')
+            .eq('id', source.id)
+            .single();
+        if (srcError || !sourceRow?.conversation_id) {
+            console.error(`❌ Failed to find conversation for source ${source.id}:`, srcError);
+            throw new Error(`No conversation found for source ${source.id}`);
+        }
+        conversationId = sourceRow.conversation_id;
     }
-    const conversationId = sourceRow.conversation_id;
     // Validate that the conversation exists
     const { data: conversation, error: convCheckError } = await supabase
         .from('conversations')
@@ -242,29 +244,6 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
             const newLinks = [];
             const edgesToInsert = [];
             const linksToProcess = links.slice(0, 200);
-            // Insert discovered_links only for dynamic sources (avoids expensive embedding of every link for shallow/medium/deep)
-            if (isDynamic && linksWithContext.length > 0) {
-                const toInsert = linksWithContext
-                    .filter((l) => l.contextSnippet.length > 0)
-                    .slice(0, 500)
-                    .map((l) => ({
-                    from_page_id: page.id,
-                    to_url: l.url,
-                    anchor_text: l.anchorText || null,
-                    context_snippet: l.contextSnippet.substring(0, 500),
-                    owner_id: source.owner_id,
-                }));
-                const { error: dlError } = await supabase.from('discovered_links').upsert(toInsert, {
-                    onConflict: 'from_page_id,to_url',
-                    ignoreDuplicates: true,
-                });
-                if (dlError) {
-                    console.warn('[crawl] discovered_links insert error:', dlError.message);
-                }
-                else {
-                    console.log(`[D/I] discovered_links inserted=${toInsert.length} conv=${conversationId?.slice(0, 8)} source=${source.id?.slice(0, 8)}`);
-                }
-            }
             for (const link of linksToProcess) {
                 // Links are already normalized by extractLinks, but double-check normalization
                 const linkUrlObj = new URL(link);
@@ -282,7 +261,6 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
                 // from_page_id lets the frontend match "from" by ID; to_url matched by URL when page is indexed
                 edgesToInsert.push({
                     from_page_id: page.id,
-                    from_url: normalizedUrl,
                     to_url: normalizedLink,
                     owner_id: source.owner_id,
                 });
@@ -359,6 +337,41 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
                     // CRITICAL: Log error but continue crawling - edges are not critical
                 }
             }
+            // Insert encoded_discovered only for dynamic sources (after page_edges exist)
+            if (isDynamic && linksWithContext.length > 0 && edgesToInsert.length > 0) {
+                const toEncode = linksWithContext
+                    .filter((l) => l.contextSnippet.length > 0)
+                    .slice(0, 500);
+                if (toEncode.length > 0) {
+                    const urls = toEncode.map((l) => l.url);
+                    const { data: edgeRows } = await supabase
+                        .from('page_edges')
+                        .select('id, to_url')
+                        .eq('from_page_id', page.id)
+                        .in('to_url', urls);
+                    const urlToEdgeId = new Map((edgeRows ?? []).map((r) => [r.to_url, r.id]));
+                    const encodedToInsert = toEncode
+                        .filter((l) => urlToEdgeId.has(l.url))
+                        .map((l) => ({
+                        page_edge_id: urlToEdgeId.get(l.url),
+                        anchor_text: l.anchorText || null,
+                        context_snippet: l.contextSnippet.substring(0, 500),
+                        owner_id: source.owner_id,
+                    }));
+                    if (encodedToInsert.length > 0) {
+                        const { error: encError } = await supabase.from('encoded_discovered').upsert(encodedToInsert, {
+                            onConflict: 'page_edge_id',
+                            ignoreDuplicates: true,
+                        });
+                        if (encError) {
+                            console.warn('[crawl] encoded_discovered insert error:', encError.message);
+                        }
+                        else {
+                            console.log(`[D/I] encoded_discovered inserted=${encodedToInsert.length} conv=${conversationId?.slice(0, 8)} source=${source.id?.slice(0, 8)}`);
+                        }
+                    }
+                }
+            }
             // Update job progress with all counters
             const updatePayload = {
                 discovered_count: discovered.size,
@@ -384,10 +397,27 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
     }
     // Run indexer BEFORE marking completed so when UI shows "ready", chunks exist
     console.log(`[D/I] Transitioning to indexing: discovered=${discovered.size} indexed=${visited.size} jobId=${job.id?.slice(0, 8)}`);
-    await supabase
-        .from('crawl_jobs')
-        .update({ status: 'indexing', updated_at: new Date().toISOString() })
-        .eq('id', job.id);
+    const indexingUpdate = { status: 'indexing', updated_at: new Date().toISOString() };
+    if (source.crawl_depth === 'dynamic') {
+        const { data: pages } = await supabase.from('pages').select('id').eq('source_id', source.id);
+        const pageIds = (pages ?? []).map((p) => p.id);
+        if (pageIds.length > 0) {
+            const { data: edges } = await supabase.from('page_edges').select('id').in('from_page_id', pageIds);
+            const edgeIds = (edges ?? []).map((e) => e.id);
+            if (edgeIds.length > 0) {
+                const { count } = await supabase
+                    .from('encoded_discovered')
+                    .select('*', { count: 'exact', head: true })
+                    .in('page_edge_id', edgeIds)
+                    .is('embedding', null);
+                if (count != null && count > 0) {
+                    indexingUpdate.encoding_discovered_total = count;
+                    indexingUpdate.encoding_discovered_done = 0;
+                }
+            }
+        }
+    }
+    await supabase.from('crawl_jobs').update(indexingUpdate).eq('id', job.id);
     try {
         await indexConversationForRag(conversationId, job.id);
     }

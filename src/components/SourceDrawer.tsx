@@ -145,10 +145,11 @@ export const SourceDrawer = ({
   const isAddPageIndexing = addingPageSourceId === source?.id && addPageJob?.status === 'indexing';
   const isAddPageEncoding = addingPageSourceId === source?.id && addPageJob?.status === 'encoding';
   const isAddPageResponding = addingPageSourceId === source?.id && addPageJob?.status === 'completed';
-  const encChunksDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_done ?? 0) : (crawlJob?.encoding_chunks_done ?? 0);
-  const encChunksTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob?.encoding_chunks_total ?? 0);
-  const encDiscoveredDone = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob?.encoding_discovered_done ?? 0);
-  const encDiscoveredTotal = isAddPageEncoding && addPageJob ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob?.encoding_discovered_total ?? 0);
+  const useAddPageProgress = (isAddPageEncoding || isAddPageResponding) && addPageJob;
+  const encChunksDone = useAddPageProgress ? (addPageJob.encoding_chunks_done ?? 0) : (crawlJob?.encoding_chunks_done ?? 0);
+  const encChunksTotal = useAddPageProgress ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob?.encoding_chunks_total ?? 0);
+  const encDiscoveredDone = useAddPageProgress ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob?.encoding_discovered_done ?? 0);
+  const encDiscoveredTotal = useAddPageProgress ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob?.encoding_discovered_total ?? 0);
   const encodingPhase = getEncodingPhase(
     realStatus === 'crawling',
     isIndexing,

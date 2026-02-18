@@ -66,16 +66,9 @@ export async function recrawlSource(conversationId: string, sourceId: string): P
     if (chunksErr) recrawlLog('chunks delete error:', chunksErr);
   }
 
-  // 4. Delete discovered_links for this source (via from_page_id -> pages)
-  const { data: sourcePages } = await supabase.from('pages').select('id').eq('source_id', sourceId);
-  const sourcePageIds = (sourcePages ?? []).map((p) => p.id);
-  const { error: dlErr } =
-    sourcePageIds.length > 0
-      ? await supabase.from('discovered_links').delete().in('from_page_id', sourcePageIds)
-      : { error: null };
-  recrawlLog('discovered_links delete', dlErr ? { error: dlErr } : 'ok');
+  // 4. encoded_discovered cascades when page_edges are deleted in step 5
 
-  // 5. Delete page_edges (via from_page_id - edges reference pages)
+  // 5. Delete page_edges (via from_page_id - edges reference pages; encoded_discovered cascades)
   if (pageIds.length > 0) {
     const { error: edgesErr } = await supabase
       .from('page_edges')

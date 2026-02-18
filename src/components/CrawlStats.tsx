@@ -62,14 +62,14 @@ export const CrawlStats = ({
             <TooltipTrigger asChild>
               <div>
                 <StatItem
-                  label="Indexed"
+                  label="Scraped"
                   value={pagesIndexed}
                   highlight={isCrawling}
                 />
               </div>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-[200px]">
-              <p className="text-xs">Pages in the graph with searchable content</p>
+              <p className="text-xs">Pages scraped and in the graph with searchable content</p>
             </TooltipContent>
           </Tooltip>
           {isDynamic && (

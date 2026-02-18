@@ -295,10 +295,12 @@ export const useChatDatabase = () => {
       queryClient.invalidateQueries({ queryKey: ['conversation-pages', conversationId] });
       queryClient.invalidateQueries({ queryKey: ['conversation-page-edges', conversationId] });
       queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
+      queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] });
       await Promise.all([
         queryClient.refetchQueries({ queryKey: ['conversation-pages', conversationId] }),
         queryClient.refetchQueries({ queryKey: ['conversation-page-edges', conversationId] }),
         queryClient.refetchQueries({ queryKey: ['discovered-links-counts', conversationId] }),
+        queryClient.refetchQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] }),
       ]);
       return data;
     }
@@ -329,10 +331,12 @@ export const useChatDatabase = () => {
     queryClient.invalidateQueries({ queryKey: ['conversation-pages', conversationId] });
     queryClient.invalidateQueries({ queryKey: ['conversation-page-edges', conversationId] });
     queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
+    queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] });
     await Promise.all([
       queryClient.refetchQueries({ queryKey: ['conversation-pages', conversationId] }),
       queryClient.refetchQueries({ queryKey: ['conversation-page-edges', conversationId] }),
       queryClient.refetchQueries({ queryKey: ['discovered-links-counts', conversationId] }),
+      queryClient.refetchQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] }),
     ]);
     return { page: {}, message: 'Page added' };
   }, [queryClient]);
@@ -442,6 +446,7 @@ export const useChatDatabase = () => {
       conversation_id: conversationId,
       role: 'user',
       content: content.trim(),
+      was_multi_step: false,
     });
 
     setIsLoading(true);
@@ -595,6 +600,7 @@ export const useChatDatabase = () => {
       conversation_id: conversationId,
       role: 'assistant',
       content: fullResponse,
+      was_multi_step: false,
     });
 
     setStreamingMessage('');

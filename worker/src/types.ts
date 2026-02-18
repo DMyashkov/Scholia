@@ -18,6 +18,7 @@ export interface CrawlJob {
 export interface Source {
   id: string;
   owner_id: string;
+  conversation_id: string;
   initial_url: string;
   domain: string;
   crawl_depth: 'shallow' | 'medium' | 'deep' | 'singular' | 'dynamic';
@@ -42,7 +43,6 @@ export interface Page {
 export interface PageEdge {
   id: string;
   from_page_id: string;
-  from_url?: string | null;
   to_url?: string | null;
   to_page_id?: string | null;
   created_at: string;

@@ -149,7 +149,7 @@ const SourceChip = ({
               <span>Depth: {getDepthLabel(source.crawlDepth)}</span>
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
-              <span>Pages indexed: {source.pagesIndexed}/{source.totalPages}</span>
+              <span>Pages scraped: {source.pagesIndexed}/{source.totalPages}</span>
               {source.status === 'ready' && source.pagesIndexed < source.totalPages && (
                 <span className="italic">— no more linked pages found</span>
               )}

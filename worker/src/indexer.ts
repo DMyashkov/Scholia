@@ -180,7 +180,7 @@ export async function indexSinglePageForRag(
   return { chunksCreated: inserted };
 }
 
-/** Embed discovered_links for a single page (add-page flow) and report progress to crawl_jobs.
+/** Embed encoded_discovered for a single page (add-page flow) and report progress to crawl_jobs.
  * Skips links pointing to already-indexed pages - we never suggest those. */
 export async function embedDiscoveredLinksForPage(
   conversationId: string,
@@ -188,40 +188,85 @@ export async function embedDiscoveredLinksForPage(
   apiKey: string,
   crawlJobId: string
 ): Promise<number> {
+  console.log('[indexer] embedDiscoveredLinksForPage ENTRY', { pageId: pageId.slice(0, 8), crawlJobId: crawlJobId.slice(0, 8) });
+
   const indexedUrls = await getIndexedPageUrlsForPage(pageId);
+  console.log('[indexer] embedDiscoveredLinksForPage indexedUrls', { count: indexedUrls.size, sample: [...indexedUrls].slice(0, 3) });
+
+  const { data: edgeRows } = await supabase
+    .from('page_edges')
+    .select('id, to_url')
+    .eq('from_page_id', pageId);
+  const edgeIds = (edgeRows ?? []).map((r) => r.id);
+  if (edgeIds.length === 0) {
+    console.log('[indexer] embedDiscoveredLinksForPage EARLY_RETURN: edgeIds.length=0', { reason: 'no page_edges for this page' });
+    return 0;
+  }
+  console.log('[indexer] embedDiscoveredLinksForPage page_edges', { edgeCount: edgeIds.length });
+
   const { data: links, error: fetchError } = await supabase
-    .from('discovered_links')
-    .select('id, context_snippet, to_url')
-    .eq('from_page_id', pageId)
+    .from('encoded_discovered')
+    .select('id, context_snippet, page_edge_id')
+    .in('page_edge_id', edgeIds)
     .is('embedding', null);
 
-  if (fetchError || !links?.length) return 0;
+  if (fetchError) {
+    console.log('[indexer] embedDiscoveredLinksForPage EARLY_RETURN: fetchError', { error: fetchError.message });
+    return 0;
+  }
+  if (!links?.length) {
+    console.log('[indexer] embedDiscoveredLinksForPage EARLY_RETURN: links.length=0', {
+      reason: 'no encoded_discovered with null embedding for these edges (may already be embedded)',
+    });
+    return 0;
+  }
+  console.log('[indexer] embedDiscoveredLinksForPage encoded_discovered (null embedding)', { linksCount: links.length });
 
-  const toEmbed = links.filter((l) => !indexedUrls.has(normalizeUrlForCompare(l.to_url || '')));
-  if (toEmbed.length === 0) return 0;
-
-  const total = toEmbed.length;
-  await supabase
-    .from('crawl_jobs')
-    .update({
-      encoding_discovered_total: total,
-      encoding_discovered_done: 0,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', crawlJobId);
+  const edgeIdToUrl = new Map((edgeRows ?? []).map((r) => [r.id, r.to_url]));
+  const toEmbed = links.filter((l) => {
+    const url = edgeIdToUrl.get(l.page_edge_id) || '';
+    return !indexedUrls.has(normalizeUrlForCompare(url));
+  });
+  const total = links.length;
+  if (crawlJobId && total > 0) {
+    await supabase
+      .from('crawl_jobs')
+      .update({
+        encoding_discovered_total: total,
+        encoding_discovered_done: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', crawlJobId);
+  }
+  if (toEmbed.length === 0) {
+    console.log('[indexer] embedDiscoveredLinksForPage EARLY_RETURN: toEmbed.length=0', {
+      linksLength: links.length,
+      total,
+      reason: 'all links point to already-indexed pages',
+    });
+    return 0;
+  }
 
   const texts = toEmbed.map((l) => l.context_snippet);
   const embeddings = await embedBatch(apiKey, texts);
-  if (embeddings.length !== texts.length) return 0;
+  if (embeddings.length !== texts.length) {
+    console.log('[indexer] embedDiscoveredLinksForPage EARLY_RETURN: embedBatch mismatch', {
+      requested: texts.length,
+      received: embeddings.length,
+    });
+    return 0;
+  }
 
   let updated = 0;
+  let lastProgressUpdate = Date.now();
   for (let i = 0; i < toEmbed.length; i++) {
     const { error } = await supabase
-      .from('discovered_links')
+      .from('encoded_discovered')
       .update({ embedding: embeddings[i] })
       .eq('id', toEmbed[i].id);
     if (!error) updated++;
-    if (updated % DISCOVERED_PROGRESS_BATCH === 0) {
+    const now = Date.now();
+    if (now - lastProgressUpdate >= DISCOVERED_PROGRESS_INTERVAL_MS) {
       await supabase
         .from('crawl_jobs')
         .update({
@@ -229,6 +274,7 @@ export async function embedDiscoveredLinksForPage(
           updated_at: new Date().toISOString(),
         })
         .eq('id', crawlJobId);
+      lastProgressUpdate = now;
     }
   }
   if (updated > 0) {
@@ -240,12 +286,21 @@ export async function embedDiscoveredLinksForPage(
       })
       .eq('id', crawlJobId);
     const skipped = links.length - toEmbed.length;
-    console.log('[indexer] add-page embedded', updated, 'discovered_links', skipped > 0 ? `(skipped ${skipped} already-indexed)` : '');
+    console.log('[indexer] embedDiscoveredLinksForPage SUCCESS', {
+      updated,
+      total: toEmbed.length,
+      skipped,
+    });
+  } else {
+    console.log('[indexer] embedDiscoveredLinksForPage WARN: updated=0', {
+      toEmbedLength: toEmbed.length,
+      reason: 'all UPDATEs to encoded_discovered failed (check RLS?)',
+    });
   }
   return updated;
 }
 
-const DISCOVERED_PROGRESS_BATCH = 25; // Update crawl_jobs every N links to avoid DB spam
+const DISCOVERED_PROGRESS_INTERVAL_MS = 1200; // Update crawl_jobs every N ms for progress bar
 
 /** Normalize URL for comparison (strip hash, query, lowercase) */
 function normalizeUrlForCompare(url: string): string {
@@ -306,23 +361,39 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
     .in('source_id', sourceIds);
   const pageIds = (pages ?? []).map((p) => p.id);
   if (pageIds.length === 0) return 0;
+  const { data: edgeRows } = await supabase
+    .from('page_edges')
+    .select('id, to_url')
+    .in('from_page_id', pageIds);
+  const edgeIds = (edgeRows ?? []).map((r) => r.id);
+  if (edgeIds.length === 0) return 0;
   const { data: links, error: fetchError } = await supabase
-    .from('discovered_links')
-    .select('id, context_snippet, to_url')
-    .in('from_page_id', pageIds)
+    .from('encoded_discovered')
+    .select('id, context_snippet, page_edge_id')
+    .in('page_edge_id', edgeIds)
     .is('embedding', null);
 
   if (fetchError || !links?.length) return 0;
 
-  const toEmbed = links.filter((l) => !indexedUrls.has(normalizeUrlForCompare(l.to_url || '')));
-  if (toEmbed.length === 0) return 0;
-
-  const total = toEmbed.length;
-  if (crawlJobId) {
+  const edgeIdToUrl = new Map((edgeRows ?? []).map((r) => [r.id, r.to_url]));
+  const toEmbed = links.filter((l) => {
+    const url = edgeIdToUrl.get(l.page_edge_id) || '';
+    return !indexedUrls.has(normalizeUrlForCompare(url));
+  });
+  const total = links.length;
+  if (crawlJobId && total > 0) {
     await supabase
       .from('crawl_jobs')
       .update({ encoding_discovered_total: total, encoding_discovered_done: 0 })
       .eq('id', crawlJobId);
+  }
+  if (toEmbed.length === 0) {
+    console.log('[indexer] embedDiscoveredLinks (bulk) EARLY_RETURN: toEmbed.length=0', {
+      linksLength: links.length,
+      total,
+      reason: 'all links point to already-indexed pages',
+    });
+    return 0;
   }
 
   const texts = toEmbed.map((l) => l.context_snippet);
@@ -330,17 +401,20 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
   if (embeddings.length !== texts.length) return 0;
 
   let updated = 0;
+  let lastProgressUpdate = Date.now();
   for (let i = 0; i < toEmbed.length; i++) {
     const { error } = await supabase
-      .from('discovered_links')
+      .from('encoded_discovered')
       .update({ embedding: embeddings[i] })
       .eq('id', toEmbed[i].id);
     if (!error) updated++;
-    if (crawlJobId && updated % DISCOVERED_PROGRESS_BATCH === 0) {
+    const now = Date.now();
+    if (crawlJobId && now - lastProgressUpdate >= DISCOVERED_PROGRESS_INTERVAL_MS) {
       await supabase
         .from('crawl_jobs')
         .update({ encoding_discovered_done: updated, last_activity_at: new Date().toISOString() })
         .eq('id', crawlJobId);
+      lastProgressUpdate = now;
     }
   }
   if (crawlJobId && updated > 0) {
@@ -351,7 +425,7 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
   }
   if (updated > 0) {
     const skipped = links.length - toEmbed.length;
-    console.log('[indexer] Embedded', updated, 'discovered_links', skipped > 0 ? `(skipped ${skipped} already-indexed)` : '');
+    console.log('[indexer] Embedded', updated, 'encoded_discovered', skipped > 0 ? `(skipped ${skipped} already-indexed)` : '');
   }
   return 0; // Don't count toward chunksCreated
 }

@@ -159,7 +159,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
 
     channelsRef.current.push(edgesChannel);
 
-    // Subscribe to discovered_links INSERTs (new links) and UPDATEs (embedding set during encoding)
+    // Subscribe to encoded_discovered INSERTs (new links) and UPDATEs (embedding set during encoding)
     // No filter: source_id dropped; RLS restricts to our rows
     const dlChannel =
       sourceIds.length > 0
@@ -170,7 +170,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
               {
                 event: 'INSERT',
                 schema: 'public',
-                table: 'discovered_links',
+                table: 'encoded_discovered',
               },
               () => {
                 if (discoveredLinksDebounceRef.current) clearTimeout(discoveredLinksDebounceRef.current);
@@ -186,7 +186,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
               {
                 event: 'UPDATE',
                 schema: 'public',
-                table: 'discovered_links',
+                table: 'encoded_discovered',
               },
               () => {
                 if (discoveredLinksDebounceRef.current) clearTimeout(discoveredLinksDebounceRef.current);
@@ -196,6 +196,9 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
                   queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] });
                   queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-count' });
                   queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-encoded-count' });
+                  // encoding_discovered_done lives on crawl_jobs; invalidate so progress bar gets latest (crawl_jobs realtime may not fire for worker updates)
+                  queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'crawl-jobs-main-for-sources' && q.queryKey[2] === conversationId });
+                  queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && (q.queryKey[0] === 'crawl-jobs-for-sources' || q.queryKey[0] === 'crawl-jobs-for-sources-bar') });
                 }, DISCOVERED_LINKS_DEBOUNCE_MS);
               }
             )

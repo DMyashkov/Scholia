@@ -90,7 +90,6 @@ export interface PageEdge {
   id: string;
   from_page_id: string;
   to_page_id?: string | null;
-  from_url?: string | null;
   to_url?: string | null;
   created_at: string;
   owner_id: string;

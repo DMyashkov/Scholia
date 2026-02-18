@@ -387,15 +387,6 @@ Deno.serve(async (req) => {
       console.log('[RAG-2ROUND] message inserted:', { id: assistantRow?.id });
     }
 
-    await supabase.from('rag_run_log').insert({
-      conversation_id: conversationId,
-      message_id: assistantRow?.id ?? null,
-      owner_id: ownerId,
-      needs_second_round: decomposeResult?.needsSecondRound ?? false,
-      did_second_round: didSecondRound,
-      reason: logReason,
-    }).then(({ error }) => { if (error) console.warn('[RAG-2ROUND] rag_run_log insert failed:', error); });
-
     if (quotesOut.length > 0) {
       for (const q of quotesOut) {
         await supabase.from('quotes').insert({

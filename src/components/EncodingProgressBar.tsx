@@ -38,7 +38,7 @@ export function getEncodingStatusLabel(
 
 /** Single bar with layered overlapping fills. Lightest → medium → darkest as phases progress. */
 export interface EncodingProgressBarProps {
-  /** Phase 1: pages indexed / target (crawl progress) */
+  /** Phase 1: pages scraped / target (crawl progress) */
   crawlDone: number;
   crawlTotal: number;
   /** Phase 2: page chunks embedded (Indexing Crawled Pages) */

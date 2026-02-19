@@ -4,12 +4,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PageRow, SourceRow } from './types.ts';
 import type { QuoteOut } from './types.ts';
-import {
-  replaceCitationPlaceholders,
-  attachQuotesToMessage,
-  buildQuotesOut,
-  updateQuoteContextFromPage,
-} from './quotes.ts';
+import { replaceCitationPlaceholders, buildQuotesOut, updateQuoteContextFromPage } from './quotes.ts';
 import { getLastMessages } from './chat.ts';
 
 export interface SaveAnswerParams {
@@ -83,16 +78,51 @@ export async function saveAssistantMessageWithQuotes(params: SaveAnswerParams): 
     await supabase.from('messages').update({ suggested_page: null }).eq('id', appendToMessageId);
   }
 
+  // Materialize quotes for the chunks actually cited in the final answer.
   if (quoteIdsOrdered.length > 0) {
-    await attachQuotesToMessage(supabase, assistantRow.id, quoteIdsOrdered);
-    const citedSnippets = lastExtractResult?.cited_snippets;
-    if (citedSnippets && typeof citedSnippets === 'object') {
-      for (const quoteId of quoteIdsOrdered) {
-        const snippet = citedSnippets[quoteId];
-        if (typeof snippet === 'string' && snippet.trim().length > 0) {
-          await supabase.from('quotes').update({ snippet: snippet.trim() }).eq('id', quoteId);
+    const { data: chunkRows = [] } = await supabase
+      .from('chunks')
+      .select('id, page_id, content')
+      .in('id', quoteIdsOrdered);
+    const chunkById = new Map((chunkRows as { id: string; page_id: string; content: string | null }[]).map((c) => [c.id, c]));
+    const citedSnippets = lastExtractResult?.cited_snippets ?? {};
+
+    for (let i = 0; i < quoteIdsOrdered.length; i++) {
+      const chunkId = quoteIdsOrdered[i];
+      const chunk = chunkById.get(chunkId);
+      if (!chunk) continue;
+      const page = pageById.get(chunk.page_id);
+      if (!page) continue;
+      const source = sourceById.get(page.source_id);
+
+      let domain = '';
+      const fullPageUrl = page.url ?? null;
+      if (fullPageUrl) {
+        try {
+          domain = new URL(fullPageUrl).hostname;
+        } catch {
+          domain = '';
         }
       }
+      if (!domain) domain = source?.domain ?? '';
+
+      const rawSnippet = typeof citedSnippets[chunkId] === 'string' && citedSnippets[chunkId].trim().length > 0
+        ? citedSnippets[chunkId].trim()
+        : (chunk.content ?? '').trim();
+
+      await supabase.from('quotes').insert({
+        message_id: assistantRow.id,
+        page_id: chunk.page_id,
+        chunk_id: chunk.id,
+        snippet: rawSnippet,
+        page_title: page.title ?? '',
+        page_path: page.path ?? '',
+        domain,
+        page_url: fullPageUrl,
+        retrieved_in_reasoning_step_id: null,
+        owner_id: ownerId,
+        citation_order: i + 1,
+      });
     }
   }
 

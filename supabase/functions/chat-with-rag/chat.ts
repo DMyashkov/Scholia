@@ -22,7 +22,7 @@ export async function chat(
   requestTitle = false,
 ): Promise<ChatResponse> {
   const titleInstruction = requestTitle
-    ? '\n- Include a "title" field: a 3-6 word phrase summarizing this conversation topic (e.g. "Quarter Horse Racing History", "Miss Meyers Career").'
+    ? '\n- Include a "title" field: a 3-6 word phrase summarizing this conversation topic (e.g. "Company Revenue History", "Product Launch Timeline").'
     : '';
   const systemPrompt = `Answer using ONLY the context below. No inference. If context lacks info, say "The context does not include..." and leave quotes empty.
 

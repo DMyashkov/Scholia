@@ -52,7 +52,8 @@ export interface ExtractClaim {
   value: string | number | unknown;
   key?: string;
   confidence?: number;
-  quoteIds: string[];
+  /** Evidence chunk ids supporting this claim */
+  chunkIds: string[];
 }
 
 export interface ExtractResult {
@@ -66,7 +67,7 @@ export interface ExtractResult {
   questions?: string[];
   /** e.g. "Could not parse claim for slot X" when parse fails or slot missing */
   extractionGaps?: string[];
-  /** When next_action is answer: verbatim passage per quote id (model-cited snippet, like pre–Unfold v2). */
+  /** When next_action is answer: verbatim passage per chunk id (model-cited snippet, like pre–Unfold v2). */
   cited_snippets?: Record<string, string>;
 }
 

@@ -1,6 +1,3 @@
-/**
- * Load RAG context: conversation, pages, sources, root message, slots and plan (if reusing).
- */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ChunkRow, PageRow, SourceRow } from './types.ts';
 import type { PlanResult, PlanSlot, PlanSubquery } from './types.ts';
@@ -99,20 +96,10 @@ export async function loadRagContext(
   } else if (bodyRootMessageId) {
     rootMessageId = bodyRootMessageId;
   } else {
-    const { data: insertedUser } = await supabase
-      .from('messages')
-      .insert({
-        conversation_id: conversationId,
-        role: 'user',
-        content: userMessage.trim(),
-        owner_id: ownerId,
-      })
-      .select('id')
-      .single();
-    if (!insertedUser?.id) {
-      return { kind: 'error', error: 'Failed to create user message' };
-    }
-    rootMessageId = insertedUser.id;
+    // In the current app flow, the frontend always creates the user message
+    // and passes its id as rootMessageId. Reaching this branch means the
+    // conversation/message state is inconsistent.
+    return { kind: 'error', error: 'Root message missing; conversation may be corrupted' };
   }
 
   let slots: SlotDb[] = [];

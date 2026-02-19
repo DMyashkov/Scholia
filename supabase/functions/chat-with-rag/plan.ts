@@ -4,7 +4,7 @@ import { OPENAI_CHAT_MODEL } from './config.ts';
 const PLAN_SYSTEM = `You plan semantic search and evidence gathering for a question over indexed documents.
 
 Output JSON only with this shape:
-- action: "retrieve" | "expand_corpus" | "clarify" | "answer"
+- action: "retrieve" | "clarify" | "answer"
 - why: short reason for this action
 - slots: array of { name, type, description?, required?, dependsOn? }
   - type is one of: "scalar" (one value), "list" (set of items), "mapping" (key->value per list item; use dependsOn: slot name of the list)
@@ -14,8 +14,10 @@ Output JSON only with this shape:
 Rules:
 - Start with action "retrieve" unless the question is ambiguous (then "clarify" with questions).
 - Slots: identify what information is needed to answer (e.g. birth_date scalar, product_list list, region_per_product mapping with dependsOn product_list).
-- Subqueries: 1–3 queries per slot to find evidence; use concise search phrases.
-- Use "expand_corpus" only when evidence likely exists in linked pages we have not indexed yet.`;
+- Subqueries
+  - for scalar slots - 1–2 focused queries
+  - for list slots - 1–2 broad discovery queries
+  - for mapping slots - 1 broad mapping query`;
 
 export async function callPlan(apiKey: string, userMessage: string): Promise<PlanResult> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -40,7 +42,7 @@ export async function callPlan(apiKey: string, userMessage: string): Promise<Pla
     return fallbackPlan(userMessage);
   }
   const obj = parsed as Record<string, unknown>;
-  const action = ['retrieve', 'expand_corpus', 'clarify', 'answer'].includes(String(obj.action))
+  const action = ['retrieve', 'clarify', 'answer'].includes(String(obj.action))
     ? (obj.action as PlanResult['action'])
     : 'retrieve';
   const why = typeof obj.why === 'string' ? obj.why : undefined;

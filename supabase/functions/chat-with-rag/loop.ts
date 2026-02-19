@@ -10,44 +10,46 @@ export interface SlotRow {
   depends_on_slot_id?: string | null;
 }
 
-export interface QuoteWithId {
+export interface EvidenceChunk {
   id: string;
   snippet: string;
 }
 
-const EXTRACT_SYSTEM = `You extract atomic claims from the provided evidence (quotes) and decide the next step.
+const EXTRACT_SYSTEM = `You extract atomic claims from the provided evidence (chunks) and decide the next step.
 
 Output JSON only:
 {
   "claims": [
-    { "slot": "slot_name", "value": <atomic value: string or number>, "key": "<only for mapping slots>", "confidence": 0.0-1.0, "quoteIds": ["quote-uuid-1", "quote-uuid-2"] }
+    { "slot": "slot_name", "value": <atomic value: string or number>, "key": "<only for mapping slots>", "confidence": 0.0-1.0, "chunkIds": ["chunk-uuid-1", "chunk-uuid-2"] }
   ],
   "next_action": "retrieve" | "expand_corpus" | "clarify" | "answer",
   "why": "short reason",
-  "final_answer": "optional: when next_action is answer and slots are complete, provide the answer text with citation placeholders [[quote:uuid]] for each quote you use",
-  "cited_snippets": "optional: when next_action is answer, object mapping each quote uuid you cite to the exact verbatim passage from the evidence for that citation, e.g. {\"uuid-1\": \"exact sentence from evidence\"}. Copy the passage exactly from the evidence block.",
+  "final_answer": "optional: when next_action is answer and slots are complete, provide the answer text with citation placeholders [[quote:uuid]] for each chunk you use (uuid = chunk id from the evidence block)",
+  "cited_snippets": "optional: when next_action is answer, object mapping each chunk uuid you cite to the exact verbatim passage from the evidence for that citation, e.g. {\"uuid-1\": \"exact sentence from evidence\"}. Copy the passage exactly from the evidence block.",
   "subqueries": "optional: when next_action is retrieve, array of { \"slot\": \"slot_name\", \"query\": \"search phrase\" } for the next retrieval round",
   "questions": "optional: when next_action is clarify, array of clarifying question strings"
 }
 
 Rules:
-- Only output claims that are directly supported by the given quotes. Each claim must list at least one quoteId from the evidence (the UUID in brackets above).
-- Use the exact quote id (UUID) in quoteIds—copy from the [uuid] line for each quote you cite. Use the same ids in final_answer as [[quote:uuid]].
+- Only output claims that are directly supported by the given chunks. Each claim must list at least one chunkId from the evidence (the UUID in brackets above).
+- Use the exact chunk id (UUID) in chunkIds—copy from the [uuid] line for each chunk you cite. Use the same ids in final_answer as [[quote:uuid]] (now referring to chunks).
 - For scalar slots: one value, key omitted. For list slots: one claim per list item, value = the item. For mapping slots: key = entity name (e.g. the list item), value = the mapping value.
-- Prefer extracting claims when the evidence clearly states the information. Use "expand_corpus" only when the evidence genuinely does not contain the needed facts, not when it is merely spread across several quotes.
+- Prefer extracting claims when the evidence clearly states the information. Use "expand_corpus" only when the evidence genuinely does not contain the needed facts, not when it is merely spread across several chunks.
 - If evidence is insufficient for required slots, set next_action to "retrieve" or "expand_corpus" or "clarify".
+- For list slots, the backend tracks how many attempts have been made and whether the list has stagnated. You may start with either a broad discovery query or a more targeted/faceted query depending on the slot description. On later iterations, prefer targeted queries, and when there are already some list items and stagnation is high, you may also propose seeded queries that reference existing items by name.
+- Never repeat an identical query string for the same slot if it has already been tried in previous iterations (the backend will provide history context in the prompt).
 - When suggestExpandWhenNoEvidence is true (dynamic sources), prefer next_action "expand_corpus" only when evidence truly lacks the information—otherwise prefer "retrieve" with subqueries or "answer" if you can fill slots.
-- When all required slots are filled and you can answer, set next_action to "answer" and include "final_answer" with [[quote:uuid]] placeholders. Also include "cited_snippets" with each cited quote id mapped to the exact verbatim passage you are citing (one sentence or short passage from the evidence).`;
+- When all required slots are filled and you can answer, set next_action to "answer" and include "final_answer" with [[quote:uuid]] placeholders. Also include "cited_snippets" with each cited chunk id mapped to the exact verbatim passage you are citing (one sentence or short passage from the evidence).`;
 
 export async function callExtractAndDecide(
   apiKey: string,
   slots: SlotRow[],
-  quotes: QuoteWithId[],
+  evidenceChunks: EvidenceChunk[],
   currentSlotItemsSummary: string,
   userMessage: string,
   suggestExpandWhenNoEvidence = false,
 ): Promise<ExtractResult> {
-  const quoteBlock = quotes
+  const quoteBlock = evidenceChunks
     .map((q) => `[${q.id}]\n${q.snippet}`)
     .join('\n\n---\n\n');
   const slotBlock = slots
@@ -110,39 +112,39 @@ Output JSON with claims, next_action, why, optional final_answer, and optional s
   const questionsRaw = Array.isArray(obj.questions) ? obj.questions : [];
   const questions = questionsRaw.filter((q): q is string => typeof q === 'string' && q.trim().length > 0).map((q) => q.trim());
   const claimsRaw = Array.isArray(obj.claims) ? obj.claims : [];
-  const quoteIdSet = new Set(quotes.map((q) => q.id));
-  const quoteIdsByIndex = quotes.map((q) => q.id);
-  let droppedNoValidQuoteIds = 0;
+  const chunkIdSet = new Set(evidenceChunks.map((q) => q.id));
+  const chunkIdsByIndex = evidenceChunks.map((q) => q.id);
+  let droppedNoValidChunkIds = 0;
   const claims: ExtractClaim[] = claimsRaw
     .filter((c): c is Record<string, unknown> => c != null && typeof c === 'object')
     .map((c) => {
-      const rawIds = Array.isArray(c.quoteIds) ? (c.quoteIds as unknown[]) : [];
-      let quoteIds = rawIds.filter((id): id is string => typeof id === 'string' && quoteIdSet.has(id)) as string[];
-      if (quoteIds.length === 0 && rawIds.length > 0) {
+      const rawIds = Array.isArray((c as any).chunkIds) ? ((c as any).chunkIds as unknown[]) : [];
+      let chunkIds = rawIds.filter((id): id is string => typeof id === 'string' && chunkIdSet.has(id)) as string[];
+      if (chunkIds.length === 0 && rawIds.length > 0) {
         const byIndex = rawIds
           .map((id) => (typeof id === 'number' ? id : typeof id === 'string' ? parseInt(id, 10) : NaN))
-          .filter((i) => Number.isInteger(i) && i >= 1 && i <= quoteIdsByIndex.length)
-          .map((i) => quoteIdsByIndex[i - 1]);
-        if (byIndex.length > 0) quoteIds = byIndex;
-        else droppedNoValidQuoteIds++;
+          .filter((i) => Number.isInteger(i) && i >= 1 && i <= chunkIdsByIndex.length)
+          .map((i) => chunkIdsByIndex[i - 1]);
+        if (byIndex.length > 0) chunkIds = byIndex;
+        else droppedNoValidChunkIds++;
       }
       return {
         slot: String(c.slot ?? ''),
         value: c.value !== undefined ? c.value : '',
         key: typeof c.key === 'string' ? c.key : undefined,
         confidence: typeof c.confidence === 'number' ? c.confidence : 1,
-        quoteIds,
+        chunkIds,
       };
     })
-    .filter((c) => c.slot && c.quoteIds.length > 0);
-  if (claimsRaw.length > 0 || droppedNoValidQuoteIds > 0) {
+    .filter((c) => c.slot && c.chunkIds.length > 0);
+  if (claimsRaw.length > 0 || droppedNoValidChunkIds > 0) {
     console.log(
       '[RAG] extract-claims',
       JSON.stringify({
         rawCount: claimsRaw.length,
         afterFilter: claims.length,
-        droppedNoValidQuoteIds,
-        sampleQuoteIds: quotes.slice(0, 2).map((q) => q.id),
+        droppedNoValidChunkIds,
+        sampleChunkIds: evidenceChunks.slice(0, 2).map((q) => q.id),
       }),
     );
   }
@@ -151,7 +153,7 @@ Output JSON with claims, next_action, why, optional final_answer, and optional s
   if (obj.cited_snippets != null && typeof obj.cited_snippets === 'object' && !Array.isArray(obj.cited_snippets)) {
     cited_snippets = {};
     for (const [id, passage] of Object.entries(obj.cited_snippets)) {
-      if (quoteIdSet.has(id) && typeof passage === 'string' && passage.trim().length > 0) {
+      if (chunkIdSet.has(id) && typeof passage === 'string' && passage.trim().length > 0) {
         cited_snippets[id] = passage.trim();
       }
     }
@@ -224,10 +226,10 @@ export async function insertClaims(
       inserted.push(slotItemId);
     }
 
-    for (const quoteId of claim.quoteIds) {
+    for (const chunkId of claim.chunkIds) {
       await supabase.from('claim_evidence').upsert(
-        { slot_item_id: slotItemId, quote_id: quoteId, owner_id: ownerId },
-        { onConflict: 'slot_item_id,quote_id', ignoreDuplicates: true },
+        { slot_item_id: slotItemId, chunk_id: chunkId, owner_id: ownerId },
+        { onConflict: 'slot_item_id,chunk_id', ignoreDuplicates: true },
       );
     }
   }

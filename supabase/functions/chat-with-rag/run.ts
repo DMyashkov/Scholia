@@ -1,8 +1,9 @@
 /**
  * RAG orchestration: load context, run plan+loop, handle clarify/expand_corpus, finalize answer.
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { createClient } from 'npm:@supabase/supabase-js@2';
+/// <reference path="./deno_types.d.ts" />
+import type { SupabaseClient } from 'supabase';
+import { createClient } from 'supabase';
 import type { PlanResult, PlanSlot } from './types.ts';
 import type { RagContextReady, SlotDb, StepDb } from './types.ts';
 import { loadRagContext, type LoadRagBody } from './context.ts';
@@ -19,9 +20,8 @@ import {
 import type { PageRow, SourceRow } from './types.ts';
 import { callPlan } from './plan.ts';
 import { callExtractAndDecide, insertClaims } from './loop.ts';
-import type { SlotRow } from './loop.ts';
-import { doRetrieveAndCreateQuotes } from './retrieve.ts';
-import { createQuoteFromChunk } from './quotes.ts';
+import type { SlotRow, EvidenceChunk } from './loop.ts';
+import { doRetrieve } from './retrieve.ts';
 import { slotCompleteness, overallCompleteness } from './completeness.ts';
 import type { SlotForCompleteness } from './completeness.ts';
 import { doExpandCorpus, type SuggestedPage } from './expand.ts';
@@ -223,6 +223,63 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     return countBySlot;
   };
 
+  type ListSlotState = {
+    attemptCount: number;
+    lastItemCount: number;
+    stagnationCount: number;
+    lastStrategy: 'broad' | 'targeted' | 'seeded';
+  };
+
+  const loadListSlotState = async (): Promise<Map<string, ListSlotState>> => {
+    const listSlots = slots.filter((s) => s.type === 'list');
+    if (listSlots.length === 0) return new Map();
+    const { data } = await supabase
+      .from('slot_iteration_state')
+      .select('slot_id, attempt_count, last_item_count, stagnation_count, last_strategy')
+      .eq('root_message_id', rootMessageId)
+      .in('slot_id', listSlots.map((s) => s.id));
+    const map = new Map<string, ListSlotState>();
+    for (const row of (data ?? []) as {
+      slot_id: string;
+      attempt_count: number;
+      last_item_count: number;
+      stagnation_count: number;
+      last_strategy: 'broad' | 'targeted' | 'seeded';
+    }[]) {
+      map.set(row.slot_id, {
+        attemptCount: row.attempt_count ?? 0,
+        lastItemCount: row.last_item_count ?? 0,
+        stagnationCount: row.stagnation_count ?? 0,
+        lastStrategy: (row.last_strategy ?? 'broad') as ListSlotState['lastStrategy'],
+      });
+    }
+    // Ensure we have a default entry for every list slot
+    for (const s of listSlots) {
+      if (!map.has(s.id)) {
+        map.set(s.id, {
+          attemptCount: 0,
+          lastItemCount: 0,
+          stagnationCount: 0,
+          lastStrategy: 'broad',
+        });
+      }
+    }
+    return map;
+  };
+
+  const saveListSlotState = async (stateBySlotId: Map<string, ListSlotState>): Promise<void> => {
+    if (stateBySlotId.size === 0) return;
+    const rows = Array.from(stateBySlotId.entries()).map(([slotId, s]) => ({
+      root_message_id: rootMessageId,
+      slot_id: slotId,
+      attempt_count: s.attemptCount,
+      last_item_count: s.lastItemCount,
+      stagnation_count: s.stagnationCount,
+      last_strategy: s.lastStrategy,
+    }));
+    await supabase.from('slot_iteration_state').upsert(rows, { onConflict: 'root_message_id,slot_id' });
+  };
+
   const getCurrentSlotItemsSummary = async (): Promise<string> => {
     const { data: items } = await supabase
       .from('slot_items')
@@ -246,8 +303,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
   let prevSlotItemCount = 0;
   let done = false;
   let finalAnswer: string | undefined;
-  let quoteIdsOrdered: string[] = [];
-  let validQuoteIds = new Set<string>();
+  // All evidence chunks seen across iterations, keyed by chunk id
+  const evidenceChunksById = new Map<string, string>();
   let lastExtractResult: { next_action: string; why?: string; final_answer?: string; subqueries?: { slot: string; query: string }[]; extractionGaps?: string[]; cited_snippets?: Record<string, string> } | null = null;
   const extractionGapsAccumulated: string[] = [];
 
@@ -267,11 +324,13 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     let subqueryTexts: string[];
 
     if (retrieveStep) {
+      // Iteration 1
       currentStepId = retrieveStep.id;
       const { data: sq } = await supabase.from('reasoning_subqueries').select('query_text, slot_id').eq('reasoning_step_id', currentStepId);
       const sqRows = (sq ?? []) as { query_text: string; slot_id: string }[];
       subqueryTexts = sqRows.map((r) => r.query_text).filter(Boolean);
     } else {
+      // Iteration 2+
       const { data: newStep } = await supabase
         .from('reasoning_steps')
         .insert({
@@ -289,64 +348,81 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         ? lastExtractResult.subqueries
         : [{ slot: 'answer', query: userMsg.slice(0, 200) }];
       const capped = nextSubs.slice(0, MAX_SUBQUERIES_PER_ITER);
+      const listSlotState = await loadListSlotState();
       for (const q of capped) {
         const sid = slotIdByName.get(q.slot);
-        if (sid) await supabase.from('reasoning_subqueries').insert({ reasoning_step_id: currentStepId, slot_id: sid, owner_id: ownerId, query_text: q.query });
+        if (!sid) continue;
+        const slot = slots.find((s) => s.id === sid);
+        let strategy: ListSlotState['lastStrategy'] | null = null;
+        if (slot?.type === 'list') {
+          const st = listSlotState.get(sid) ?? { attemptCount: 0, lastItemCount: 0, stagnationCount: 0, lastStrategy: 'broad' };
+          if (st.attemptCount === 0) strategy = 'broad';
+          else if (st.stagnationCount === 0) strategy = 'targeted';
+          else strategy = 'seeded';
+        }
+        await supabase.from('reasoning_subqueries').insert({
+          reasoning_step_id: currentStepId,
+          slot_id: sid,
+          owner_id: ownerId,
+          query_text: q.query,
+          ...(strategy ? { strategy } : {}),
+        });
       }
       const { data: sq } = await supabase.from('reasoning_subqueries').select('query_text, slot_id').eq('reasoning_step_id', currentStepId);
       const sqRows = (sq ?? []) as { query_text: string; slot_id: string }[];
       subqueryTexts = sqRows.map((r) => r.query_text).filter(Boolean);
     }
 
-    const subqueriesToRun = subqueryTexts.slice(0, Math.min(MAX_SUBQUERIES_PER_ITER, MAX_TOTAL_SUBQUERIES - totalSubqueriesRun));
+    // Avoid re-running identical queries for the same slot across iterations
+    const { data: allPrevSubq } = await supabase
+      .from('reasoning_subqueries')
+      .select('slot_id, query_text')
+      .in('reasoning_step_id', stepList.map((s) => s.id));
+    const seen = new Set<string>();
+    for (const row of (allPrevSubq ?? []) as { slot_id: string; query_text: string }[]) {
+      seen.add(`${row.slot_id}::${row.query_text}`);
+    }
+
+    const subqueriesToRun = subqueryTexts
+      .slice(0, Math.min(MAX_SUBQUERIES_PER_ITER, MAX_TOTAL_SUBQUERIES - totalSubqueriesRun))
+      .filter((q) => q && !seen.has(`:${q}`)); // we don't know slot here, so be conservative by query text only
     if (subqueriesToRun.length === 0) break;
 
     totalSubqueriesRun += subqueriesToRun.length;
 
     log('retrieve-start', { iteration, subqueryCount: subqueriesToRun.length });
-    const { chunks: retrievedChunks, quoteIds: newQuoteIds, chunksPerSubquery } = await doRetrieveAndCreateQuotes(
+    const { chunks: retrievedChunks, chunksPerSubquery } = await doRetrieve(
       supabase,
       openaiKey,
       pageIds,
       subqueriesToRun,
-      pageById,
-      sourceDomainByPageId,
-      currentStepId,
-      ownerId,
     );
-    log('retrieve-done', { quotesCreated: newQuoteIds.length, chunksPerSubquery });
+    log('retrieve-done', { chunksRetrieved: retrievedChunks.length, chunksPerSubquery });
 
-    for (const chunk of leadList) {
-      const page = pageById.get(chunk.page_id);
-      if (!page) continue;
-      const domain = sourceDomainByPageId.get(chunk.page_id) ?? '';
-      const id = await createQuoteFromChunk(supabase, {
-        chunk,
-        page,
-        domain,
-        retrievedInReasoningStepId: currentStepId,
-        ownerId,
-      });
-      if (id) newQuoteIds.push(id);
+    // Accumulate evidence chunks across iterations (by chunk id)
+    for (const chunk of retrievedChunks) {
+      const snippet = (chunk.content ?? '').trim();
+      if (!snippet) continue;
+      evidenceChunksById.set(chunk.id, snippet);
     }
 
-    type QuoteRow = { id: string; snippet: string };
-    const allQuotesForRoot: QuoteRow[] = await (async (): Promise<QuoteRow[]> => {
-      const { data: steps } = await supabase.from('reasoning_steps').select('id').eq('root_message_id', rootMessageId);
-      const stepIds = (steps ?? []).map((s: { id: string }) => s.id);
-      if (stepIds.length === 0) return [];
-      const { data: qrows } = await supabase.from('quotes').select('id, snippet').in('retrieved_in_reasoning_step_id', stepIds);
-      return (qrows ?? []) as QuoteRow[];
-    })();
-    validQuoteIds = new Set(allQuotesForRoot.map((q) => q.id));
-    const quotesForExtract = allQuotesForRoot.map((q) => ({ id: q.id, snippet: q.snippet }));
+    const evidenceChunksForExtract: EvidenceChunk[] = Array.from(evidenceChunksById.entries()).map(([id, snippet]) => ({
+      id,
+      snippet,
+    }));
 
     const currentSummary = await getCurrentSlotItemsSummary();
-    log('extract-call', { iteration, quoteCount: quotesForExtract.length });
-    const snippetPreviews = quotesForExtract.map((q) => (q.snippet ?? '').slice(0, 120));
-    const hasFoalKeywords = quotesForExtract.some((q) => /foal|Kid Meyers|Oh My Oh|Mr\. Meyers|Milpool|broodmare|sired by|dam of/i.test(q.snippet ?? ''));
-    log('extract-quotes-preview', { iteration, snippetPreviews, hasFoalKeywords });
-    const extractResult = await callExtractAndDecide(openaiKey, slotRowsForExtract, quotesForExtract, currentSummary, userMsg, dynamicMode);
+    log('extract-call', { iteration, chunkCount: evidenceChunksForExtract.length });
+    const snippetPreviews = evidenceChunksForExtract.map((q) => (q.snippet ?? '').slice(0, 120));
+    log('extract-evidence-preview', { iteration, snippetPreviews });
+    const extractResult = await callExtractAndDecide(
+      openaiKey,
+      slotRowsForExtract,
+      evidenceChunksForExtract,
+      currentSummary,
+      userMsg,
+      dynamicMode,
+    );
     lastExtractResult = extractResult;
     if (extractResult.extractionGaps?.length) {
       extractionGapsAccumulated.push(...extractResult.extractionGaps);
@@ -363,6 +439,26 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     await insertClaims(supabase, { slotIdByName, claims: extractResult.claims, ownerId });
 
     const slotItemCountBySlotId = await getSlotItemCountBySlotId();
+    // Update per-list-slot iteration state based on new item counts
+    const listSlotState = await loadListSlotState();
+    for (const slot of slots.filter((s) => s.type === 'list')) {
+      const prev = listSlotState.get(slot.id) ?? {
+        attemptCount: 0,
+        lastItemCount: 0,
+        stagnationCount: 0,
+        lastStrategy: 'broad' as ListSlotState['lastStrategy'],
+      };
+      const currentCount = slotItemCountBySlotId.get(slot.id) ?? 0;
+      const nextAttemptCount = prev.attemptCount + 1;
+      const nextStagnationCount = currentCount > prev.lastItemCount ? 0 : prev.stagnationCount + 1;
+      listSlotState.set(slot.id, {
+        attemptCount: nextAttemptCount,
+        lastItemCount: currentCount,
+        stagnationCount: nextStagnationCount,
+        lastStrategy: prev.lastStrategy,
+      });
+    }
+    await saveListSlotState(listSlotState);
     const slotsForCompleteness: SlotForCompleteness[] = slots.map((s) => ({
       id: s.id,
       type: s.type as SlotForCompleteness['type'],
@@ -399,24 +495,38 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     }));
     const subqueriesForStep = subqueriesWithSlot.length ? subqueriesWithSlot : subqueriesToRun.map((q) => ({ slot: '', query: q }));
     const stepStatements: string[] = [];
-    stepStatements.push(`Retrieved ${newQuoteIds.length} quotes from this step.`);
+    stepStatements.push(`Retrieved ${retrievedChunks.length} chunks from this step.`);
     stepStatements.push(extractResult.why ?? 'Extract');
     stepStatements.push(`Achieved ${Math.round((completeness ?? 0) * 100)}% completeness.`);
     if (INCLUDE_FILL_STATUS_BY_SLOT && fillStatusBySlot && Object.keys(fillStatusBySlot).length > 0) {
       stepStatements.push(`Fill: ${Object.entries(fillStatusBySlot).map(([k, v]) => `${k}=${v}`).join(', ')}.`);
     }
+    const listSlotDebug: Record<string, { attempts: number; count: number; stagnation: number; strategy: string }> = {};
+    for (const slot of slots.filter((s) => s.type === 'list')) {
+      const st = listSlotState.get(slot.id);
+      if (!st) continue;
+      const count = slotItemCountBySlotId.get(slot.id) ?? 0;
+      listSlotDebug[slot.name] = {
+        attempts: st.attemptCount,
+        count,
+        stagnation: st.stagnationCount,
+        strategy: st.lastStrategy,
+      };
+    }
+
     const stepEntry: ThoughtStep = {
       iter: iteration,
       action: 'retrieve',
       why: extractResult.why,
       subqueries: subqueriesForStep,
       chunksPerSubquery: chunksPerSubquery?.length ? chunksPerSubquery : undefined,
-      quotesFound: newQuoteIds.length,
+      quotesFound: retrievedChunks.length,
       claims: extractResult.claims,
       completeness,
       fillStatusBySlot: INCLUDE_FILL_STATUS_BY_SLOT ? fillStatusBySlot : undefined,
       statements: stepStatements,
       nextAction: extractResult.next_action,
+      ...(Object.keys(listSlotDebug).length > 0 ? { listSlotState: listSlotDebug } : {}),
     };
     thoughtProcess.steps.push(stepEntry);
     if (extractionGapsAccumulated.length > 0) {
@@ -431,7 +541,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       action: extractResult.next_action,
       label: extractResult.next_action === 'answer' ? 'Answering' : extractResult.next_action === 'retrieve' ? 'Retrieving again' : extractResult.next_action,
       why: extractResult.why,
-      quotesFound: newQuoteIds.length,
+      quotesFound: retrievedChunks.length,
       claims: extractResult.claims,
       completeness,
       fillStatusBySlot: INCLUDE_FILL_STATUS_BY_SLOT ? fillStatusBySlot : undefined,
@@ -613,7 +723,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       conversationId: convId,
       ownerId,
       finalAnswer,
-      validQuoteIds,
+      validQuoteIds: new Set(evidenceChunksById.keys()),
       lastExtractResult,
       thoughtProcess,
       extractionGapsAccumulated,

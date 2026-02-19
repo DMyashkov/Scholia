@@ -237,6 +237,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       .from('slot_iteration_state')
       .select('slot_id, attempt_count, last_item_count, stagnation_count, last_strategy')
       .eq('root_message_id', rootMessageId)
+      .eq('owner_id', ownerId)
       .in('slot_id', listSlots.map((s) => s.id));
     const map = new Map<string, ListSlotState>();
     for (const row of (data ?? []) as {
@@ -272,6 +273,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const rows = Array.from(stateBySlotId.entries()).map(([slotId, s]) => ({
       root_message_id: rootMessageId,
       slot_id: slotId,
+      owner_id: ownerId,
       attempt_count: s.attemptCount,
       last_item_count: s.lastItemCount,
       stagnation_count: s.stagnationCount,

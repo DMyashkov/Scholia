@@ -256,7 +256,7 @@ export const ChatArea = ({
                 <TypingIndicator minimal={!!addingPageSourceId} stepLabels={ragStepProgress} />
               ) : null}
               {isLoading && liveThoughtProcess && (liveThoughtProcess.slots?.length || liveThoughtProcess.steps?.length) ? (
-                <div className="px-4 pt-1 pb-2">
+                <div className="px-4 pt-2 pb-4">
                   <div className="max-w-3xl mx-auto w-full">
                     <ThoughtProcessView
                       thoughtProcess={liveThoughtProcess}

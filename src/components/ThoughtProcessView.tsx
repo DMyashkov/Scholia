@@ -320,7 +320,15 @@ export function ThoughtProcessView({
   const completenessPct = tp.completeness != null ? Math.round(tp.completeness * 100) : null;
   const hasStopOrNote = Boolean(tp.hardStopReason || tp.partialAnswerNote || (tp.extractionGaps?.length ?? 0) > 0 || tp.expandCorpusReason);
   const outcome = outcomeLabel(tp);
-  const headerSubtitle = !isLive && outcome ? (completenessPct === 100 ? `Answered (${completenessPct}%)` : outcome) : null;
+  const suggestedOutcome =
+    outcome === 'Suggested a page' && suggestedPage?.title
+      ? `Suggested ${suggestedPage.title}${
+          suggestedPage.fromPageTitle ? ` (branching out from ${suggestedPage.fromPageTitle})` : ''
+        }`
+      : outcome;
+  const headerSubtitle = !isLive && suggestedOutcome
+    ? (completenessPct === 100 ? `Answered (${completenessPct}%)` : suggestedOutcome)
+    : null;
 
   return (
     <div

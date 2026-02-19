@@ -9,7 +9,7 @@ import { fetchTargetPageLead } from './targetLead';
 const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 const CHUNK_MAX_CHARS = 600;
 const CHUNK_OVERLAP_CHARS = 100;
-const EMBED_BATCH_SIZE = 50;
+const EMBED_BATCH_SIZE = 10;
 
 export async function indexConversationForRag(
   conversationId: string,

@@ -96,8 +96,8 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           status = 'ready';
         }
         
-        // Use indexed_count if available, fallback to pages_indexed; prefer actual DB count when we have pages
-        const jobIndexed = (crawlJob as CrawlJob).indexed_count ?? crawlJob.pages_indexed ?? 0;
+        // Use indexed_count when available; prefer actual DB count when we have pages
+        const jobIndexed = (crawlJob as CrawlJob).indexed_count ?? 0;
         pagesIndexed = Math.max(jobIndexed, sourcePages.length);
         // For dynamic + add-page: target = current+1 until page is inserted. Once addPageJob is encoding/completed,
         // the new page is in DB so use sourcePages.length (avoids 2/3 when realtime delivers page before status update).
@@ -189,33 +189,6 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const encChunksTotal = useAddPageProgress ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_chunks_total ?? 0;
   const encDiscoveredDone = useAddPageProgress ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_done ?? 0;
   const encDiscoveredTotal = useAddPageProgress ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_total ?? 0;
-
-  // Encoded Discovered: advance displayed value every 1.2s so the bar doesn't only jump when backend sends 50-page updates
-  const [displayedEncDiscoveredDone, setDisplayedEncDiscoveredDone] = useState(encDiscoveredDone);
-  const encDiscoveredDoneRef = useRef(encDiscoveredDone);
-  const encDiscoveredTotalRef = useRef(encDiscoveredTotal);
-  encDiscoveredDoneRef.current = encDiscoveredDone;
-  encDiscoveredTotalRef.current = encDiscoveredTotal;
-  // When realtime sends a new encDiscoveredDone, snap displayed to it so we never show less than real progress
-  useEffect(() => {
-    if (encDiscoveredTotal === 0) {
-      setDisplayedEncDiscoveredDone(0);
-      return;
-    }
-    setDisplayedEncDiscoveredDone((prev) => Math.max(prev, encDiscoveredDone));
-  }, [encDiscoveredDone, encDiscoveredTotal]);
-  // Every 1.2s increment displayed by 1 (capped at total) so the bar moves smoothly between realtime updates
-  useEffect(() => {
-    if (encDiscoveredTotal <= 0) return;
-    const id = setInterval(() => {
-      setDisplayedEncDiscoveredDone((prev) => {
-        const total = encDiscoveredTotalRef.current;
-        if (prev >= total) return prev;
-        return Math.min(prev + 1, total);
-      });
-    }, 1200);
-    return () => clearInterval(id);
-  }, [encDiscoveredTotal]);
 
   const encodingPhase = getEncodingPhase(
     isCrawling && !activeSource,
@@ -388,7 +361,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
             {isDynamic && (
               <StatItem
                 label="Encoded Discovered"
-                value={encDiscoveredTotal > 0 ? displayedEncDiscoveredDone : totalEncodedDiscovered}
+                value={encDiscoveredTotal > 0 ? encDiscoveredDone : totalEncodedDiscovered}
                 highlight={isAddPageResponding || encodingPhase === 'encoding-discovered' || ((isIndexingFromJob || isAddPageEncoding) && encDiscoveredTotal > 0)}
                 tooltip="Links with embedded context; used for AI suggestions when adding pages. Animates over 1.5s when realtime updates arrive."
               />
@@ -403,7 +376,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
             crawlTotal={progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1}
             chunksDone={encChunksDone}
             chunksTotal={encChunksTotal}
-            discoveredDone={encDiscoveredTotal > 0 ? displayedEncDiscoveredDone : encDiscoveredDone}
+            discoveredDone={encDiscoveredTotal > 0 ? encDiscoveredDone : encDiscoveredDone}
             discoveredTotal={encDiscoveredTotal}
             phase={encodingPhase}
             isDynamic={isDynamic}

@@ -81,14 +81,15 @@ export function EncodingProgressBar({
   // When Responding: keep bar fully filled (orange) and pulse
   const showFullBar = isResponding;
   const crawlWidth = showFullBar ? 1 : phase === 'crawl' ? crawlPct : phase !== 'idle' ? 1 : 0;
+  // Avoid showing 100% for indeterminate indexing-chunks (chunksTotal not yet set) so the bar doesn't snap 100% -> 0% when total arrives
   const chunksWidth = showFullBar
     ? 1
     : phase === 'indexing-chunks'
-      ? (showChunksIndeterminate ? 1 : chunksPct)
+      ? (showChunksIndeterminate ? 0.12 : chunksPct) // small pulsing strip instead of full bar while waiting for chunksTotal
       : phase === 'encoding-discovered'
         ? 1
         : 0;
-  const discoveredWidth = showFullBar ? 1 : phase === 'encoding-discovered' ? (showDiscoveredIndeterminate ? 1 : discoveredPct) : 0;
+  const discoveredWidth = showFullBar ? 1 : phase === 'encoding-discovered' ? (showDiscoveredIndeterminate ? 0.12 : discoveredPct) : 0;
 
   // Chunks uses "done" color when static (matches phase 3); medium when dynamic (phase 3 overlays with distinct color).
   const chunksIsFinalPhase = !isDynamic;

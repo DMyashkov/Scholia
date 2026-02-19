@@ -38,6 +38,7 @@ const Index = () => {
     isLoading,
     streamingMessage,
     ragStepProgress,
+    liveThoughtProcess,
     createNewConversation,
     selectConversation,
     deleteConversation,
@@ -149,9 +150,9 @@ const Index = () => {
     if (activeConversationId) updateDynamicMode(activeConversationId, enabled);
   }, [activeConversationId, updateDynamicMode]);
 
-  const handleAddSuggestedPage = useCallback(async (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string, unfoldMode?: 'unfold' | 'direct' | 'auto') => {
+  const handleAddSuggestedPage = useCallback(async (url: string, sourceId: string, questionToReask?: string, messageId?: string, scrapedPageDisplay?: string) => {
     const normalizedUrl = normalizeSourceUrl(url);
-    console.log('[AddSuggestedPage] called', { url: normalizedUrl, sourceId, questionToReask, messageId, indexedPageDisplay, unfoldMode, activeConversationId });
+    console.log('[AddSuggestedPage] called', { url: normalizedUrl, sourceId, questionToReask, messageId, scrapedPageDisplay, activeConversationId });
     if (!activeConversationId) {
       console.warn('[AddSuggestedPage] no activeConversationId, aborting');
       return;
@@ -159,7 +160,7 @@ const Index = () => {
     setAddingPageSourceId(sourceId);
     try {
       if (questionToReask?.trim() && messageId) {
-        await addPageAndContinueResponse(activeConversationId, sourceId, normalizedUrl, messageId, questionToReask.trim(), indexedPageDisplay, unfoldMode);
+        await addPageAndContinueResponse(activeConversationId, sourceId, normalizedUrl, messageId, questionToReask.trim(), scrapedPageDisplay);
       } else {
         await addPageToSource(activeConversationId, sourceId, normalizedUrl);
         if (questionToReask?.trim()) {
@@ -231,6 +232,7 @@ const Index = () => {
           isLoading={isLoading}
           streamingMessage={streamingMessage}
           ragStepProgress={ragStepProgress}
+          liveThoughtProcess={liveThoughtProcess}
           onSendMessage={handleSendMessage}
           onAddSource={handleAddSource}
           onRemoveSource={removeSourceFromConversation}

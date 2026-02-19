@@ -149,11 +149,13 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
                   <span className="text-[10px] text-muted-foreground block">{singularOption.description}</span>
                 </div>
               </button>
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => setDepth(dynamicOption.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDepth(dynamicOption.value); } }}
                 className={cn(
-                  'w-full flex items-center gap-3 p-3 rounded-lg border transition-all',
+                  'w-full flex items-center gap-3 p-3 rounded-lg border transition-all cursor-pointer',
                   depth === dynamicOption.value
                     ? 'border-primary bg-primary/10 text-foreground'
                     : 'border-border bg-background/50 text-muted-foreground hover:border-border/80 hover:bg-background'
@@ -169,10 +171,10 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
                   <span className="text-sm font-medium">{dynamicOption.label}</span>
                   <span className="text-[10px] text-muted-foreground block">{dynamicOption.description}</span>
                   {depth === dynamicOption.value && (
-                    <div className="flex flex-wrap items-center gap-y-2 gap-x-1.5 mt-3">
+                    <div className="flex flex-wrap items-center gap-y-2 gap-x-1.5 mt-3" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); setSuggestionMode('surface'); }}
+                        onClick={() => setSuggestionMode('surface')}
                         className={cn(
                           'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium border transition-colors',
                           suggestionMode === 'surface'
@@ -185,7 +187,7 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
                       </button>
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); setSuggestionMode('dive'); }}
+                        onClick={() => setSuggestionMode('dive')}
                         className={cn(
                           'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium border transition-colors',
                           suggestionMode === 'dive'
@@ -200,7 +202,6 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
                         <HoverCardTrigger asChild>
                           <button
                             type="button"
-                            onClick={(e) => e.stopPropagation()}
                             className="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
                             aria-label="Learn about Surface vs Dive"
                           >
@@ -220,7 +221,7 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
                     </div>
                   )}
                 </div>
-              </button>
+              </div>
             </div>
           </div>
 

@@ -29,7 +29,9 @@ export interface Message {
   quotes?: MessageQuote[] | null;
   was_multi_step: boolean;
   follows_message_id?: string | null;
-  indexed_page_display?: string | null;
+  scraped_page_display?: string | null;
+  thought_process?: Record<string, unknown> | null;
+  suggested_page?: Record<string, unknown> | null;
 }
 
 export type SuggestionMode = 'surface' | 'dive';

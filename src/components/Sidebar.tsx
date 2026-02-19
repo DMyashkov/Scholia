@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { Plus, MessageSquare, Trash2, PanelLeftClose } from 'lucide-react';
 import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import { Conversation } from '@/types/chat';
@@ -16,7 +17,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { useState } from 'react';
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -41,22 +41,16 @@ export const Sidebar = ({
   currentSources = [],
   addingPageSourceId,
 }: SidebarProps) => {
-  const groupedConversations = {
-    today: conversations.filter(c => {
-      const today = new Date();
-      return c.updatedAt.toDateString() === today.toDateString();
-    }),
-    yesterday: conversations.filter(c => {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      return c.updatedAt.toDateString() === yesterday.toDateString();
-    }),
-    older: conversations.filter(c => {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      return c.updatedAt < yesterday;
-    }),
-  };
+  const groupedConversations = useMemo(() => {
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    return {
+      today: conversations.filter(c => c.updatedAt.toDateString() === today.toDateString()),
+      yesterday: conversations.filter(c => c.updatedAt.toDateString() === yesterday.toDateString()),
+      older: conversations.filter(c => c.updatedAt < yesterday),
+    };
+  }, [conversations]);
 
   return (
     <>
@@ -88,7 +82,7 @@ export const Sidebar = ({
         </div>
 
         {/* Conversations list */}
-        <ScrollArea className="flex-1 px-2 py-4 scrollbar-thin">
+        <ScrollArea className="flex-1 min-h-0 px-2 py-4 scrollbar-thin">
           {groupedConversations.today.length > 0 && (
             <div className="mb-4">
               <p className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">

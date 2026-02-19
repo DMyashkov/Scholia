@@ -1,9 +1,10 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
-import { Conversation } from '@/types/chat';
+import { Conversation, ThoughtProcess } from '@/types/chat';
 import { PanelLeft } from 'lucide-react';
 import { Quote, Source, CrawlDepth } from '@/types/source';
 import { ChatMessage, TypingIndicator } from './ChatMessage';
+import { ThoughtProcessView } from './ThoughtProcessView';
 import { ChatInput, type DisableReason } from './ChatInput';
 import { useQuery } from '@tanstack/react-query';
 import { crawlJobsApi } from '@/lib/db';
@@ -21,6 +22,7 @@ interface ChatAreaProps {
   isLoading: boolean;
   streamingMessage: string;
   ragStepProgress?: Array<{ current: number; total: number; label: string }>;
+  liveThoughtProcess?: ThoughtProcess | null;
   onSendMessage: (message: string, options?: { unfoldMode?: 'unfold' | 'direct' }) => void;
   onAddSource: (url: string, depth: CrawlDepth, options: { sameDomainOnly: boolean; suggestionMode?: 'surface' | 'dive' }) => Promise<Source | null>;
   onRemoveSource: (sourceId: string) => void;
@@ -32,7 +34,7 @@ interface ChatAreaProps {
   /** Called when a guest tries to add a source or start a conversation */
   onGuestRequired?: () => void;
   onDynamicModeChange?: (enabled: boolean) => void;
-  onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string, unfoldMode?: 'unfold' | 'direct' | 'auto') => Promise<void>;
+  onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, scrapedPageDisplay?: string) => Promise<void>;
   addingPageSourceId?: string | null;
 }
 
@@ -42,6 +44,7 @@ export const ChatArea = ({
   isLoading,
   streamingMessage,
   ragStepProgress = [],
+  liveThoughtProcess = null,
   onSendMessage,
   onAddSource,
   onRemoveSource,
@@ -251,6 +254,15 @@ export const ChatArea = ({
               )}
               {(isLoading && !streamingMessage) || addingPageSourceId ? (
                 <TypingIndicator minimal={!!addingPageSourceId} stepLabels={ragStepProgress} />
+              ) : null}
+              {isLoading && liveThoughtProcess && (liveThoughtProcess.slots?.length || liveThoughtProcess.steps?.length) ? (
+                <div className="px-4">
+                  <ThoughtProcessView
+                    thoughtProcess={liveThoughtProcess}
+                    isLive
+                    defaultOpen
+                  />
+                </div>
               ) : null}
             </div>
           </ScrollArea>

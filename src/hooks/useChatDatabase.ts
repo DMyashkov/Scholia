@@ -10,7 +10,7 @@ import { useRealtimeCrawlUpdates } from './useRealtimeCrawlUpdates';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import type { Conversation as DBConversation, Message as DBMessage, MessageQuote } from '@/lib/db/types';
-import type { Conversation, Message } from '@/types/chat';
+import type { Conversation, Message, ThoughtProcess } from '@/types/chat';
 import type { Source } from '@/types/source';
 import { deriveTitleFromUrl } from '@/lib/utils';
 import { generateTitle } from '@/data/mockResponses';
@@ -54,9 +54,10 @@ const mapQuoteDbToUI = (q: DbQuoteRow): MessageQuote => ({
 const dbMessageToUI = (db: DBMessage): Message => {
   const extended = db as DBMessage & {
     quotes?: DbQuoteRow[] | null;
-    suggested_page?: { url: string; title: string; snippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string; unfoldMode?: 'unfold' | 'direct' | 'auto' } | null;
+    suggested_page?: { url: string; title: string; snippet: string; sourceId: string; promptedByQuestion?: string; fromPageTitle?: string } | null;
     follows_message_id?: string | null;
-    indexed_page_display?: string | null;
+    scraped_page_display?: string | null;
+    thought_process?: Message['thoughtProcess'] | null;
   };
   const quotesDb = extended.quotes ?? [];
   const quotes = quotesDb.map(mapQuoteDbToUI) as Message['quotes'];
@@ -70,7 +71,8 @@ const dbMessageToUI = (db: DBMessage): Message => {
     wasMultiStep: db.was_multi_step ?? false,
     suggestedPage: extended.suggested_page ?? undefined,
     followsMessageId: extended.follows_message_id ?? undefined,
-    indexedPageDisplay: extended.indexed_page_display ?? undefined,
+    scrapedPageDisplay: extended.scraped_page_display ?? undefined,
+    thoughtProcess: extended.thought_process ?? undefined,
   };
 };
 
@@ -89,6 +91,7 @@ export const useChatDatabase = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<string>('');
   const [ragStepProgress, setRagStepProgress] = useState<Array<{ current: number; total: number; label: string }>>([]);
+  const [liveThoughtProcess, setLiveThoughtProcess] = useState<ThoughtProcess | null>(null);
 
   // Database hooks
   const { data: dbConversations = [], isLoading: conversationsLoading } = useConversations();
@@ -350,8 +353,7 @@ export const useChatDatabase = () => {
     url: string,
     messageId: string,
     userMessage: string,
-    indexedPageDisplay?: string,
-    unfoldMode?: 'unfold' | 'direct' | 'auto'
+    scrapedPageDisplay?: string,
   ) => {
     const functionsUrl = getFunctionsUrl();
     if (!functionsUrl) throw new Error('Functions URL not configured');
@@ -366,67 +368,106 @@ export const useChatDatabase = () => {
     await addPageToSource(conversationId, sourceId, url);
     await new Promise((r) => setTimeout(r, 500));
 
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${functionsUrl}/chat-with-rag`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-      },
-      body: JSON.stringify({
-        conversationId,
-        userMessage: userMessage.trim(),
-        appendToMessageId: messageId,
-        indexedPageDisplay: indexedPageDisplay ?? undefined,
-        unfoldMode: unfoldMode ?? 'auto',
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
-    }
-    const reader = res.body?.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    if (reader) {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          if (!line.trim()) continue;
+    setIsLoading(true);
+    setStreamingMessage('');
+    setRagStepProgress([]);
+    setLiveThoughtProcess(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${functionsUrl}/chat-with-rag`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({
+          conversationId,
+          userMessage: userMessage.trim(),
+          appendToMessageId: messageId,
+          scrapedPageDisplay: scrapedPageDisplay ?? undefined,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      if (reader) {
+        const steps: { current: number; total: number; label: string }[] = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line) as Record<string, unknown>;
+              if (event.thoughtProcess != null && typeof event.thoughtProcess === 'object') {
+                setLiveThoughtProcess(event.thoughtProcess as ThoughtProcess);
+              } else if (event.plan != null && typeof event.plan === 'object') {
+                const plan = event.plan as { slots?: ThoughtProcess['slots']; subqueries?: unknown[] };
+                if (Array.isArray(plan.slots)) {
+                  setLiveThoughtProcess((prev) => ({ ...prev, slots: plan.slots, steps: prev?.steps ?? [] }));
+                }
+              }
+              if (event.step != null && event.label && event.totalSteps != null) {
+                const current = Number(event.step);
+                const total = Number(event.totalSteps);
+                const label = String(event.label);
+                const idx = steps.findIndex((s) => s.current === current);
+                if (idx >= 0) {
+                  steps[idx] = { current, total, label };
+                } else {
+                  steps.push({ current, total, label });
+                  steps.sort((a, b) => a.current - b.current);
+                }
+                setRagStepProgress([...steps]);
+              }
+              if (event.done === true) {
+                setLiveThoughtProcess(null);
+                queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+                return;
+              }
+              if (event.error) {
+                setLiveThoughtProcess(null);
+                throw new Error(String(event.error));
+              }
+            } catch (e) {
+              if (e instanceof SyntaxError) continue;
+              throw e;
+            }
+          }
+        }
+        if (buffer.trim()) {
           try {
-            const event = JSON.parse(line) as Record<string, unknown>;
-            if (event.error) throw new Error(String(event.error));
+            const event = JSON.parse(buffer) as Record<string, unknown>;
             if (event.done === true) {
+              setLiveThoughtProcess(null);
               queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
               return;
             }
-          } catch (e) {
-            if (e instanceof SyntaxError) continue;
-            throw e;
+            if (event.error) {
+              setLiveThoughtProcess(null);
+              throw new Error(String(event.error));
+            }
+          } catch {
+            /* ignore */
           }
         }
+        setLiveThoughtProcess(null);
       }
-      if (buffer.trim()) {
-        try {
-          const event = JSON.parse(buffer) as Record<string, unknown>;
-          if (event.done === true) {
-            queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-            return;
-          }
-          if (event.error) throw new Error(String(event.error));
-        } catch {
-          /* ignore */
-        }
-      }
+      queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+    } finally {
+      setIsLoading(false);
     }
-    queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
   }, [queryClient, addPageToSource, updateMessageMutation]);
 
-  const sendMessage = useCallback(async (content: string, options?: { unfoldMode?: 'unfold' | 'direct' }) => {
+  const sendMessage = useCallback(async (content: string) => {
     if (!content.trim() || isLoading) {
       console.log('[sendMessage] early return', { hasContent: !!content?.trim(), isLoading });
       return;
@@ -446,8 +487,8 @@ export const useChatDatabase = () => {
       conversationSources = currentSources;
     }
 
-    // Create user message
-    await createMessageMutation.mutateAsync({
+    // Create user message (edge function uses its id as rootMessageId for Evidence-First RAG)
+    const userMsg = await createMessageMutation.mutateAsync({
       conversation_id: conversationId,
       role: 'user',
       content: content.trim(),
@@ -457,6 +498,7 @@ export const useChatDatabase = () => {
     setIsLoading(true);
     setStreamingMessage('');
     setRagStepProgress([]);
+    setLiveThoughtProcess(null);
 
     const readySources = conversationSources.filter(s => s.status === 'ready');
     const crawlingSources = conversationSources.filter(s => s.status === 'crawling');
@@ -477,7 +519,7 @@ export const useChatDatabase = () => {
           body: JSON.stringify({
             conversationId,
             userMessage: content.trim(),
-            unfoldMode: options?.unfoldMode ?? 'auto',
+            rootMessageId: userMsg.id,
           }),
         });
         if (!res.ok) {
@@ -506,6 +548,14 @@ export const useChatDatabase = () => {
                   if (!line.trim()) continue;
                   try {
                     const event = JSON.parse(line) as Record<string, unknown>;
+                    if (event.thoughtProcess != null && typeof event.thoughtProcess === 'object') {
+                      setLiveThoughtProcess(event.thoughtProcess as ThoughtProcess);
+                    } else if (event.plan != null && typeof event.plan === 'object') {
+                      const plan = event.plan as { slots?: ThoughtProcess['slots']; subqueries?: unknown[] };
+                      if (Array.isArray(plan.slots)) {
+                        setLiveThoughtProcess({ slots: plan.slots, steps: [] });
+                      }
+                    }
                     if (event.step != null && event.label && event.totalSteps != null) {
                       const current = Number(event.step);
                       const total = Number(event.totalSteps);
@@ -521,6 +571,7 @@ export const useChatDatabase = () => {
                     }
                     if (event.done === true && event.message) {
                       const ev = event as { suggestedTitle?: string };
+                      setLiveThoughtProcess(null);
                       queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
                       if (ev.suggestedTitle) {
                         console.log('[chat] RAG returned suggestedTitle:', JSON.stringify(ev.suggestedTitle), '| invalidating conversations to refresh sidebar');
@@ -532,6 +583,7 @@ export const useChatDatabase = () => {
                       return;
                     }
                     if (event.error) {
+                      setLiveThoughtProcess(null);
                       ragFailed = true;
                       ragError = String(event.error);
                       break;
@@ -545,6 +597,7 @@ export const useChatDatabase = () => {
                 try {
                   const event = JSON.parse(buffer) as Record<string, unknown> & { suggestedTitle?: string };
                   if (event.done === true && event.message) {
+                    setLiveThoughtProcess(null);
                     queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
                     if (event.suggestedTitle) {
                       console.log('[chat] RAG returned suggestedTitle (buffer):', JSON.stringify(event.suggestedTitle), '| invalidating conversations to refresh sidebar');
@@ -556,6 +609,7 @@ export const useChatDatabase = () => {
                     return;
                   }
                   if (event.error) {
+                    setLiveThoughtProcess(null);
                     ragFailed = true;
                     ragError = String(event.error);
                   }
@@ -621,6 +675,7 @@ export const useChatDatabase = () => {
     isLoading: isLoading || conversationsLoading,
     streamingMessage,
     ragStepProgress,
+    liveThoughtProcess,
     createNewConversation,
     selectConversation,
     deleteConversation,

@@ -150,3 +150,12 @@
 .typing-dot:nth-child(3) {
   animation-delay: 0.4s;
 }
+
+@keyframes thought-process-glow {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.06); }
+  50% { box-shadow: 0 0 0 1px hsl(var(--primary) / 0.12); }
+}
+
+.animate-thought-process-glow {
+  animation: thought-process-glow 2.5s ease-in-out infinite;
+}

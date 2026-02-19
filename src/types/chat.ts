@@ -9,8 +9,35 @@ export interface SuggestedPage {
   promptedByQuestion?: string;
   /** Title of the page this link was discovered from (for "branching out from X") */
   fromPageTitle?: string;
-  /** Preserved from original request for re-ask flow */
-  unfoldMode?: 'unfold' | 'direct' | 'auto';
+}
+
+/** Thought process from Evidence-First RAG (collapsible UI). Streamed in real time. */
+export interface ThoughtProcess {
+  slots?: { name: string; type: string; description?: string }[];
+  /** Why we chose this plan (from plan step). */
+  planReason?: string;
+  steps?: {
+    iter: number;
+    action: string;
+    why?: string;
+    subqueries?: { slot: string; query: string }[];
+    chunksPerSubquery?: number[];
+    quotesFound?: number;
+    claims?: unknown[];
+    completeness?: number;
+    fillStatusBySlot?: Record<string, string>;
+    /** One-after-the-other narrative statements (retrieve, extract, fill). */
+    statements?: string[];
+    /** After this step: answer | retrieve | expand_corpus | clarify */
+    nextAction?: string;
+  }[];
+  iterationCount?: number;
+  completeness?: number;
+  hardStopReason?: string;
+  clarifyQuestions?: string[];
+  expandCorpusReason?: string;
+  extractionGaps?: string[];
+  partialAnswerNote?: string;
 }
 
 export interface Message {
@@ -25,7 +52,9 @@ export interface Message {
   /** Points to the previous message this is a follow-up of (add page + re-answer) */
   followsMessageId?: string;
   /** Display text for divider: "Indexed American Horses - Wikipedia" */
-  indexedPageDisplay?: string;
+  scrapedPageDisplay?: string;
+  /** Evidence-First RAG: slots, steps, iteration count, completeness */
+  thoughtProcess?: ThoughtProcess | null;
 }
 
 export interface Conversation {

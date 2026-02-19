@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { QuoteCardsList } from './QuoteCard';
 import { CitedPages } from './CitedPages';
 import { CopyMessageButton } from './CopyMessageButton';
+import { ThoughtProcessView } from './ThoughtProcessView';
 import {
   Tooltip,
   TooltipContent,
@@ -21,12 +22,12 @@ interface ChatMessageProps {
   sources?: { id: string; domain: string }[];
   onQuoteClick?: (quote: Quote) => void;
   onSourceClick?: (sourceId: string) => void;
-  onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string, unfoldMode?: 'unfold' | 'direct' | 'auto') => Promise<void>;
+  onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, scrapedPageDisplay?: string) => Promise<void>;
   conversationId?: string | null;
 }
 
-export const ChatMessage = ({ 
-  message, 
+export const ChatMessage = ({
+  message,
   followUp,
   isStreaming,
   onQuoteClick,
@@ -35,6 +36,9 @@ export const ChatMessage = ({
 }: ChatMessageProps) => {
   const isUser = message.role === 'user';
   const quotes = message.quotes || [];
+  const tp = message.thoughtProcess;
+  const isComplex = (tp?.iterationCount ?? 0) > 2 || message.wasMultiStep;
+  const completionPct = tp?.completeness != null ? Math.round(tp.completeness * 100) : null;
 
   return (
     <div
@@ -63,24 +67,42 @@ export const ChatMessage = ({
               <p className="text-sm font-medium text-muted-foreground">
                 {isUser ? 'You' : 'Scholia'}
               </p>
-              {!isUser && message.wasMultiStep && (
+              {!isUser && isComplex && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                      <span
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary border border-primary/20 cursor-help"
-                        tabIndex={0}
-                      >
-                        <Layers className="h-3 w-3" />
-                        Unfolded
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-[240px]">
-                      <p className="font-medium">Unfolded</p>
-                      <p className="text-muted-foreground text-xs mt-0.5">
-                        Took additional steps to unfold complex query.
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary border border-primary/20 cursor-help"
+                      tabIndex={0}
+                    >
+                      <Layers className="h-3 w-3" />
+                      Complex
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-[240px]">
+                    <p className="font-medium">Complex</p>
+                    <p className="text-muted-foreground text-xs mt-0.5">
+                      {tp?.iterationCount != null ? `Completed in ${tp.iterationCount} iteration(s).` : 'Took multiple steps to answer.'}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {!isUser && completionPct != null && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground border border-border cursor-help"
+                      tabIndex={0}
+                    >
+                      {completionPct}%
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-[200px]">
+                    <p className="font-medium">Evidence completeness</p>
+                    <p className="text-muted-foreground text-xs mt-0.5">
+                      Slot coverage for this answer.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
               )}
             </div>
             <CopyMessageButton message={message} className="h-8 w-8 shrink-0 opacity-70 hover:opacity-100" />
@@ -106,14 +128,37 @@ export const ChatMessage = ({
             <CitedPages quotes={quotes} onQuoteClick={onQuoteClick} />
           )}
 
+          {/* Thought process: when there's a follow-up, show combined panel in follow-up block (B4); otherwise show for this message */}
+          {!isUser && !isStreaming && !followUp && tp && (tp.slots?.length || tp.steps?.length) ? (
+            <ThoughtProcessView thoughtProcess={tp} suggestedPage={message.suggestedPage} isLive={false} defaultOpen={false} />
+          ) : null}
+
           {/* Follow-up: separate assistant message after user added suggested page */}
           {!isUser && !isStreaming && followUp && (
             <>
               <div className="my-4 h-px bg-border" />
               <div className="flex items-center justify-between gap-3 mb-3">
-                <p className="text-sm text-muted-foreground">
-                  Scraped {followUp.indexedPageDisplay || 'new page'}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-muted-foreground">
+                    Scraped {followUp.scrapedPageDisplay || 'new page'}
+                  </p>
+                  {followUp.thoughtProcess?.completeness != null && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground border border-border cursor-help"
+                          tabIndex={0}
+                        >
+                          {Math.round(followUp.thoughtProcess.completeness * 100)}%
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="max-w-[200px]">
+                        <p className="font-medium">Evidence: {Math.round(followUp.thoughtProcess.completeness * 100)}%</p>
+                        <p className="text-muted-foreground text-xs mt-0.5">Slot coverage for this answer.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
                 <CopyMessageButton message={followUp} className="h-8 w-8 shrink-0 opacity-70 hover:opacity-100" />
               </div>
               <div className="space-y-2">
@@ -130,6 +175,15 @@ export const ChatMessage = ({
                 {(followUp.quotes?.length ?? 0) > 0 && onQuoteClick && (
                   <CitedPages quotes={followUp.quotes ?? []} onQuoteClick={onQuoteClick} />
                 )}
+                {followUp.thoughtProcess && (followUp.thoughtProcess.slots?.length || followUp.thoughtProcess.steps?.length) ? (
+                  <ThoughtProcessView
+                    thoughtProcess={followUp.thoughtProcess}
+                    thoughtProcessBefore={tp && (tp.slots?.length || tp.steps?.length) ? tp : undefined}
+                    suggestedPage={message.suggestedPage}
+                    isLive={false}
+                    defaultOpen={false}
+                  />
+                ) : null}
               </div>
             </>
           )}
@@ -299,7 +353,7 @@ function IndexSuggestionCard({
 }: {
   suggestedPage: SuggestedPage;
   messageId: string;
-  onAddAndReask: (url: string, sourceId: string, questionToReask?: string, messageId?: string, indexedPageDisplay?: string, unfoldMode?: 'unfold' | 'direct' | 'auto') => Promise<void>;
+  onAddAndReask: (url: string, sourceId: string, questionToReask?: string, messageId?: string, scrapedPageDisplay?: string) => Promise<void>;
 }) {
   const [adding, setAdding] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
@@ -309,13 +363,13 @@ function IndexSuggestionCard({
   const key = `${sp.sourceId}:${sp.url}`;
   const isAdding = adding === key;
   const hasReask = !!sp.promptedByQuestion;
-  const indexedPageDisplay = `${sp.title} - ${getDomainDisplay(sp.url)}`.replace(/ - $/, '');
+  const scrapedPageDisplay = `${sp.title} - ${getDomainDisplay(sp.url)}`.replace(/ - $/, '');
 
   const handleYes = async () => {
     setAdding(key);
     console.log('[IndexSuggestion] Yes clicked', { url: sp.url, sourceId: sp.sourceId, question: sp.promptedByQuestion });
     try {
-      await onAddAndReask(sp.url, sp.sourceId, sp.promptedByQuestion, messageId, indexedPageDisplay, sp.unfoldMode);
+      await onAddAndReask(sp.url, sp.sourceId, sp.promptedByQuestion, messageId, scrapedPageDisplay);
       console.log('[IndexSuggestion] onAddAndReask completed successfully');
       setAdded(true);
     } catch (err) {

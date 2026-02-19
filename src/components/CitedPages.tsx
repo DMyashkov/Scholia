@@ -23,7 +23,7 @@ export const CitedPages = ({ quotes, onQuoteClick }: CitedPagesProps) => {
   if (pages.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-border/30">
+    <div className="flex flex-wrap items-center gap-2 mt-3 mb-10 pt-3 border-t border-border/30">
       <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium shrink-0">
         Pages cited
       </span>

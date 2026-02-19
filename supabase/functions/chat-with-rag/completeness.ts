@@ -17,6 +17,12 @@ export function slotCompleteness(
   slot: SlotForCompleteness,
   slotItemCountBySlotId: Map<string, number>,
 ): number {
+  // If this slot depends on another slot, it cannot be complete until the parent has at least one item.
+  if (slot.depends_on_slot_id) {
+    const parentCount = slotItemCountBySlotId.get(slot.depends_on_slot_id) ?? 0;
+    if (parentCount === 0) return 0;
+  }
+
   const count = slotItemCountBySlotId.get(slot.id) ?? 0;
   if (slot.type === 'scalar') {
     return count >= 1 ? 1 : 0;

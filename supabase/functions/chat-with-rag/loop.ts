@@ -33,7 +33,7 @@ Output JSON only:
 Rules:
 - Only output claims that are directly supported by the given chunks. Each claim must list at least one chunkId from the evidence (the UUID in brackets above).
 - Use the exact chunk id (UUID) in chunkIds—copy from the [uuid] line for each chunk you cite. Use the same ids in final_answer as [[quote:uuid]] (now referring to chunks).
-- For scalar slots: one value, key omitted. For list slots: one claim per list item, value = the item. For mapping slots: key = entity name (e.g. the list item), value = the mapping value.
+- For scalar slots: one value, key omitted. For list slots: one claim per list item, value = the item. For mapping slots: key must be one of the entity names (keys) from the slot's dependency (see current slot state); value = the mapping value. Do not invent mapping keys—only use keys that already exist in the dependency slot's items.
 - Prefer extracting claims when the evidence clearly states the information. Use "expand_corpus" only when the evidence genuinely does not contain the needed facts, not when it is merely spread across several chunks.
 - If evidence is insufficient for required slots, set next_action to "retrieve" or "expand_corpus" or "clarify".
 - For list slots, the backend tracks how many attempts have been made and whether the list has stagnated. You may start with either a broad discovery query or a more targeted/faceted query depending on the slot description. On later iterations, prefer targeted queries, and when there are already some list items and stagnation is high, you may also propose seeded queries that reference existing items by name.
@@ -45,7 +45,7 @@ export async function callExtractAndDecide(
   apiKey: string,
   slots: SlotRow[],
   evidenceChunks: EvidenceChunk[],
-  currentSlotItemsSummary: string,
+  currentSlotStateJson: string,
   userMessage: string,
   suggestExpandWhenNoEvidence = false,
 ): Promise<ExtractResult> {
@@ -61,8 +61,8 @@ export async function callExtractAndDecide(
 Slots to fill:
 ${slotBlock}
 
-Current slot items (already extracted):
-${currentSlotItemsSummary || '(none yet)'}
+Current slot state (structured JSON — use this to see existing keys per slot and, for mapping slots, which keys are allowed):
+${currentSlotStateJson || '{}'}
 
 Evidence (quotes with ids — use these exact UUIDs in each claim's quoteIds):
 ---
@@ -174,22 +174,32 @@ Output JSON with claims, next_action, why, optional final_answer, and optional s
 
 /**
  * Insert claims as slot_items and claim_evidence. Dedupes by (slot_id, key, value_json).
+ * For mapping slots, only accepts claims whose key is in allowedKeysByMappingSlotId (anchors to list slot).
  * Returns created slot_item ids (for callers that need them).
  */
 export async function insertClaims(
   supabase: SupabaseClient,
   params: {
     slotIdByName: Map<string, string>;
+    slots: { id: string; type: string; depends_on_slot_id?: string | null }[];
     claims: ExtractClaim[];
     ownerId: string;
+    allowedKeysByMappingSlotId?: Map<string, Set<string>>;
   },
 ): Promise<{ insertedSlotItemIds: string[] }> {
-  const { slotIdByName, claims, ownerId } = params;
+  const { slotIdByName, slots, claims, ownerId, allowedKeysByMappingSlotId } = params;
   const inserted: string[] = [];
 
   for (const claim of claims) {
     const slotId = slotIdByName.get(claim.slot);
     if (!slotId) continue;
+
+    const slot = slots.find((s) => s.id === slotId);
+    if (slot?.type === 'mapping' && allowedKeysByMappingSlotId?.has(slotId)) {
+      const allowed = allowedKeysByMappingSlotId.get(slotId)!;
+      const keyStr = claim.key != null ? (typeof claim.key === 'string' ? claim.key : String(claim.key)) : null;
+      if (keyStr == null || !allowed.has(keyStr)) continue;
+    }
 
     const valueJson = typeof claim.value === 'object' && claim.value !== null ? claim.value : claim.value;
     const key = claim.key ?? null;

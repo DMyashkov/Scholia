@@ -26,12 +26,26 @@ function outcomeLabel(tp: ThoughtProcess): string | null {
   return null;
 }
 
-function PhaseContent({ tp, showBanner, suggestedPage }: { tp: ThoughtProcess; showBanner?: boolean; suggestedPage?: { title: string; url?: string; fromPageTitle?: string } | null }) {
+function PhaseContent({
+  tp,
+  showBanner,
+  suggestedPage,
+  stacked,
+}: {
+  tp: ThoughtProcess;
+  showBanner?: boolean;
+  suggestedPage?: { title: string; url?: string; fromPageTitle?: string } | null;
+  /** When in a multi-phase layout: tight padding around dividers */
+  stacked?: 'first' | 'middle' | 'last';
+}) {
   const outcome = outcomeLabel(tp);
   const hasStopOrNote = Boolean(tp.hardStopReason || tp.partialAnswerNote || (tp.extractionGaps?.length ?? 0) > 0 || tp.expandCorpusReason);
 
+  const paddingClass =
+    stacked === 'first' ? 'pt-4 pb-1.5' : stacked === 'last' ? 'pt-1.5 pb-4' : stacked === 'middle' ? 'pt-1.5 pb-1.5' : 'pt-4 pb-4';
+
   return (
-    <div className="px-4 pt-4 space-y-7">
+    <div className={cn('px-4 space-y-7', paddingClass)}>
       {showBanner && tp.steps?.length ? (() => {
         const last = tp.steps[tp.steps.length - 1];
         const needMore = last?.nextAction === 'expand_corpus' || (tp.completeness != null && tp.completeness < 1);
@@ -294,8 +308,10 @@ function PhaseContent({ tp, showBanner, suggestedPage }: { tp: ThoughtProcess; s
 
 interface ThoughtProcessViewProps {
   thoughtProcess: ThoughtProcess;
-  /** When present, show two phases: "First (no page)" and then the follow-up phase with no subtitle */
+  /** When present, show previous phase(s) above the current (e.g. before suggested page was added). */
   thoughtProcessBefore?: ThoughtProcess | null;
+  /** When set, use this ordered list of phases (oldest first) instead of deriving from thoughtProcess + thoughtProcessBefore. Supports 3+ phases. */
+  phases?: ThoughtProcess[] | null;
   /** When set and outcome is "Suggested a page", footer shows "Suggested **{title}** (branching out from …)" when fromPageTitle is set */
   suggestedPage?: { title: string; url?: string; fromPageTitle?: string } | null;
   /** When true, show as live/streaming (no collapse, subtle pulse) */
@@ -304,16 +320,29 @@ interface ThoughtProcessViewProps {
   defaultOpen?: boolean;
 }
 
+function hasPhaseContent(tp: ThoughtProcess | null | undefined): boolean {
+  return Boolean(tp && ((tp.slots?.length ?? 0) > 0 || (tp.steps?.length ?? 0) > 0));
+}
+
 export function ThoughtProcessView({
   thoughtProcess: tp,
   thoughtProcessBefore = null,
+  phases: phasesProp = null,
   suggestedPage = null,
   isLive = false,
   defaultOpen = false,
 }: ThoughtProcessViewProps) {
   const [open, setOpen] = useState(isLive || defaultOpen);
-  const hasContent = (tp.slots?.length ?? 0) > 0 || (tp.steps?.length ?? 0) > 0;
-  const hasTwoPhases = thoughtProcessBefore && ((thoughtProcessBefore.slots?.length ?? 0) > 0 || (thoughtProcessBefore.steps?.length ?? 0) > 0);
+  const hasContent = hasPhaseContent(tp);
+
+  const phases: ThoughtProcess[] =
+    phasesProp && phasesProp.length > 0
+      ? phasesProp.filter(hasPhaseContent)
+      : thoughtProcessBefore && hasPhaseContent(thoughtProcessBefore)
+        ? [thoughtProcessBefore, tp]
+        : [tp];
+
+  const hasMultiplePhases = phases.length > 1;
 
   if (!tp || !hasContent) return null;
 
@@ -377,18 +406,20 @@ export function ThoughtProcessView({
         )}
       </button>
 
-      {open && (hasTwoPhases && thoughtProcessBefore ? (
+      {open && (
         <div className="border-t border-border/50">
-          <PhaseContent tp={thoughtProcessBefore} showBanner={false} suggestedPage={suggestedPage} />
-          <div className="border-t border-border/50">
-            <PhaseContent tp={tp} showBanner={false} />
-          </div>
+          {phases.map((phase, i) => (
+            <div key={i} className={i > 0 ? 'border-t border-border/50' : undefined}>
+              <PhaseContent
+                tp={phase}
+                showBanner={i === phases.length - 1}
+                suggestedPage={i === phases.length - 1 ? suggestedPage : null}
+                stacked={hasMultiplePhases ? (i === 0 ? 'first' : i === phases.length - 1 ? 'last' : 'middle') : undefined}
+              />
+            </div>
+          ))}
         </div>
-      ) : (
-        <div className="border-t border-border/50">
-          <PhaseContent tp={tp} showBanner suggestedPage={suggestedPage} />
-        </div>
-      ))}
+      )}
     </div>
   );
 }

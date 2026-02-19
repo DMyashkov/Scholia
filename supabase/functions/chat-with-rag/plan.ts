@@ -8,12 +8,13 @@ Output JSON only with this shape:
 - why: short reason for this action
 - slots: array of { name, type, description?, required?, dependsOn? }
   - type is one of: "scalar" (one value), "list" (set of items), "mapping" (key->value per list item; use dependsOn: slot name of the list)
+  - dependsOn: name of another slot that must have at least one value before this slot can be queried (e.g. mapping depends on list; or "archetype" slot depends on "loved_thing" scalar)
   - description: one short sentence for what this slot represents (helps extraction and UI)
 - subqueries: array of { slot, query } — each query is a search phrase for the slot (slot = slot name string)
 
 Rules:
 - Start with action "retrieve" unless the question is ambiguous (then "clarify" with questions).
-- Slots: identify what information is needed to answer (e.g. birth_date scalar, product_list list, region_per_product mapping with dependsOn product_list).
+- Slots: identify what information is needed to answer (e.g. birth_date scalar, product_list list, region_per_product mapping with dependsOn product_list). Any slot can depend on another: use dependsOn whenever slot B cannot be filled until slot A has values.
 - Subqueries
   - for scalar slots - 1–2 focused queries
   - for list slots - 1–2 broad discovery queries

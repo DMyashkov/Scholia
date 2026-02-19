@@ -61,18 +61,24 @@ function PhaseContent({ tp, showBanner, suggestedPage }: { tp: ThoughtProcess; s
           <div className="flex flex-wrap gap-1.5">
             {tp.slots.map((s) => {
               const pill = (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-muted/40 text-muted-foreground border border-border/50">
-                  <span className="font-medium text-foreground/80">{s.name}</span>
-                  <span className="text-[10px] opacity-80">· {s.type}</span>
+                <span className="inline-flex flex-col items-start gap-0.5 px-2.5 py-1 rounded-full text-xs bg-muted/40 text-muted-foreground border border-border/50">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="font-medium text-foreground/80">{s.name}</span>
+                    <span className="text-[10px] opacity-80">· {s.type}</span>
+                  </span>
+                  {s.dependsOn && (
+                    <span className="text-[10px] opacity-70">depends on {s.dependsOn}</span>
+                  )}
                 </span>
               );
-              return s.description ? (
+              const tooltipBody = [s.description, s.dependsOn && `Depends on: ${s.dependsOn}`].filter(Boolean).join('\n\n');
+              return tooltipBody ? (
                 <Tooltip key={s.name}>
                   <TooltipTrigger asChild>
                     <span className="cursor-help inline-flex">{pill}</span>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-xs text-foreground">
-                    {s.description}
+                  <TooltipContent side="top" className="max-w-xs text-foreground whitespace-pre-line">
+                    {tooltipBody}
                   </TooltipContent>
                 </Tooltip>
               ) : (

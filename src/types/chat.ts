@@ -13,7 +13,7 @@ export interface SuggestedPage {
 
 /** Thought process from Evidence-First RAG (collapsible UI). Streamed in real time. */
 export interface ThoughtProcess {
-  slots?: { name: string; type: string; description?: string }[];
+  slots?: { name: string; type: string; description?: string; dependsOn?: string }[];
   /** Why we chose this plan (from plan step). */
   planReason?: string;
   steps?: {

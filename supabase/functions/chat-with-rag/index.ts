@@ -312,8 +312,9 @@ Deno.serve(async (req) => {
         await emit({ plan: { action: planResult.action, why: planResult.why, slots: planResult.slots, subqueries: planResult.subqueries } });
         const initialThought = {
           slots: (planResult.slots ?? []).map((s) => {
-            const o: { name: string; type: string; description?: string } = { name: s.name, type: s.type };
+            const o: { name: string; type: string; description?: string; dependsOn?: string } = { name: s.name, type: s.type };
             if (s.description) o.description = s.description;
+            if (s.dependsOn) o.dependsOn = s.dependsOn;
             return o;
           }),
           steps: [],
@@ -348,7 +349,7 @@ Deno.serve(async (req) => {
         nextAction?: string;
       };
       let thoughtProcess: {
-        slots: { name: string; type: string; description?: string }[];
+        slots: { name: string; type: string; description?: string; dependsOn?: string }[];
         planReason?: string;
         steps: ThoughtStep[];
         iterationCount?: number;
@@ -360,8 +361,9 @@ Deno.serve(async (req) => {
         partialAnswerNote?: string;
       } = {
         slots: (planResult?.slots ?? []).map((s) => {
-          const o: { name: string; type: string; description?: string } = { name: s.name, type: s.type };
+          const o: { name: string; type: string; description?: string; dependsOn?: string } = { name: s.name, type: s.type };
           if (s.description) o.description = s.description;
+          if (s.dependsOn) o.dependsOn = s.dependsOn;
           return o;
         }),
         planReason: appendToMessageId
@@ -510,6 +512,9 @@ Deno.serve(async (req) => {
 
         const currentSummary = await getCurrentSlotItemsSummary();
         log('extract-call', { iteration, quoteCount: quotesForExtract.length });
+        const snippetPreviews = quotesForExtract.map((q) => (q.snippet ?? '').slice(0, 120));
+        const hasFoalKeywords = quotesForExtract.some((q) => /foal|Kid Meyers|Oh My Oh|Mr\. Meyers|Milpool|broodmare|sired by|dam of/i.test(q.snippet ?? ''));
+        log('extract-quotes-preview', { iteration, snippetPreviews, hasFoalKeywords });
         const extractResult = await callExtractAndDecide(openaiKey, slotRowsForExtract, quotesForExtract, currentSummary, userMessage.trim(), dynamicMode);
         lastExtractResult = extractResult;
         if (extractResult.extractionGaps?.length) {
@@ -639,6 +644,26 @@ Deno.serve(async (req) => {
           }
         return;
       }
+        if (extractResult.next_action === 'expand_corpus') {
+          const dependentSlotsToFill = slots.filter((s) => {
+            if (!s.depends_on_slot_id) return false;
+            const parentCount = slotItemCountBySlotId.get(s.depends_on_slot_id) ?? 0;
+            const myCount = slotItemCountBySlotId.get(s.id) ?? 0;
+            if (parentCount === 0) return false;
+            if (s.type === 'mapping') return myCount < parentCount;
+            return myCount < 1;
+          });
+          if (dependentSlotsToFill.length > 0) {
+            const fallbackSubqueries = dependentSlotsToFill.map((s) => ({
+              slot: s.name,
+              query: (s.description ?? '').trim() || `${s.name} from evidence`,
+            }));
+            lastExtractResult = { ...extractResult, next_action: 'retrieve', subqueries: fallbackSubqueries };
+            (extractResult as { next_action: string; subqueries?: { slot: string; query: string }[] }).next_action = 'retrieve';
+            (extractResult as { next_action: string; subqueries?: { slot: string; query: string }[] }).subqueries = fallbackSubqueries;
+            log('expand_corpus-override-retrieve', { reason: 'dependent_slots_not_filled', slots: dependentSlotsToFill.map((s) => s.name) });
+          }
+        }
         if (extractResult.next_action === 'expand_corpus') {
           log('expand_corpus', { why: extractResult.why, expansionCount });
           if (expansionCount >= MAX_EXPANSIONS) {

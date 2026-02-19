@@ -31,11 +31,12 @@ Output JSON only:
 }
 
 Rules:
-- Only output claims that are directly supported by the given quotes. Each claim must list at least one quoteId from the evidence.
-- Use the exact quote id (UUID) in quoteIds. Use the same ids in final_answer as [[quote:uuid]].
-- For scalar slots: one value, key omitted. For list slots: one claim per list item, value = the item. For mapping slots: key = entity name, value = the mapping value.
+- Only output claims that are directly supported by the given quotes. Each claim must list at least one quoteId from the evidence (the UUID in brackets above).
+- Use the exact quote id (UUID) in quoteIds—copy from the [uuid] line for each quote you cite. Use the same ids in final_answer as [[quote:uuid]].
+- For scalar slots: one value, key omitted. For list slots: one claim per list item, value = the item. For mapping slots: key = entity name (e.g. the list item), value = the mapping value.
+- Prefer extracting claims when the evidence clearly states the information. Use "expand_corpus" only when the evidence genuinely does not contain the needed facts, not when it is merely spread across several quotes.
 - If evidence is insufficient for required slots, set next_action to "retrieve" or "expand_corpus" or "clarify".
-- When suggestExpandWhenNoEvidence is true (dynamic sources), prefer next_action "expand_corpus" with why describing what kind of page might help when evidence does not support the required slots—instead of "retrieve" again.
+- When suggestExpandWhenNoEvidence is true (dynamic sources), prefer next_action "expand_corpus" only when evidence truly lacks the information—otherwise prefer "retrieve" with subqueries or "answer" if you can fill slots.
 - When all required slots are filled and you can answer, set next_action to "answer" and include "final_answer" with [[quote:uuid]] placeholders. Also include "cited_snippets" with each cited quote id mapped to the exact verbatim passage you are citing (one sentence or short passage from the evidence).`;
 
 export async function callExtractAndDecide(
@@ -47,7 +48,7 @@ export async function callExtractAndDecide(
   suggestExpandWhenNoEvidence = false,
 ): Promise<ExtractResult> {
   const quoteBlock = quotes
-    .map((q) => `[${q.id}]\n${q.snippet.slice(0, 800)}${q.snippet.length > 800 ? '...' : ''}`)
+    .map((q) => `[${q.id}]\n${q.snippet}`)
     .join('\n\n---\n\n');
   const slotBlock = slots
     .map((s) => `- ${s.name} (${s.type})${s.description ? `: ${s.description}` : ''}`)
@@ -61,7 +62,7 @@ ${slotBlock}
 Current slot items (already extracted):
 ${currentSlotItemsSummary || '(none yet)'}
 
-Evidence (quotes with ids — use these ids in quoteIds and in [[quote:id]] in final_answer):
+Evidence (quotes with ids — use these exact UUIDs in each claim's quoteIds):
 ---
 ${quoteBlock}
 ---
@@ -110,12 +111,21 @@ Output JSON with claims, next_action, why, optional final_answer, and optional s
   const questions = questionsRaw.filter((q): q is string => typeof q === 'string' && q.trim().length > 0).map((q) => q.trim());
   const claimsRaw = Array.isArray(obj.claims) ? obj.claims : [];
   const quoteIdSet = new Set(quotes.map((q) => q.id));
+  const quoteIdsByIndex = quotes.map((q) => q.id);
+  let droppedNoValidQuoteIds = 0;
   const claims: ExtractClaim[] = claimsRaw
     .filter((c): c is Record<string, unknown> => c != null && typeof c === 'object')
     .map((c) => {
-      const quoteIds = Array.isArray(c.quoteIds)
-        ? (c.quoteIds as unknown[]).filter((id): id is string => typeof id === 'string' && quoteIdSet.has(id))
-        : [];
+      const rawIds = Array.isArray(c.quoteIds) ? (c.quoteIds as unknown[]) : [];
+      let quoteIds = rawIds.filter((id): id is string => typeof id === 'string' && quoteIdSet.has(id)) as string[];
+      if (quoteIds.length === 0 && rawIds.length > 0) {
+        const byIndex = rawIds
+          .map((id) => (typeof id === 'number' ? id : typeof id === 'string' ? parseInt(id, 10) : NaN))
+          .filter((i) => Number.isInteger(i) && i >= 1 && i <= quoteIdsByIndex.length)
+          .map((i) => quoteIdsByIndex[i - 1]);
+        if (byIndex.length > 0) quoteIds = byIndex;
+        else droppedNoValidQuoteIds++;
+      }
       return {
         slot: String(c.slot ?? ''),
         value: c.value !== undefined ? c.value : '',
@@ -125,6 +135,17 @@ Output JSON with claims, next_action, why, optional final_answer, and optional s
       };
     })
     .filter((c) => c.slot && c.quoteIds.length > 0);
+  if (claimsRaw.length > 0 || droppedNoValidQuoteIds > 0) {
+    console.log(
+      '[RAG] extract-claims',
+      JSON.stringify({
+        rawCount: claimsRaw.length,
+        afterFilter: claims.length,
+        droppedNoValidQuoteIds,
+        sampleQuoteIds: quotes.slice(0, 2).map((q) => q.id),
+      }),
+    );
+  }
 
   let cited_snippets: Record<string, string> | undefined;
   if (obj.cited_snippets != null && typeof obj.cited_snippets === 'object' && !Array.isArray(obj.cited_snippets)) {

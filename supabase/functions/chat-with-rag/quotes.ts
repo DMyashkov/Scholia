@@ -1,29 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ChunkRow, PageRow, SourceRow, QuoteOut } from './types.ts';
-import { PAGE_CONTEXT_CHARS, QUOTE_SNIPPET_MAX_CHARS } from './config.ts';
+import { PAGE_CONTEXT_CHARS } from './config.ts';
 
 /**
- * Build a single-statement snippet from chunk content for display as the quoted passage.
- * Always returns at most QUOTE_SNIPPET_MAX_CHARS, trimmed at sentence boundary, so we show one (or two short) sentences;
- * context_before/after provide surrounding text. Avoids showing a full paragraph when the chunk is small.
+ * Use full chunk content as the stored quote snippet (no length limit).
+ * Extract sees the full chunk; UI can use context_before/after to show a focused region if needed.
  */
 export function snippetFromChunk(c: ChunkRow): string {
-  const raw = c.content?.trim() ?? '';
-  const maxLen = QUOTE_SNIPPET_MAX_CHARS;
-  const cut = raw.length <= maxLen ? raw : raw.slice(0, maxLen + 1);
-  const lastSentenceEnd = Math.max(
-    cut.lastIndexOf('. '),
-    cut.lastIndexOf('! '),
-    cut.lastIndexOf('? '),
-    cut.lastIndexOf('.\n'),
-    cut.lastIndexOf('!\n'),
-    cut.lastIndexOf('?\n'),
-  );
-  if (lastSentenceEnd >= 0 && lastSentenceEnd > maxLen >> 1) {
-    return cut.slice(0, lastSentenceEnd + 1).trim();
-  }
-  if (cut.length > maxLen) return cut.slice(0, maxLen).trim() + '…';
-  return cut.trim();
+  return (c.content ?? '').trim();
 }
 
 /**

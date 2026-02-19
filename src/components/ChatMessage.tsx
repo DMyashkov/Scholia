@@ -429,36 +429,55 @@ interface TypingIndicatorProps {
 export const TypingIndicator = ({ minimal = false, stepLabels = [] }: TypingIndicatorProps) => {
   const currentStep = stepLabels.length > 0 ? stepLabels[stepLabels.length - 1] : null;
 
+  // Shared layout: same as ChatMessage assistant row (py-6, max-w-3xl, avatar + content)
+  const containerClass = 'flex gap-4 px-4 py-6 bg-chat-assistant animate-fade-in';
+  const innerClass = 'max-w-3xl mx-auto w-full flex gap-4';
+  const avatarClass = 'shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-primary/20';
+  const contentClass = 'flex-1 space-y-2 min-w-0';
+
   if (minimal) {
+    // Adding suggested page: show as a proper assistant row (avatar + "Indexing…" + dots)
     return (
-      <div className="flex gap-4 px-4 py-3 bg-chat-assistant animate-fade-in">
-        <div className="max-w-3xl mx-auto w-full flex gap-4">
-          <div className="shrink-0 w-8" aria-hidden />
-          <div className="flex gap-1">
-            <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
-            <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
-            <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+      <div className={containerClass}>
+        <div className={innerClass}>
+          <div className={avatarClass} aria-hidden>
+            <Sparkles className="h-4 w-4 text-primary" />
+          </div>
+          <div className={contentClass}>
+            <p className="text-sm font-medium text-muted-foreground">Scholia</p>
+            <p className="text-xs text-muted-foreground flex items-center gap-2">
+              <span>Indexing…</span>
+              <span className="flex gap-1">
+                <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+                <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+                <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+              </span>
+            </p>
           </div>
         </div>
       </div>
     );
   }
+
   return (
-    <div className="flex gap-4 px-4 py-6 bg-chat-assistant animate-fade-in">
-      <div className="max-w-3xl mx-auto w-full flex gap-4">
-        <div className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-primary/20">
+    <div className={containerClass}>
+      <div className={innerClass}>
+        <div className={avatarClass}>
           <Sparkles className="h-4 w-4 text-primary" />
         </div>
-        <div className="flex-1 space-y-2">
+        <div className={contentClass}>
           <p className="text-sm font-medium text-muted-foreground">Scholia</p>
           {currentStep ? (
             <p className="text-xs text-muted-foreground">{currentStep.label}</p>
           ) : (
-            <div className="flex gap-1 py-2">
-              <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
-              <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
-              <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
-            </div>
+            <p className="text-xs text-muted-foreground flex items-center gap-2">
+              <span>Thinking…</span>
+              <span className="flex gap-1">
+                <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+                <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+                <span className="w-2 h-2 rounded-full bg-muted-foreground typing-dot" />
+              </span>
+            </p>
           )}
         </div>
       </div>

@@ -256,12 +256,14 @@ export const ChatArea = ({
                 <TypingIndicator minimal={!!addingPageSourceId} stepLabels={ragStepProgress} />
               ) : null}
               {isLoading && liveThoughtProcess && (liveThoughtProcess.slots?.length || liveThoughtProcess.steps?.length) ? (
-                <div className="px-4">
-                  <ThoughtProcessView
-                    thoughtProcess={liveThoughtProcess}
-                    isLive
-                    defaultOpen
-                  />
+                <div className="px-4 pt-1 pb-2">
+                  <div className="max-w-3xl mx-auto w-full">
+                    <ThoughtProcessView
+                      thoughtProcess={liveThoughtProcess}
+                      isLive
+                      defaultOpen
+                    />
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -278,7 +280,7 @@ export const ChatArea = ({
         <>
           <WelcomeScreen onAddSource={() => openAddSourceModal(null)} hasSources={sources.length > 0} />
           {addingPageSourceId && (
-            <div className="px-4">
+            <div className="px-4 pt-3 pb-2">
               <TypingIndicator minimal />
             </div>
           )}

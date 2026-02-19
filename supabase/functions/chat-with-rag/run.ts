@@ -131,11 +131,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       required: s.required !== false,
       depends_on_slot_id: null as string | null,
     }));
-    for (let i = 0; i < planResult.slots.length; i++) {
-      const s = planResult.slots[i];
-      const depId = s.dependsOn ? planResult.slots.find((x) => x.name === s.dependsOn)?.name : undefined;
-      (slotInserts[i] as { depends_on_slot_id?: string | null }).depends_on_slot_id = null;
-    }
     const { data: insertedSlots } = await supabase.from('slots').insert(slotInserts).select('id, name');
     const insertedSlotsList = (insertedSlots ?? []) as { id: string; name: string }[];
     slotIdByName = new Map(insertedSlotsList.map((s) => [s.name, s.id]));

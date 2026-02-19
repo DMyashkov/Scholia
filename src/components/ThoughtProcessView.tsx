@@ -26,12 +26,12 @@ function outcomeLabel(tp: ThoughtProcess): string | null {
   return null;
 }
 
-function PhaseContent({ tp, showBanner, suggestedPage }: { tp: ThoughtProcess; showBanner?: boolean; suggestedPage?: { title: string; url?: string } | null }) {
+function PhaseContent({ tp, showBanner, suggestedPage }: { tp: ThoughtProcess; showBanner?: boolean; suggestedPage?: { title: string; url?: string; fromPageTitle?: string } | null }) {
   const outcome = outcomeLabel(tp);
   const hasStopOrNote = Boolean(tp.hardStopReason || tp.partialAnswerNote || (tp.extractionGaps?.length ?? 0) > 0 || tp.expandCorpusReason);
 
   return (
-    <div className="px-4 pb-4 pt-3 space-y-5">
+    <div className="px-4 pt-4 space-y-7">
       {showBanner && tp.steps?.length ? (() => {
         const last = tp.steps[tp.steps.length - 1];
         const needMore = last?.nextAction === 'expand_corpus' || (tp.completeness != null && tp.completeness < 1);
@@ -58,31 +58,31 @@ function PhaseContent({ tp, showBanner, suggestedPage }: { tp: ThoughtProcess; s
       {tp.slots && tp.slots.length > 0 && (
         <div>
           <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-2">Looking for</p>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-2">
             {tp.slots.map((s) => {
+              const tooltipBody = [s.description, s.dependsOn && `Depends on: ${s.dependsOn}`].filter(Boolean).join('\n\n');
               const pill = (
-                <span className="inline-flex flex-col items-start gap-0.5 px-2.5 py-1 rounded-full text-xs bg-muted/40 text-muted-foreground border border-border/50">
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="font-medium text-foreground/80">{s.name}</span>
-                    <span className="text-[10px] opacity-80">· {s.type}</span>
-                  </span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-muted/40 text-muted-foreground border border-border/50 max-w-full">
+                  <span className="font-medium text-foreground/80 shrink-0">{s.name}</span>
+                  <span className="text-[10px] opacity-80 shrink-0">· {s.type}</span>
                   {s.dependsOn && (
-                    <span className="text-[10px] opacity-70">depends on {s.dependsOn}</span>
+                    <span className="text-[10px] truncate min-w-0 text-amber-600 dark:text-amber-400" title={`Depends on: ${s.dependsOn}`}>
+                      ↳ {s.dependsOn}
+                    </span>
                   )}
                 </span>
               );
-              const tooltipBody = [s.description, s.dependsOn && `Depends on: ${s.dependsOn}`].filter(Boolean).join('\n\n');
               return tooltipBody ? (
                 <Tooltip key={s.name}>
                   <TooltipTrigger asChild>
-                    <span className="cursor-help inline-flex">{pill}</span>
+                    <span className="cursor-help inline-flex max-w-full">{pill}</span>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-xs text-foreground whitespace-pre-line">
                     {tooltipBody}
                   </TooltipContent>
                 </Tooltip>
               ) : (
-                <span key={s.name}>{pill}</span>
+                <span key={s.name} className="inline-flex max-w-full">{pill}</span>
               );
             })}
           </div>
@@ -172,21 +172,28 @@ function PhaseContent({ tp, showBanner, suggestedPage }: { tp: ThoughtProcess; s
                           const filled = status === 'filled';
                           const slotMeta = tp.slots!.find((s) => s.name === slotName);
                           const typeStr = slotMeta?.type ?? '';
+                          const dependsOn = slotMeta?.dependsOn;
                           return (
                             <span
                               key={slotName}
                               className={cn(
-                                'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border',
+                                'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border max-w-full',
                                 filled ? 'bg-primary/10 text-primary border-primary/20' : 'bg-muted/40 text-muted-foreground border-border/50 border-dashed'
                               )}
+                              title={dependsOn ? `Depends on: ${dependsOn}` : undefined}
                             >
                               {filled ? (
                                 <CheckCircle2 className="h-3 w-3 shrink-0" />
                               ) : (
                                 <Circle className="h-3 w-3 shrink-0 stroke-dasharray-[2,2] stroke-[2]" />
                               )}
-                              <span className="font-medium">{slotName}</span>
-                              {typeStr && <span className="text-[10px] opacity-80">· {typeStr}</span>}
+                              <span className="font-medium shrink-0">{slotName}</span>
+                              {typeStr && <span className="text-[10px] opacity-80 shrink-0">· {typeStr}</span>}
+                              {dependsOn && (
+                                <span className="text-[10px] truncate min-w-0 text-amber-600 dark:text-amber-400" title={`Depends on: ${dependsOn}`}>
+                                  ↳ {dependsOn}
+                                </span>
+                              )}
                             </span>
                           );
                         })}
@@ -225,7 +232,16 @@ function PhaseContent({ tp, showBanner, suggestedPage }: { tp: ThoughtProcess; s
                 {outcome === 'Suggested a page' ? (
                   <>
                     <FilePlus className="h-4 w-4 shrink-0 text-violet-500" />
-                    <span>{suggestedPage?.title ? `Suggested ${suggestedPage.title}` : 'Suggested a page'}</span>
+                    <span>
+                      {suggestedPage?.title ? (
+                        <>
+                          Suggested <strong>{suggestedPage.title}</strong>
+                          {suggestedPage.fromPageTitle ? ` (branching out from ${suggestedPage.fromPageTitle})` : ''}
+                        </>
+                      ) : (
+                        'Suggested a page'
+                      )}
+                    </span>
                   </>
                 ) : outcome === 'Answered from evidence' ? (
                   <>
@@ -280,8 +296,8 @@ interface ThoughtProcessViewProps {
   thoughtProcess: ThoughtProcess;
   /** When present, show two phases: "First (no page)" and then the follow-up phase with no subtitle */
   thoughtProcessBefore?: ThoughtProcess | null;
-  /** When set and outcome is "Suggested a page", footer shows "Suggested: {title}" */
-  suggestedPage?: { title: string; url?: string } | null;
+  /** When set and outcome is "Suggested a page", footer shows "Suggested **{title}** (branching out from …)" when fromPageTitle is set */
+  suggestedPage?: { title: string; url?: string; fromPageTitle?: string } | null;
   /** When true, show as live/streaming (no collapse, subtle pulse) */
   isLive?: boolean;
   /** When false (saved message), panel is collapsible and starts collapsed */
@@ -309,7 +325,7 @@ export function ThoughtProcessView({
   return (
     <div
       className={cn(
-        'mt-5 rounded-xl overflow-hidden transition-all duration-200',
+        'mt-3 rounded-xl overflow-hidden transition-all duration-200',
         'bg-gradient-to-b from-muted/15 to-muted/5',
         'border border-border/50 shadow-sm',
         isLive && 'ring-1 ring-primary/10 animate-thought-process-glow'
@@ -361,7 +377,7 @@ export function ThoughtProcessView({
           </div>
         </div>
       ) : (
-        <div className="px-4 pb-4 pt-0 space-y-2 border-t border-border/50">
+        <div className="border-t border-border/50">
           <PhaseContent tp={tp} showBanner suggestedPage={suggestedPage} />
         </div>
       ))}

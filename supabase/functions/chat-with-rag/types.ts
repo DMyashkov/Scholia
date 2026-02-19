@@ -82,3 +82,43 @@ export type ChunkRow = {
 
 export type PageRow = { id: string; source_id: string; title: string | null; path: string; url: string };
 export type SourceRow = { id: string; domain: string };
+
+// RAG context (index.ts split)
+export type SlotDb = { id: string; name: string; type: string; description?: string | null; required: boolean; depends_on_slot_id?: string | null };
+export type StepDb = { id: string; iteration_number: number; action: string; why?: string | null; completeness_score?: number | null };
+
+export interface RagContextReady {
+  kind: 'ready';
+  conversationId: string;
+  ownerId: string;
+  userMessage: string;
+  dynamicMode: boolean;
+  sourceIds: string[];
+  pages: PageRow[];
+  pageIds: string[];
+  pageById: Map<string, PageRow>;
+  sourceById: Map<string, SourceRow>;
+  sourceDomainByPageId: Map<string, string>;
+  leadChunks: ChunkRow[];
+  rootMessageId: string;
+  slots: SlotDb[];
+  slotIdByName: Map<string, string>;
+  planResult: PlanResult | null;
+  expansionCount: number;
+  appendToMessageId?: string;
+  scrapedPageDisplay?: string;
+}
+
+export interface RagContextNoPages {
+  kind: 'noPages';
+  conversationId: string;
+  ownerId: string;
+  content: string;
+}
+
+export interface RagContextError {
+  kind: 'error';
+  error: string;
+}
+
+export type RagContext = RagContextReady | RagContextNoPages | RagContextError;

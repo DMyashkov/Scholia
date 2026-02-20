@@ -1,1 +1,1 @@
-{"version":3,"file":"crawlSource.d.ts","sourceRoot":"","sources":["../../src/crawler/crawlSource.ts"],"names":[],"mappings":"AAIA,OAAO,KAAK,EAAE,QAAQ,EAAE,MAAM,EAAE,MAAM,UAAU,CAAC;AAOjD,wBAAsB,WAAW,CAAC,GAAG,EAAE,QAAQ,EAAE,MAAM,EAAE,MAAM,GAAG,OAAO,CAAC,IAAI,CAAC,CA2B9E"}
+{"version":3,"file":"crawlSource.d.ts","sourceRoot":"","sources":["../../src/crawler/crawlSource.ts"],"names":[],"mappings":"AAIA,OAAO,KAAK,EAAE,QAAQ,EAAE,MAAM,EAAE,MAAM,UAAU,CAAC;AAOjD,wBAAsB,WAAW,CAAC,GAAG,EAAE,QAAQ,EAAE,MAAM,EAAE,MAAM,GAAG,OAAO,CAAC,IAAI,CAAC,CAyB9E"}

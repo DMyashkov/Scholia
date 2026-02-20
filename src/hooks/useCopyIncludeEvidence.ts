@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthContext } from '@/contexts/AuthContext';
-import { userSettingsApi } from '@/lib/db/user-settings';
+import { userSettingsApi, type UserSettings } from '@/lib/db/user-settings';
+import { optimisticUpdateSingle } from '@/hooks/optimisticMutation';
 
 const STORAGE_KEY = 'scholia-copy-include-evidence';
 
@@ -38,12 +39,25 @@ export function useCopyIncludeEvidence() {
     enabled: !!user,
   });
 
+  const queryKey = ['user-settings', user?.id] as const;
+  const optimistic = optimisticUpdateSingle<UserSettings | null, boolean>({
+    queryKey,
+    merge: (old, copyIncludeEvidence) =>
+      old
+        ? { ...old, copy_include_evidence: copyIncludeEvidence }
+        : {
+            owner_id: user!.id,
+            sidebar_width: 600,
+            copy_include_evidence: copyIncludeEvidence,
+            suggested_page_candidates: 5,
+            updated_at: new Date().toISOString(),
+          },
+  })(queryClient);
+
   const upsertMutation = useMutation({
     mutationFn: (copyIncludeEvidence: boolean) =>
       userSettingsApi.upsertCopyIncludeEvidence(user!.id, copyIncludeEvidence),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user-settings', user?.id] });
-    },
+    ...optimistic,
   });
 
   const copyIncludeEvidence = user

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ExtractClaim, ExtractResult } from './types.ts';
+import type { SuggestedPage } from './expand.ts';
 import { OPENAI_CHAT_MODEL } from './config.ts';
 
 export interface SlotRow {
@@ -27,7 +28,8 @@ Output JSON only:
   "final_answer": "optional: when next_action is answer and slots are complete, provide the answer text with citation placeholders [[quote:uuid]] for each chunk you use (uuid = chunk id from the evidence block)",
   "cited_snippets": "optional: when next_action is answer, object mapping each chunk uuid you cite to the exact verbatim passage from the evidence for that citation, e.g. {\"uuid-1\": \"exact sentence from evidence\"}. Copy the passage exactly from the evidence block.",
   "subqueries": "optional: when next_action is retrieve, array of { \"slot\": \"slot_name\", \"query\": \"search phrase\" } for the next retrieval round",
-  "questions": "optional: when next_action is clarify, array of clarifying question strings"
+  "questions": "optional: when next_action is clarify, array of clarifying question strings",
+  "suggested_page_index": "optional: when next_action is expand_corpus and a candidate list was provided, integer 1–10 indicating which candidate page to suggest (1 = first); omit to suggest the first"
 }
 
 Rules:
@@ -38,7 +40,7 @@ Rules:
 - If evidence is insufficient for required slots, set next_action to "retrieve" or "expand_corpus" or "clarify".
 - For list slots, the backend tracks how many attempts have been made and whether the list has stagnated. You may start with either a broad discovery query or a more targeted/faceted query depending on the slot description. On later iterations, prefer targeted queries, and when there are already some list items and stagnation is high, you may also propose seeded queries that reference existing items by name.
 - Never repeat an identical query string for the same slot if it has already been tried in previous iterations (the backend will provide history context in the prompt).
-- When suggestExpandWhenNoEvidence is true (dynamic sources), prefer next_action "expand_corpus" only when evidence truly lacks the information—otherwise prefer "retrieve" with subqueries or "answer" if you can fill slots.
+- When candidate suggested pages are provided (dynamic sources), prefer next_action "expand_corpus" only when evidence genuinely lacks the information AND at least one candidate page is clearly relevant. Otherwise prefer "retrieve" with subqueries (e.g. when the list is not full or more retrieval could fill slots) or "answer" if slots are fillable. When you choose expand_corpus you may set "suggested_page_index" (1–10) to pick which candidate to suggest; if omitted the first is used.
 - When all required slots are filled and you can answer, set next_action to "answer" and include "final_answer" with [[quote:uuid]] placeholders. Also include "cited_snippets" with each cited chunk id mapped to the exact verbatim passage you are citing (one sentence or short passage from the evidence).`;
 
 export async function callExtractAndDecide(
@@ -48,6 +50,7 @@ export async function callExtractAndDecide(
   currentSlotStateJson: string,
   userMessage: string,
   suggestExpandWhenNoEvidence = false,
+  topSuggestedPages: SuggestedPage[] | null = null,
 ): Promise<ExtractResult> {
   const quoteBlock = evidenceChunks
     .map((q) => `[${q.id}]\n${q.snippet}`)
@@ -55,6 +58,21 @@ export async function callExtractAndDecide(
   const slotBlock = slots
     .map((s) => `- ${s.name} (${s.type})${s.description ? `: ${s.description}` : ''}`)
     .join('\n');
+
+  let dynamicBlock = '';
+  if (topSuggestedPages && topSuggestedPages.length > 0) {
+    const candidateList = topSuggestedPages
+      .map((p, i) => `${i + 1}. ${p.url}\n   title: ${p.title}\n   snippet: ${(p.snippet || '').slice(0, 200)}${(p.snippet?.length ?? 0) > 200 ? '...' : ''}`)
+      .join('\n');
+    dynamicBlock = `
+
+Candidate suggested pages (non-indexed links; only suggest if one is clearly relevant and evidence lacks the information):
+${candidateList}
+
+When you choose expand_corpus, you may set "suggested_page_index" (1–${topSuggestedPages.length}) to pick which candidate to suggest; if omitted the first is used. Prefer retrieve with subqueries when more retrieval could fill slots (e.g. list not full).`;
+  } else if (suggestExpandWhenNoEvidence) {
+    dynamicBlock = '\nThis conversation has dynamic sources. When evidence is insufficient to fill required slots, prefer next_action "expand_corpus" with why describing what kind of page might help, instead of "retrieve".';
+  }
 
   const userContent = `Question: ${userMessage}
 
@@ -67,10 +85,9 @@ ${currentSlotStateJson || '{}'}
 Evidence (quotes with ids — use these exact UUIDs in each claim's quoteIds):
 ---
 ${quoteBlock}
----
-${suggestExpandWhenNoEvidence ? '\nThis conversation has dynamic sources (suggestExpandWhenNoEvidence=true). When evidence is insufficient to fill required slots, prefer next_action "expand_corpus" with why describing what kind of page might help, instead of "retrieve".' : ''}
+---${dynamicBlock}
 
-Output JSON with claims, next_action, why, optional final_answer, and optional subqueries (when next_action is retrieve).`;
+Output JSON with claims, next_action, why, optional final_answer, optional subqueries (when next_action is retrieve), and optional suggested_page_index (1–10, when next_action is expand_corpus).`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -160,6 +177,12 @@ Output JSON with claims, next_action, why, optional final_answer, and optional s
     if (Object.keys(cited_snippets).length === 0) cited_snippets = undefined;
   }
 
+  let suggested_page_index: number | undefined;
+  if (next_action === 'expand_corpus' && typeof obj.suggested_page_index === 'number') {
+    const n = Math.floor(obj.suggested_page_index);
+    if (n >= 1 && n <= 10) suggested_page_index = n;
+  }
+
   return {
     claims,
     next_action,
@@ -169,6 +192,7 @@ Output JSON with claims, next_action, why, optional final_answer, and optional s
     questions: questions.length > 0 ? questions : undefined,
     extractionGaps: undefined,
     cited_snippets,
+    suggested_page_index,
   };
 }
 

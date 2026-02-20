@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Settings, Trash2 } from 'lucide-react';
 import { useCopyIncludeEvidence } from '@/hooks/useCopyIncludeEvidence';
+import { useSuggestedPageCandidates } from '@/hooks/useSuggestedPageCandidates';
 import { useDeleteAllConversations } from '@/hooks/useConversations';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -33,6 +34,7 @@ export const SettingsSheet = ({
   onOpenChange?: (open: boolean) => void;
 }) => {
   const { copyIncludeEvidence: includeEvidence, setCopyIncludeEvidence } = useCopyIncludeEvidence();
+  const { suggestedPageCandidates, setSuggestedPageCandidates } = useSuggestedPageCandidates();
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const deleteAllMutation = useDeleteAllConversations();
 
@@ -79,6 +81,28 @@ export const SettingsSheet = ({
                 onClick={handleWithoutEvidence}
               >
                 Without evidence
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-2 pt-4 border-t border-border">
+            <Label>Dynamic mode: suggested page candidates</Label>
+            <p className="text-sm text-muted-foreground">
+              How many candidate pages the assistant sees when suggesting a new page to add (5 or 10).
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant={suggestedPageCandidates === 5 ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSuggestedPageCandidates(5)}
+              >
+                5
+              </Button>
+              <Button
+                variant={suggestedPageCandidates === 10 ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSuggestedPageCandidates(10)}
+              >
+                10
               </Button>
             </div>
           </div>

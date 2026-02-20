@@ -1,8 +1,8 @@
 import fetch from 'node-fetch';
 import RobotsParser from 'robots-parser';
 import { supabase } from '../db';
-import { indexConversationForRag } from '../indexer';
-import { MAX_PAGES, PAGE_TITLE_SUFFIX_REGEX } from './constants';
+import { indexSourceForRag } from '../indexer';
+import { MAX_LINKS_PER_PAGE_DYNAMIC, MAX_PAGES } from './constants';
 import { crawlPage } from './crawlPage';
 import { extractLinks, extractLinksWithContext } from './links';
 import { normalizeUrlForCrawl } from './urlUtils';
@@ -15,7 +15,6 @@ export async function crawlSource(job, source) {
             .eq('id', source.id)
             .single();
         if (srcError || !sourceRow?.conversation_id) {
-            console.error(`❌ Failed to find conversation for source ${source.id}:`, srcError);
             throw new Error(`No conversation found for source ${source.id}`);
         }
         conversationId = sourceRow.conversation_id;
@@ -26,7 +25,6 @@ export async function crawlSource(job, source) {
         .eq('id', conversationId)
         .single();
     if (convCheckError || !conversation) {
-        console.error(`❌ Conversation ${conversationId} does not exist! Error:`, convCheckError);
         throw new Error(`Conversation ${conversationId} does not exist for source ${source.id}`);
     }
     return crawlSourceWithConversationId(job, source, conversationId);
@@ -44,13 +42,8 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
     }
     const visited = new Set();
     const discovered = new Set();
-    const queue = seedUrls.map((url) => ({
-        url,
-        depth: 0,
-        priority: 0,
-    }));
+    const queue = [...seedUrls];
     seedUrls.forEach((u) => discovered.add(u));
-    const directLinksFromStart = [];
     let sourceTitleUpdated = false;
     const firstSeedUrl = seedUrls[0];
     let robotsParser = null;
@@ -62,22 +55,17 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
             robotsParser = RobotsParser(robotsUrl, robotsText);
         }
     }
-    catch {
-        // Ignore
+    catch (err) {
+        console.warn('crawl: robots.txt unavailable', firstSeedUrl.slice(0, 50), err instanceof Error
+            ? err.message : err);
     }
     if (queue.length === 0) {
-        console.error(`❌ CRITICAL: Queue is empty before starting crawl!`);
         return;
     }
     const sourceShort = new URL(firstSeedUrl).pathname?.replace(/^\/wiki\//, '') || firstSeedUrl.slice(0, 40);
-    console.log(`[crawl] START source=${sourceShort} seeds=${seedUrls.length} url=${firstSeedUrl} maxPages=${maxPages} depth=${source.crawl_depth} jobId=${job.id?.slice(0, 8)}`);
-    let loopIterations = 0;
+    console.log('crawl: started', sourceShort, 'max', maxPages);
     while (queue.length > 0 && visited.size < maxPages) {
-        loopIterations++;
-        if (loopIterations === 1 && queue.length === 0)
-            break;
-        queue.sort((a, b) => a.priority - b.priority);
-        const { url, depth, priority } = queue.shift();
+        const url = queue.shift();
         const urlObj = new URL(url);
         urlObj.hash = '';
         urlObj.search = '';
@@ -88,104 +76,66 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
             urlObj.pathname = urlObj.pathname.slice(0, -1);
         }
         const normalizedUrl = urlObj.toString();
-        if (visited.has(normalizedUrl))
-            continue;
-        if (depth > 2)
-            continue;
         if (robotsParser && !robotsParser.isAllowed(normalizedUrl, 'ScholiaCrawler')) {
             continue;
         }
         try {
             if (!conversationId)
                 throw new Error(`conversationId is null before calling crawlPage!`);
-            console.log(`[D/I] crawlPage START url=${normalizedUrl.slice(0, 60)} depth=${depth} isSeed=${depth === 0} conv=${conversationId?.slice(0, 8)}`);
-            const result = await crawlPage(normalizedUrl, source, job, conversationId);
+            const result = await crawlPage(normalizedUrl, source, conversationId);
             if (!result) {
-                console.error(`[D/I] crawlPage FAILED - page insert/fetch failed`);
                 visited.add(normalizedUrl);
                 continue;
             }
             const { page, html } = result;
             visited.add(normalizedUrl);
-            console.log(`[D/I] crawlPage OK pageId=${page?.id?.slice(0, 8)} visited=${visited.size}`);
             if (!sourceTitleUpdated && page.title) {
-                const pageTitle = page.title.replace(PAGE_TITLE_SUFFIX_REGEX, '').trim();
-                if (pageTitle && pageTitle.length > 0) {
+                const label = page.title.trim().substring(0, 100);
+                if (label) {
                     try {
                         const { error } = await supabase
                             .from('sources')
-                            .update({ source_label: pageTitle.substring(0, 100) })
+                            .update({ source_label: label })
                             .eq('id', source.id);
                         if (!error) {
-                            source.source_label = pageTitle.substring(0, 100);
+                            source.source_label = label;
                         }
                         sourceTitleUpdated = true;
                     }
                     catch {
-                        // Non-blocking
+                        /* ignore */
                     }
                 }
             }
             const isDynamic = source.crawl_depth === 'dynamic';
             const links = extractLinks(html, normalizedUrl, source);
             const linksWithContext = isDynamic ? extractLinksWithContext(html, normalizedUrl, source) : [];
-            const newLinks = [];
             const edgesToInsert = [];
-            const linksToProcess = links.slice(0, 200);
+            const linksToProcess = isDynamic ? links.slice(0, MAX_LINKS_PER_PAGE_DYNAMIC) : links;
             for (const link of linksToProcess) {
-                const linkUrlObj = new URL(link);
-                linkUrlObj.hash = '';
-                linkUrlObj.search = '';
-                if (linkUrlObj.pathname === '/' || linkUrlObj.pathname === '') {
-                    linkUrlObj.pathname = '/';
-                }
-                else if (linkUrlObj.pathname.endsWith('/')) {
-                    linkUrlObj.pathname = linkUrlObj.pathname.slice(0, -1);
-                }
-                const normalizedLink = linkUrlObj.toString();
                 edgesToInsert.push({
                     from_page_id: page.id,
-                    to_url: normalizedLink,
+                    to_url: link,
                     owner_id: source.owner_id,
                 });
-                if (!discovered.has(normalizedLink)) {
-                    discovered.add(normalizedLink);
-                    newLinks.push(normalizedLink);
-                    if (priority === 0 && depth === 0) {
-                        directLinksFromStart.push(normalizedLink);
-                    }
-                    if (depth >= 2)
-                        continue;
-                    const linkPriority = priority === 0 ? 1 : priority + 1;
-                    const queueHasSameOrHigherPriority = queue.some((q) => q.priority <= linkPriority - 1);
-                    if (priority === 0 && depth === 0) {
-                        queue.push({ url: normalizedLink, depth: depth + 1, priority: linkPriority });
-                    }
-                    else if (!queueHasSameOrHigherPriority && visited.size + queue.length < maxPages) {
-                        queue.push({ url: normalizedLink, depth: depth + 1, priority: linkPriority });
-                    }
+                if (!discovered.has(link) && !visited.has(link)) {
+                    discovered.add(link);
+                    queue.push(link);
                 }
             }
-            console.log(`[crawl] page ${visited.size}/${maxPages} depth=${depth} links=${links.length} newToQueue=${newLinks.length} queue=${queue.length}`);
             if (edgesToInsert.length > 0) {
-                try {
-                    const batchSize = 50;
-                    for (let i = 0; i < edgesToInsert.length; i += batchSize) {
-                        const chunk = edgesToInsert.slice(i, i + batchSize);
-                        try {
-                            await supabase.from('page_edges').insert(chunk);
-                        }
-                        catch {
-                            // Log but don't block
-                        }
-                        if (i + batchSize < edgesToInsert.length) {
-                            await new Promise((resolve) => setTimeout(resolve, 10));
-                        }
+                const batchSize = 50;
+                for (let i = 0; i < edgesToInsert.length; i += batchSize) {
+                    const chunk = edgesToInsert.slice(i, i + batchSize);
+                    const { error: edgeErr } = await supabase
+                        .from('page_edges')
+                        .upsert(chunk, { onConflict: 'from_page_id,to_url', ignoreDuplicates: true });
+                    if (edgeErr) {
+                        console.error('crawl: edge insert failed', edgeErr.message);
                     }
-                }
-                catch (edgeError) {
-                    const err = edgeError;
-                    console.error(`[crawl] EDGE INSERT ERROR`, err?.message || edgeError);
+                    if (i + batchSize < edgesToInsert.length) {
+                        await new Promise((resolve) => setTimeout(resolve, 10));
+                    }
                 }
             }
             if (isDynamic && linksWithContext.length > 0 && edgesToInsert.length > 0) {
@@ -212,10 +162,7 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
                             ignoreDuplicates: true,
                         });
                         if (encError) {
-                            console.warn('[crawl] encoded_discovered insert error:', encError.message);
-                        }
-                        else {
-                            console.log(`[D/I] encoded_discovered inserted=${encodedToInsert.length}`);
+                            console.warn('crawl: encoded_discovered insert failed', encError.message);
                         }
                     }
                 }
@@ -234,11 +181,11 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
         catch (error) {
             if (error instanceof Error && error.message.includes('was deleted'))
                 throw error;
-            console.error(`❌ Error crawling ${url}:`, error);
+            console.error('crawl: error on page', url.slice(0, 50), error);
             visited.add(normalizedUrl);
         }
     }
-    console.log(`[D/I] Transitioning to indexing: discovered=${discovered.size} indexed=${visited.size} jobId=${job.id?.slice(0, 8)}`);
+    console.log('crawl: indexing', discovered.size, 'discovered,', visited.size, 'pages');
     const indexingUpdate = { status: 'indexing', updated_at: new Date().toISOString() };
     if (source.crawl_depth === 'dynamic') {
         const { data: pages } = await supabase.from('pages').select('id').eq('source_id', source.id);
@@ -261,10 +208,10 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
     }
     await supabase.from('crawl_jobs').update(indexingUpdate).eq('id', job.id);
     try {
-        await indexConversationForRag(conversationId, job.id);
+        await indexSourceForRag(source.id, job.id, conversationId);
     }
-    catch (_indexErr) {
-        console.warn('[crawl] RAG indexing failed:', _indexErr);
+    catch (err) {
+        console.warn('crawl: RAG indexing failed', err);
     }
     await supabase
         .from('crawl_jobs')
@@ -277,26 +224,17 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
         updated_at: new Date().toISOString(),
     })
         .eq('id', job.id);
-    const exitReason = queue.length === 0 ? 'queue empty' : `visited >= maxPages (${visited.size} >= ${maxPages})`;
-    console.log(`[crawl] END source=${sourceShort} visited=${visited.size} exit=${exitReason} iterations=${loopIterations}`);
-    console.log(`[D/I] FINAL discovered=${discovered.size} indexed=${visited.size} (this is what job will have after final update)`);
-    if (loopIterations === 0) {
-        console.error(`❌ CRITICAL: Crawl loop never ran! Loop iterations = 0`);
-        console.error(`❌ Queue length: ${queue.length}, visited.size: ${visited.size}, maxPages: ${maxPages}`);
-    }
-    if (visited.size === 0 && loopIterations > 0) {
-        console.error(`❌ CRITICAL: Loop ran ${loopIterations} times but visited.size is still 0!`);
-    }
+    console.log('crawl: done', sourceShort, visited.size, 'pages', queue.length === 0 ? '(queue empty)' : '(hit max)');
     const { data: insertedPages, error: verifyError } = await supabase
         .from('pages')
         .select('id, url')
         .eq('source_id', source.id)
         .limit(5);
     if (verifyError) {
-        console.error(`❌ Error verifying pages:`, verifyError);
+        console.error('crawl: verify failed', verifyError);
     }
-    else if (!insertedPages || insertedPages.length === 0) {
-        console.error(`❌ CRITICAL: No pages found in DB even though visited.size=${visited.size}!`);
+    else if (visited.size > 0 && (!insertedPages || insertedPages.length === 0)) {
+        console.error('crawl: no pages in DB after crawl');
     }
 }
 //# sourceMappingURL=crawlSource.js.map

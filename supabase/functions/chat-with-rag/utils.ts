@@ -1,3 +1,45 @@
+/**
+ * Fair allocation: take up to floor(cap/numQueries) best items per query so every query
+ * is represented, then fill remaining slots with next-best by distance (lower is better).
+ * Single source of truth for both chunk retrieval and suggested-page expansion.
+ */
+export function capWithFairAllocation<T>(
+  map: Map<string, T>,
+  groups: T[][],
+  cap: number,
+  getKey: (t: T) => string,
+  getDistance: (t: T) => number,
+): T[] {
+  const numQueries = groups.length;
+  if (numQueries === 0) return [];
+  const perQueryQuota = Math.max(1, Math.floor(cap / numQueries));
+  const selectedKeys = new Set<string>();
+
+  for (let i = 0; i < groups.length; i++) {
+    const list = groups[i].slice().sort((a, b) => getDistance(a) - getDistance(b));
+    let taken = 0;
+    for (const item of list) {
+      if (taken >= perQueryQuota) break;
+      const key = getKey(item);
+      if (selectedKeys.has(key)) continue;
+      selectedKeys.add(key);
+      taken++;
+    }
+  }
+
+  const selected = Array.from(selectedKeys)
+    .map((key) => map.get(key)!)
+    .filter(Boolean)
+    .sort((a, b) => getDistance(a) - getDistance(b));
+
+  if (selected.length >= cap) return selected.slice(0, cap);
+  const remaining = Array.from(map.values())
+    .filter((item) => !selectedKeys.has(getKey(item)))
+    .sort((a, b) => getDistance(a) - getDistance(b));
+  const fill = remaining.slice(0, cap - selected.length);
+  return [...selected, ...fill].sort((a, b) => getDistance(a) - getDistance(b)).slice(0, cap);
+}
+
 export function indicatesCantAnswer(content: string): boolean {
   const lower = content.toLowerCase();
   const patterns = [

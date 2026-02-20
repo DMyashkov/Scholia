@@ -69,6 +69,8 @@ export interface ExtractResult {
   extractionGaps?: string[];
   /** When next_action is answer: verbatim passage per chunk id (model-cited snippet, like pre–Unfold v2). */
   cited_snippets?: Record<string, string>;
+  /** When next_action is expand_corpus: 1–10 to pick which of the precomputed candidate pages to suggest (optional). */
+  suggested_page_index?: number;
 }
 
 export type ChunkRow = {
@@ -94,6 +96,8 @@ export interface RagContextReady {
   ownerId: string;
   userMessage: string;
   dynamicMode: boolean;
+  /** How many candidate suggested pages to show the model (5 or 10, from user_settings). */
+  suggestedPageCandidates: number;
   sourceIds: string[];
   pages: PageRow[];
   pageIds: string[];

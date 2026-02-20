@@ -1,5 +1,5 @@
-import type { CrawlJob, Page, Source } from '../types';
-export declare function crawlPage(url: string, source: Source, job: CrawlJob, conversationId: string): Promise<{
+import type { Page, Source } from '../types';
+export declare function crawlPage(url: string, source: Source, conversationId: string): Promise<{
     page: Page;
     html: string;
 } | null>;

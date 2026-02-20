@@ -1,3 +1,8 @@
+/** Index one source's pages for RAG (used after a source crawl). Optionally run discovered-link embedding for the conversation. */
+export declare function indexSourceForRag(sourceId: string, crawlJobId?: string, conversationId?: string): Promise<{
+    chunksCreated: number;
+}>;
+/** Index all sources in a conversation (e.g. full re-index). Prefer indexSourceForRag after a single-source crawl. */
 export declare function indexConversationForRag(conversationId: string, crawlJobId?: string): Promise<{
     chunksCreated: number;
 }>;

@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { conversationsApi } from '@/lib/db/conversations';
+import type { Conversation } from '@/lib/db/types';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { optimisticUpdateMulti } from '@/hooks/optimisticMutation';
 
 export const useConversations = () => {
   const { user } = useAuthContext();
@@ -40,14 +42,45 @@ export const useCreateConversation = () => {
   });
 };
 
+type UpdateConversationVariables = {
+  id: string;
+  title?: string;
+  dynamic_mode?: boolean;
+};
+
 export const useUpdateConversation = () => {
   const queryClient = useQueryClient();
   const { user } = useAuthContext();
   const userId = user?.id || null;
 
+  const optimistic = optimisticUpdateMulti<UpdateConversationVariables>({
+    updates: [
+      {
+        getQueryKey: () => ['conversations', userId],
+        merge: (prev, v) =>
+          (prev as Conversation[] | undefined)?.map((c) =>
+            c.id === v.id ? { ...c, dynamic_mode: v.dynamic_mode! } : c
+          ) ?? prev ?? [],
+      },
+      {
+        getQueryKey: (v) => ['conversation', v.id],
+        merge: (prev, v) =>
+          prev ? { ...(prev as Conversation), dynamic_mode: v.dynamic_mode! } : prev,
+      },
+    ],
+  })(queryClient);
+
   return useMutation({
-    mutationFn: ({ id, title, dynamic_mode }: { id: string; title?: string; dynamic_mode?: boolean }) =>
-      conversationsApi.update(id, { ...(title !== undefined && { title }), ...(dynamic_mode !== undefined && { dynamic_mode }) }),
+    mutationFn: ({ id, title, dynamic_mode }: UpdateConversationVariables) =>
+      conversationsApi.update(id, {
+        ...(title !== undefined && { title }),
+        ...(dynamic_mode !== undefined && { dynamic_mode }),
+      }),
+    onMutate: async (variables) => {
+      if (variables.dynamic_mode === undefined) return undefined;
+      return optimistic.onMutate(variables);
+    },
+    onError: optimistic.onError,
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['conversations', userId] });
       queryClient.invalidateQueries({ queryKey: ['conversation', variables.id] });

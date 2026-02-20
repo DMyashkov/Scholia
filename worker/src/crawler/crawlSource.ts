@@ -1,13 +1,14 @@
 import fetch from 'node-fetch';
 import RobotsParser from 'robots-parser';
 import { supabase } from '../db';
-import { indexConversationForRag } from '../indexer';
+import { indexSourceForRag } from '../indexer';
 import type { CrawlJob, Source } from '../types';
 import { MAX_LINKS_PER_PAGE_DYNAMIC, MAX_PAGES } from './constants';
 import { crawlPage } from './crawlPage';
 import { extractLinks, extractLinksWithContext } from './links';
 import { updateJobStatus } from './job';
 import { normalizeUrlForCrawl } from './urlUtils';
+import { updateCrawlJob } from './job';
 
 export async function crawlSource(job: CrawlJob, source: Source): Promise<void> {
   let conversationId = source.conversation_id;
@@ -236,10 +237,10 @@ async function crawlSourceWithConversationId(
       }
     }
   }
-  await supabase.from('crawl_jobs').update(indexingUpdate).eq('id', job.id);
+  await updateCrawlJob(job.id, indexingUpdate);
 
   try {
-    await indexConversationForRag(conversationId, job.id);
+    await indexSourceForRag(source.id, job.id, conversationId);
   } catch (err) {
     console.warn('crawl: RAG indexing failed', err);
   }

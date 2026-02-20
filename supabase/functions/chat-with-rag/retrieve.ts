@@ -3,6 +3,7 @@ import type { ChunkRow } from './types.ts';
 import { embedBatch } from './embed.ts';
 import { MATCH_CHUNKS_PER_QUERY } from './config.ts';
 import { MATCH_CHUNKS_MERGED_CAP } from './config.ts';
+import { capWithFairAllocation } from './utils.ts';
 
 export interface RetrieveResult {
   chunks: ChunkRow[];
@@ -12,46 +13,6 @@ export interface RetrieveResult {
 
 function distanceOf(c: ChunkRow): number {
   return (c as { distance?: number }).distance ?? 1;
-}
-
-/**
- * Fair allocation: take up to floor(cap/numQueries) best chunks per query so every query
- * is represented when we hit the cap, then fill remaining slots with next-best by distance.
- */
-function capWithFairAllocation(
-  chunkMap: Map<string, ChunkRow>,
-  chunksByQueryIndex: ChunkRow[][],
-  cap: number,
-): ChunkRow[] {
-  const numQueries = chunksByQueryIndex.length;
-  if (numQueries === 0) return [];
-  const perQueryQuota = Math.max(1, Math.floor(cap / numQueries));
-  const selectedIds = new Set<string>();
-
-  for (let i = 0; i < chunksByQueryIndex.length; i++) {
-    const list = chunksByQueryIndex[i]
-      .slice()
-      .sort((a, b) => distanceOf(a) - distanceOf(b));
-    let taken = 0;
-    for (const c of list) {
-      if (taken >= perQueryQuota) break;
-      if (selectedIds.has(c.id)) continue;
-      selectedIds.add(c.id);
-      taken++;
-    }
-  }
-
-  const selected = Array.from(selectedIds)
-    .map((id) => chunkMap.get(id)!)
-    .filter(Boolean)
-    .sort((a, b) => distanceOf(a) - distanceOf(b));
-
-  if (selected.length >= cap) return selected.slice(0, cap);
-  const remaining = Array.from(chunkMap.values())
-    .filter((c) => !selectedIds.has(c.id))
-    .sort((a, b) => distanceOf(a) - distanceOf(b));
-  const fill = remaining.slice(0, cap - selected.length);
-  return [...selected, ...fill].sort((a, b) => distanceOf(a) - distanceOf(b));
 }
 
 export async function doRetrieve(
@@ -86,6 +47,8 @@ export async function doRetrieve(
     chunkMap,
     chunksByQueryIndex,
     MATCH_CHUNKS_MERGED_CAP,
+    (c) => c.id,
+    distanceOf,
   );
   return { chunks, chunksPerSubquery };
 }

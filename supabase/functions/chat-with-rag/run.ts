@@ -24,7 +24,7 @@ import type { SlotRow, EvidenceChunk } from './loop.ts';
 import { doRetrieve } from './retrieve.ts';
 import { slotCompleteness, overallCompleteness } from './completeness.ts';
 import type { SlotForCompleteness } from './completeness.ts';
-import { doExpandCorpus, type SuggestedPage } from './expand.ts';
+import { doExpandCorpus, getTopSuggestedPages, type SuggestedPage } from './expand.ts';
 import { getLastMessages } from './chat.ts';
 
 export type Emit = (obj: unknown) => Promise<void>;
@@ -82,6 +82,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     ownerId,
     userMessage: userMsg,
     dynamicMode,
+    suggestedPageCandidates,
     sourceIds,
     pages,
     pageIds,
@@ -434,7 +435,11 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
     const currentSlotState = await getCurrentSlotItemsState();
     const currentSlotStateJson = Object.keys(currentSlotState).length > 0 ? JSON.stringify(currentSlotState, null, 2) : '';
-    log('extract-call', { iteration, chunkCount: evidenceChunksForExtract.length });
+    const topSuggestedPages: SuggestedPage[] | null =
+      dynamicMode && sourceIds.length > 0
+        ? await getTopSuggestedPages(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun.slice(0, 3), suggestedPageCandidates)
+        : null;
+    log('extract-call', { iteration, chunkCount: evidenceChunksForExtract.length, topSuggestedCount: topSuggestedPages?.length ?? 0 });
     const snippetPreviews = evidenceChunksForExtract.map((q) => (q.snippet ?? '').slice(0, 120));
     log('extract-evidence-preview', { iteration, snippetPreviews });
     const extractResult = await callExtractAndDecide(
@@ -444,6 +449,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       currentSlotStateJson,
       userMsg,
       dynamicMode,
+      topSuggestedPages,
     );
     lastExtractResult = extractResult;
     if (extractResult.extractionGaps?.length) {
@@ -662,7 +668,13 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       }
       let suggestedPage: SuggestedPage | null = null;
       if (dynamicMode && sourceIds.length > 0) {
-        suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun.slice(0, 3));
+        if (topSuggestedPages && topSuggestedPages.length > 0) {
+          const idx = extractResult.suggested_page_index;
+          const oneBased = typeof idx === 'number' && idx >= 1 && idx <= topSuggestedPages.length ? idx : 1;
+          suggestedPage = topSuggestedPages[oneBased - 1];
+        } else {
+          suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun.slice(0, 3));
+        }
         if (suggestedPage) log('expand-suggested', { url: suggestedPage.url });
       }
       thoughtProcess.expandCorpusReason = extractResult.why;

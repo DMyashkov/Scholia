@@ -20,24 +20,20 @@ export async function updateJobStatus(jobId, status, errorMessage = null, starte
         .update(updates)
         .eq('id', jobId);
 }
-/**
- * Atomically claim a queued job.
- * Returns null if no job available or if claim failed.
- */
+/** Single-worker job claim: reset stale running jobs (e.g. after restart), then take the next queued job. */
 export async function claimJob() {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const staleThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const { data: stuckJobs } = await supabase
         .from('crawl_jobs')
-        .select('*')
+        .select('id')
         .eq('status', 'running')
-        .lt('last_activity_at', fiveMinutesAgo)
+        .lt('last_activity_at', staleThreshold)
         .limit(10);
-    if (stuckJobs && stuckJobs.length > 0) {
-        const stuckIds = stuckJobs.map((j) => j.id);
+    if (stuckJobs?.length) {
         await supabase
             .from('crawl_jobs')
             .update({ status: 'queued', updated_at: new Date().toISOString() })
-            .in('id', stuckIds);
+            .in('id', stuckJobs.map((j) => j.id));
     }
     const { data: jobs, error: fetchError } = await supabase
         .from('crawl_jobs')
@@ -46,54 +42,27 @@ export async function claimJob() {
         .order('created_at', { ascending: true })
         .limit(1);
     if (fetchError) {
-        console.error(`❌ Error fetching queued jobs:`, fetchError);
+        console.error('crawl: failed to fetch queued jobs', fetchError);
         return null;
     }
-    if (!jobs || jobs.length === 0) {
+    if (!jobs?.length) {
         _noQueuedLogCounter++;
-        const shouldLog = _noQueuedLogCounter <= 2 || _noQueuedLogCounter % 12 === 0;
-        if (shouldLog) {
-            const { data: allJobs, error: allError } = await supabase
-                .from('crawl_jobs')
-                .select('id, status, source_id, created_at')
-                .order('created_at', { ascending: false })
-                .limit(10);
-            if (allError) {
-                console.log(`[worker] no queued jobs, fetch error (check DB connection):`, allError.message);
-            }
-            else if (!allJobs || allJobs.length === 0) {
-                console.log(`[worker] no queued jobs, DB has 0 crawl_jobs (add a source to create one)`);
-            }
-            else {
-                const summary = allJobs.map((j) => ({ id: j.id?.slice(0, 8), status: j.status, created: j.created_at?.slice(11, 19) }));
-                console.log(`[worker] no queued jobs but ${allJobs.length} recent:`, summary);
-                const queued = allJobs.filter((j) => j.status === 'queued');
-                if (queued.length > 0) {
-                    console.log(`[worker] BUG: ${queued.length} queued in recent but claimJob missed them!`, queued.map((j) => j.id));
-                }
-            }
+        if (_noQueuedLogCounter <= 2 || _noQueuedLogCounter % 12 === 0) {
+            console.log('crawl: no jobs queued');
         }
         return null;
     }
     _noQueuedLogCounter = 0;
-    const jobToClaim = jobs[0];
+    const job = jobs[0];
     const now = new Date().toISOString();
     const { data: updated, error: updateError } = await supabase
         .from('crawl_jobs')
-        .update({
-        status: 'running',
-        last_activity_at: now,
-        updated_at: now,
-    })
-        .eq('id', jobToClaim.id)
-        .eq('status', 'queued')
+        .update({ status: 'running', last_activity_at: now, updated_at: now })
+        .eq('id', job.id)
         .select()
         .single();
     if (updateError || !updated) {
-        console.log('[worker] claim failed (race or no longer queued)', {
-            jobId: jobToClaim.id?.slice(0, 8),
-            updateError: updateError?.message,
-        });
+        console.error('crawl: claim failed', job.id?.slice(0, 8), updateError);
         return null;
     }
     return updated;

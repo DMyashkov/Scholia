@@ -30,6 +30,13 @@ export async function loadRagContext(
   }
   const ownerId = (conv as { owner_id?: string }).owner_id ?? userId;
   const dynamicMode = (conv as { dynamic_mode?: boolean }).dynamic_mode !== false;
+  const { data: userSettings } = await supabase
+    .from('user_settings')
+    .select('suggested_page_candidates')
+    .eq('owner_id', ownerId)
+    .single();
+  const suggestedPageCandidates = (userSettings as { suggested_page_candidates?: number } | null)?.suggested_page_candidates;
+  const suggestedPageCandidatesNum = suggestedPageCandidates === 10 ? 10 : 5;
 
   const { data: sources } = await supabase
     .from('sources')
@@ -153,6 +160,7 @@ export async function loadRagContext(
     ownerId,
     userMessage: userMessage.trim(),
     dynamicMode,
+    suggestedPageCandidates: suggestedPageCandidatesNum,
     sourceIds,
     pages,
     pageIds,

@@ -7,37 +7,27 @@ import fetch from 'node-fetch';
 import { supabase } from './db';
 import { indexSinglePageForRag, embedDiscoveredLinksForPage } from './indexer';
 import { extractLinksWithContext } from './crawler';
+import {
+  CRAWLER_USER_AGENT,
+  DEFAULT_PAGE_TITLE,
+  MAIN_CONTENT_SELECTOR,
+  MAX_PAGE_CONTENT_LENGTH,
+} from './crawler/constants';
+import { normalizeUrlForCrawl } from './crawler/urlUtils';
+import { updateCrawlJob } from './crawler/job';
 import type { Source } from './types';
 
-function normalizeUrl(input: string): string {
-  let s = (input || '').trim();
-  const hashIdx = s.indexOf('#');
-  if (hashIdx >= 0) s = s.slice(0, hashIdx);
-  const qIdx = s.indexOf('?');
-  if (qIdx >= 0) s = s.slice(0, qIdx);
-  s = s.trim();
-  s = s.replace(/^(https?:\/\/)+/i, '');
-  s = 'https://' + s;
-  try {
-    const u = new URL(s);
-    u.hash = '';
-    u.search = '';
-    if (u.pathname.endsWith('/') && u.pathname !== '/') u.pathname = u.pathname.slice(0, -1);
-    return u.toString();
-  } catch {
-    return s;
-  }
-}
+/** Max outbound links / encoded_discovered rows to create per added page. */
+const MAX_LINKS_PER_ADD_PAGE = 500;
 
-async function updateCrawlJob(
-  jobId: string,
-  updates: { status?: string; error_message?: string | null }
-) {
-  await supabase
-    .from('crawl_jobs')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', jobId);
-}
+/** Max snippet length stored in encoded_discovered. */
+const ENCODED_SNIPPET_MAX_LENGTH = 500;
+
+/** Max existing pages to link from when adding a new page (seed edges). */
+const SEED_EDGES_LIMIT = 10;
+
+/** Fallback snippet when link has no context. */
+const DEFAULT_SNIPPET_FALLBACK = 'Link from page';
 
 export async function processAddPageJob(job: {
   id: string;
@@ -50,7 +40,7 @@ export async function processAddPageJob(job: {
     await updateCrawlJob(jobId, { status: 'failed', error_message: 'No URL in explicit_crawl_urls' });
     return;
   }
-  const normalizedUrl = normalizeUrl(url);
+  const normalizedUrl = normalizeUrlForCrawl(url);
 
   console.log('[add-page] process start', { jobId: jobId.slice(0, 8), url: normalizedUrl.slice(0, 50) });
 
@@ -72,7 +62,7 @@ export async function processAddPageJob(job: {
 
     // Fetch page
     const res = await fetch(normalizedUrl, {
-      headers: { 'User-Agent': 'ScholiaCrawler/1.0' },
+      headers: { 'User-Agent': CRAWLER_USER_AGENT },
     });
     if (!res.ok) {
       await updateCrawlJob(jobId, {
@@ -84,14 +74,14 @@ export async function processAddPageJob(job: {
     const html = await res.text();
 
     const $ = cheerio.load(html);
-    const title = $('title').first().text().trim() || $('h1').first().text().trim() || 'Untitled';
+    const title = $('title').first().text().trim() || $('h1').first().text().trim() || DEFAULT_PAGE_TITLE;
     const content =
-      $('main, article, .content, #content, #bodyContent, .mw-parser-output')
+      $(MAIN_CONTENT_SELECTOR)
         .first()
         .text()
         .trim()
-        .substring(0, 50000) ||
-      $('body').text().trim().substring(0, 50000);
+        .substring(0, MAX_PAGE_CONTENT_LENGTH) ||
+      $('body').text().trim().substring(0, MAX_PAGE_CONTENT_LENGTH);
 
     const urlObj = new URL(normalizedUrl);
     const path = urlObj.pathname + urlObj.search;
@@ -135,7 +125,7 @@ export async function processAddPageJob(job: {
       .select('id, url')
       .eq('source_id', sourceId)
       .neq('id', newPage.id)
-      .limit(10);
+      .limit(SEED_EDGES_LIMIT);
 
     if (seedPages?.length) {
       const edges = seedPages.map((p) => ({
@@ -170,7 +160,7 @@ export async function processAddPageJob(job: {
     console.log('[add-page] newLinks after dedup', { newLinksCount: newLinks.length, existingCount: existingUrls.size });
 
     if (newLinks.length > 0) {
-      const edgeRows = newLinks.slice(0, 500).map((l) => ({
+      const edgeRows = newLinks.slice(0, MAX_LINKS_PER_ADD_PAGE).map((l) => ({
         from_page_id: newPage.id,
         to_url: l.url,
         owner_id: ownerId,
@@ -184,15 +174,15 @@ export async function processAddPageJob(job: {
         .from('page_edges')
         .select('id, to_url')
         .eq('from_page_id', newPage.id)
-        .in('to_url', newLinks.slice(0, 500).map((l) => l.url));
+        .in('to_url', newLinks.slice(0, MAX_LINKS_PER_ADD_PAGE).map((l) => l.url));
       const urlToEdgeId = new Map((edgeIds ?? []).map((r: { id: string; to_url: string }) => [r.to_url, r.id]));
       const encodedRows = newLinks
-        .slice(0, 500)
+        .slice(0, MAX_LINKS_PER_ADD_PAGE)
         .filter((l) => urlToEdgeId.has(l.url))
         .map((l) => ({
           page_edge_id: urlToEdgeId.get(l.url)!,
           anchor_text: l.anchorText || null,
-          snippet: (l.snippet || l.anchorText || 'Link from page').substring(0, 500),
+          snippet: (l.snippet || l.anchorText || DEFAULT_SNIPPET_FALLBACK).substring(0, ENCODED_SNIPPET_MAX_LENGTH),
           owner_id: ownerId,
         }));
       if (encodedRows.length > 0) {

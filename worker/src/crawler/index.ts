@@ -4,7 +4,7 @@ import { crawlSource } from './crawlSource';
 import { updateJobStatus } from './job';
 
 export { claimJob } from './job';
-export { extractLinksWithContext } from './links';
+export { extractLinks, extractLinksWithContext } from './links';
 
 export async function processCrawlJob(jobId: string): Promise<void> {
   try {

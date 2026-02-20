@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
+import { CONVERSATION_PAGE_EDGES, CONVERSATION_PAGES, PAGES } from '@/lib/queryKeys';
 import { pagesApi, pageEdgesApi } from '@/lib/db/pages';
 
 export const usePages = (sourceId: string | null) => {
   return useQuery({
-    queryKey: ['pages', sourceId],
+    queryKey: [PAGES, sourceId],
     queryFn: () => {
       if (!sourceId) throw new Error('Source ID required');
       return pagesApi.listBySource(sourceId);
@@ -22,7 +23,7 @@ export const useConversationPages = (
   options?: UseConversationPagesOptions
 ) => {
   return useQuery({
-    queryKey: ['conversation-pages', conversationId],
+    queryKey: [CONVERSATION_PAGES, conversationId],
     queryFn: () => {
       if (!conversationId) throw new Error('Conversation ID required');
       return pagesApi.listByConversation(conversationId);
@@ -53,7 +54,7 @@ export const useConversationPageEdges = (
   options?: UseConversationPageEdgesOptions
 ) => {
   return useQuery({
-    queryKey: ['conversation-page-edges', conversationId],
+    queryKey: [CONVERSATION_PAGE_EDGES, conversationId],
     queryFn: () => {
       if (!conversationId) throw new Error('Conversation ID required');
       return pageEdgesApi.listByConversation(conversationId);

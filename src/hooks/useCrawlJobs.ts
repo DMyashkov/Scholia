@@ -1,40 +1,15 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { CRAWL_JOB_SINGLE, CRAWL_JOBS_LIST } from '@/lib/queryKeys';
 import { crawlJobsApi } from '@/lib/db/crawl-jobs';
-import { supabase } from '@/lib/supabase';
-import { useEffect } from 'react';
-import type { CrawlJob } from '@/lib/db/types';
 
+/**
+ * Current crawl job for a source (in-progress or latest main). Realtime invalidation
+ * is handled by useRealtimeCrawlUpdates when viewing a conversation (invalidates
+ * crawl-job and crawl-jobs on crawl_jobs changes).
+ */
 export const useCrawlJob = (sourceId: string | null, conversationId?: string | null) => {
-  const queryClient = useQueryClient();
-
-  // Set up realtime subscription
-  useEffect(() => {
-    if (!sourceId) return;
-
-    const channel = supabase
-      .channel(`crawl-jobs:${sourceId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'crawl_jobs',
-          filter: `source_id=eq.${sourceId}`,
-        },
-        (payload) => {
-          queryClient.setQueryData(['crawl-job', sourceId, conversationId ?? ''], payload.new as CrawlJob);
-          queryClient.invalidateQueries({ queryKey: ['crawl-jobs', sourceId] });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [sourceId, conversationId, queryClient]);
-
   return useQuery({
-    queryKey: ['crawl-job', sourceId, conversationId ?? ''],
+    queryKey: [CRAWL_JOB_SINGLE, sourceId, conversationId ?? ''],
     queryFn: async () => {
       if (!sourceId) throw new Error('Source ID required');
       const jobs = await crawlJobsApi.listBySource(sourceId);
@@ -53,7 +28,7 @@ export const useCrawlJob = (sourceId: string | null, conversationId?: string | n
 
 export const useCrawlJobs = (sourceId: string | null) => {
   return useQuery({
-    queryKey: ['crawl-jobs', sourceId],
+    queryKey: [CRAWL_JOBS_LIST, sourceId],
     queryFn: () => {
       if (!sourceId) throw new Error('Source ID required');
       return crawlJobsApi.listBySource(sourceId);

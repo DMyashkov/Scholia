@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { CONVERSATION_SOURCES, CRAWL_JOBS_LIST } from '@/lib/queryKeys';
 import { conversationSourcesApi } from '@/lib/db/conversation-sources';
 import { sourcesApi } from '@/lib/db/sources';
 import type { SourceInsert } from '@/lib/db/types';
@@ -16,7 +17,7 @@ export type ExistingConversationInfo = {
 
 export const useConversationSources = (conversationId: string | null) => {
   return useQuery({
-    queryKey: ['conversation-sources', conversationId],
+    queryKey: [CONVERSATION_SOURCES, conversationId],
     queryFn: () => {
       if (!conversationId) throw new Error('Conversation ID required');
       return conversationSourcesApi.list(conversationId);
@@ -72,7 +73,7 @@ export const useAddSourceToConversation = () => {
     },
     onSuccess: (newSource, variables) => {
       queryClient.setQueryData(
-        ['conversation-sources', variables.conversationId],
+        [CONVERSATION_SOURCES, variables.conversationId],
         (prev: Array<{ conversation_id: string; source_id: string; created_at: string; source: typeof newSource }> | undefined) => {
           const list = prev ?? [];
           if (list.some((cs) => cs.source_id === newSource.id)) return list;
@@ -87,8 +88,8 @@ export const useAddSourceToConversation = () => {
           ];
         }
       );
-      queryClient.invalidateQueries({ queryKey: ['conversation-sources', variables.conversationId] });
-      queryClient.invalidateQueries({ queryKey: ['crawl-jobs'] });
+      queryClient.invalidateQueries({ queryKey: [CONVERSATION_SOURCES, variables.conversationId] });
+      queryClient.invalidateQueries({ queryKey: [CRAWL_JOBS_LIST] });
     },
   });
 };
@@ -100,7 +101,7 @@ export const useRemoveSourceFromConversation = () => {
     mutationFn: ({ conversationId, sourceId }: { conversationId: string; sourceId: string }) =>
       conversationSourcesApi.remove(conversationId, sourceId),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['conversation-sources', variables.conversationId] });
+      queryClient.invalidateQueries({ queryKey: [CONVERSATION_SOURCES, variables.conversationId] });
     },
   });
 };

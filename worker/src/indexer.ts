@@ -342,7 +342,6 @@ export async function embedDiscoveredLinksForPage(
             .from('encoded_discovered')
             .update({ snippet: text })
             .eq('id', item.id);
-          console.log('[indexer] dive', `[${updated + 1}/${toEmbed.length}]`, url.slice(0, 50) + '...', '→', lead.slice(0, 60) + (lead.length > 60 ? '...' : ''));
         }
       }
       texts.push(text || DEFAULT_LINK_SNIPPET);

@@ -12,6 +12,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useQuery } from '@tanstack/react-query';
+import { CRAWL_JOBS_MAIN_FOR_SOURCES } from '@/lib/queryKeys';
 import { crawlJobsApi } from '@/lib/db/crawl-jobs';
 import type { CrawlJob } from '@/lib/db/types';
 import { useConversationPages } from '@/hooks/usePages';
@@ -203,7 +204,7 @@ export const SourcesBar = ({
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds.join(',')]);
   const { data: crawlJobsData = [] } = useQuery({
-    queryKey: ['crawl-jobs-main-for-sources', sourceIdsKey, conversationId ?? ''],
+    queryKey: [CRAWL_JOBS_MAIN_FOR_SOURCES, sourceIdsKey, conversationId ?? ''],
     queryFn: async () => {
       if (!conversationId || sourceIds.length === 0) return [];
       return crawlJobsApi.listLatestMainBySources(sourceIds, conversationId);

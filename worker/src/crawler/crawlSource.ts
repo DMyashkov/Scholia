@@ -132,8 +132,10 @@ async function crawlSourceWithConversationId(
       }
 
       const isDynamic = source.crawl_depth === 'dynamic';
+      const isSurface = (source as { suggestion_mode?: string }).suggestion_mode !== 'dive';
       const links = extractLinks(html, normalizedUrl, source);
-      const linksWithContext = isDynamic ? extractLinksWithContext(html, normalizedUrl, source) : [];
+      /** In-page context snippet is only built for surface mode; dive uses target-page lead at embed time. */
+      const linksWithContext = isDynamic && isSurface ? extractLinksWithContext(html, normalizedUrl, source) : [];
 
       const edgesToInsert: Array<{ from_page_id: string; to_url: string; owner_id: string }> = [];
       const linksToProcess = isDynamic ? links.slice(0, MAX_LINKS_PER_PAGE_DYNAMIC) : links;
@@ -168,24 +170,34 @@ async function crawlSourceWithConversationId(
         }
       }
 
-      if (isDynamic && linksWithContext.length > 0 && edgesToInsert.length > 0) {
-        const toEncode = linksWithContext.filter((l) => l.snippet.length > 0).slice(0, 500);
-        if (toEncode.length > 0) {
-          const urls = toEncode.map((l) => l.url);
-          const { data: edgeRows } = await supabase
-            .from('page_edges')
-            .select('id, to_url')
-            .eq('from_page_id', page.id)
-            .in('to_url', urls);
-          const urlToEdgeId = new Map((edgeRows ?? []).map((r: { id: string; to_url: string }) => [r.to_url, r.id]));
-          const encodedToInsert = toEncode
-            .filter((l) => urlToEdgeId.has(l.url))
-            .map((l) => ({
-              page_edge_id: urlToEdgeId.get(l.url)!,
-              anchor_text: l.anchorText || null,
-              snippet: l.snippet.substring(0, 500),
+      if (isDynamic && edgesToInsert.length > 0) {
+        const urlsToEncode = edgesToInsert.slice(0, 500).map((e) => e.to_url);
+        const { data: edgeRows } = await supabase
+          .from('page_edges')
+          .select('id, to_url')
+          .eq('from_page_id', page.id)
+          .in('to_url', urlsToEncode);
+        const urlToEdgeId = new Map((edgeRows ?? []).map((r: { id: string; to_url: string }) => [r.to_url, r.id]));
+        if (urlToEdgeId.size > 0) {
+          const encodedToInsert = Array.from(urlToEdgeId.entries()).map(([toUrl, edgeId]) => {
+            if (isSurface && linksWithContext.length > 0) {
+              const withContext = linksWithContext.find((l) => l.url === toUrl);
+              if (withContext && withContext.snippet.length > 0) {
+                return {
+                  page_edge_id: edgeId,
+                  anchor_text: withContext.anchorText || null,
+                  snippet: withContext.snippet.substring(0, 500),
+                  owner_id: source.owner_id,
+                };
+              }
+            }
+            return {
+              page_edge_id: edgeId,
+              anchor_text: null,
+              snippet: 'Link from page',
               owner_id: source.owner_id,
-            }));
+            };
+          });
           if (encodedToInsert.length > 0) {
             const { error: encError } = await supabase.from('encoded_discovered').upsert(encodedToInsert, {
               onConflict: 'page_edge_id',

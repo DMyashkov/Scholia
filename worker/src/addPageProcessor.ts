@@ -6,7 +6,7 @@ import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
 import { supabase } from './db';
 import { indexSinglePageForRag, embedDiscoveredLinksForPage } from './indexer';
-import { extractLinksWithContext } from './crawler';
+import { extractLinks, extractLinksWithContext } from './crawler';
 import {
   CRAWLER_USER_AGENT,
   DEFAULT_PAGE_TITLE,
@@ -89,7 +89,7 @@ export async function processAddPageJob(job: {
     // Get source
     const { data: source, error: srcErr } = await supabase
       .from('sources')
-      .select('owner_id, same_domain_only, conversation_id')
+      .select('owner_id, same_domain_only, conversation_id, suggestion_mode')
       .eq('id', sourceId)
       .single();
 
@@ -142,12 +142,16 @@ export async function processAddPageJob(job: {
     // Insert page_edges for new page's outbound links, then encoded_discovered
     const sourceForExtract = {
       same_domain_only: source.same_domain_only ?? true,
+      suggestion_mode: source.suggestion_mode,
     } as Source;
-    const linksWithContext = extractLinksWithContext(html, normalizedUrl, sourceForExtract);
-    console.log('[add-page] extractLinksWithContext', {
-      linksCount: linksWithContext.length,
-      sameDomainOnly: sourceForExtract.same_domain_only,
-      sampleUrls: linksWithContext.slice(0, 3).map((l) => l.url.slice(0, 60)),
+    const isSurface = (source as { suggestion_mode?: string }).suggestion_mode !== 'dive';
+    /** In-page context snippet only for surface; dive uses target-page lead at embed time. */
+    const linksWithContext = isSurface ? extractLinksWithContext(html, normalizedUrl, sourceForExtract) : [];
+    const linksUrlOnly = extractLinks(html, normalizedUrl, sourceForExtract);
+    console.log('[add-page] links', {
+      withContext: linksWithContext.length,
+      urlOnly: linksUrlOnly.length,
+      isSurface,
     });
 
     const { data: sourcePageEdges } =
@@ -156,13 +160,16 @@ export async function processAddPageJob(job: {
         .select('to_url')
         .eq('from_page_id', newPage.id);
     const existingUrls = new Set((sourcePageEdges ?? []).map((r: { to_url: string }) => r.to_url));
-    const newLinks = linksWithContext.filter((l) => !existingUrls.has(l.url));
-    console.log('[add-page] newLinks after dedup', { newLinksCount: newLinks.length, existingCount: existingUrls.size });
+    const newLinkUrls = isSurface
+      ? linksWithContext.filter((l) => !existingUrls.has(l.url)).map((l) => l.url)
+      : linksUrlOnly.filter((url) => !existingUrls.has(url));
+    const newLinksWithContext = linksWithContext.filter((l) => !existingUrls.has(l.url));
+    console.log('[add-page] newLinks after dedup', { newLinksCount: newLinkUrls.length, existingCount: existingUrls.size });
 
-    if (newLinks.length > 0) {
-      const edgeRows = newLinks.slice(0, MAX_LINKS_PER_ADD_PAGE).map((l) => ({
+    if (newLinkUrls.length > 0) {
+      const edgeRows = newLinkUrls.slice(0, MAX_LINKS_PER_ADD_PAGE).map((url) => ({
         from_page_id: newPage.id,
-        to_url: l.url,
+        to_url: url,
         owner_id: ownerId,
       }));
       const { error: edgeErr } = await supabase.from('page_edges').upsert(edgeRows, {
@@ -174,17 +181,21 @@ export async function processAddPageJob(job: {
         .from('page_edges')
         .select('id, to_url')
         .eq('from_page_id', newPage.id)
-        .in('to_url', newLinks.slice(0, MAX_LINKS_PER_ADD_PAGE).map((l) => l.url));
+        .in('to_url', newLinkUrls.slice(0, MAX_LINKS_PER_ADD_PAGE));
       const urlToEdgeId = new Map((edgeIds ?? []).map((r: { id: string; to_url: string }) => [r.to_url, r.id]));
-      const encodedRows = newLinks
-        .slice(0, MAX_LINKS_PER_ADD_PAGE)
-        .filter((l) => urlToEdgeId.has(l.url))
-        .map((l) => ({
-          page_edge_id: urlToEdgeId.get(l.url)!,
-          anchor_text: l.anchorText || null,
-          snippet: (l.snippet || l.anchorText || DEFAULT_SNIPPET_FALLBACK).substring(0, ENCODED_SNIPPET_MAX_LENGTH),
+      const encodedRows = newLinkUrls.slice(0, MAX_LINKS_PER_ADD_PAGE).filter((url) => urlToEdgeId.has(url)).map((url) => {
+        const withContext = newLinksWithContext.find((l) => l.url === url);
+        const snippet =
+          isSurface && withContext && (withContext.snippet || withContext.anchorText)
+            ? (withContext.snippet || withContext.anchorText || DEFAULT_SNIPPET_FALLBACK).substring(0, ENCODED_SNIPPET_MAX_LENGTH)
+            : DEFAULT_SNIPPET_FALLBACK;
+        return {
+          page_edge_id: urlToEdgeId.get(url)!,
+          anchor_text: withContext?.anchorText || null,
+          snippet,
           owner_id: ownerId,
-        }));
+        };
+      });
       if (encodedRows.length > 0) {
         const { error: encErr } = await supabase.from('encoded_discovered').upsert(encodedRows, {
           onConflict: 'page_edge_id',
@@ -197,13 +208,13 @@ export async function processAddPageJob(job: {
         });
       } else {
         console.log('[add-page] encoded_discovered skip: encodedRows.length=0', {
-          newLinksCount: newLinks.length,
+          newLinksCount: newLinkUrls.length,
           urlToEdgeIdSize: urlToEdgeId.size,
           reason: 'urlToEdgeId missing some URLs?',
         });
       }
     } else {
-      console.log('[add-page] no newLinks to insert', { linksWithContextCount: linksWithContext.length });
+      console.log('[add-page] no newLinks to insert', { linksUrlOnly: linksUrlOnly.length, linksWithContext: linksWithContext.length });
     }
 
     // Chunk and embed page content

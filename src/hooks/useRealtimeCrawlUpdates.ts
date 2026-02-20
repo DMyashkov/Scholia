@@ -1,4 +1,21 @@
 import { useEffect, useMemo, useRef } from 'react';
+import {
+  ADD_PAGE_JOB,
+  CRAWL_JOBS_FOR_SOURCES,
+  CRAWL_JOBS_FOR_SOURCES_BAR,
+  CRAWL_JOBS_LIST,
+  CRAWL_JOBS_MAIN_FOR_SOURCES,
+  CRAWL_JOB_INVALIDATION_PREFIXES,
+  CRAWL_JOB_SINGLE,
+  CONVERSATION_PAGE_EDGES,
+  CONVERSATION_PAGES,
+  CONVERSATION_SOURCES,
+  DISCOVERED_LINKS_COUNT_PER_SOURCE,
+  DISCOVERED_LINKS_COUNTS_BY_CONVERSATION,
+  DISCOVERED_LINKS_ENCODED_COUNT_PER_SOURCE,
+  DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION,
+  PAGES,
+} from '@/lib/queryKeys';
 import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
 import type { CrawlJob, Page, PageEdge } from '@/lib/db/types';
@@ -13,6 +30,35 @@ import type { CrawlJob, Page, PageEdge } from '@/lib/db/types';
 const EDGES_DEBOUNCE_MS = 1200;
 const EDGES_TRAILING_MS = 800;
 const DISCOVERED_LINKS_DEBOUNCE_MS = 500;
+const PAGES_DEBOUNCE_MS = 300;
+
+/** True if queryKey is an array with key[0] === prefix and (optionally) key[1] === second. */
+function queryKeyMatches(key: unknown, prefix: string, second?: unknown): boolean {
+  return Array.isArray(key) && key[0] === prefix && (second === undefined || key[1] === second);
+}
+
+/** Query predicate: invalidate if key matches any (prefix, second) pair. */
+function predicateForKeys(conversationId: string, pairs: [string, unknown?][]): (query: { queryKey: unknown }) => boolean {
+  return (query) => {
+    const key = query.queryKey;
+    return pairs.some(([prefix, second]) => queryKeyMatches(key, prefix, second ?? conversationId));
+  };
+}
+
+/** Run fn after ms; each call resets the timer. Call the returned function from the event handler. */
+function debouncedInvoke(
+  timerRef: { current: ReturnType<typeof setTimeout> | null },
+  ms: number,
+  fn: () => void
+): () => void {
+  return () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      fn();
+    }, ms);
+  };
+}
 
 export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds: string[]) {
   const queryClient = useQueryClient();
@@ -48,20 +94,18 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
           },
         (payload) => {
           const job = payload.new as CrawlJob;
-
-          queryClient.invalidateQueries({ predicate: (query) => {
+          const predicate = (query: { queryKey: unknown }) => {
             const key = query.queryKey;
-            return (
-              (Array.isArray(key) && key[0] === 'crawl-job' && key[1] === job.source_id) ||
-              (Array.isArray(key) && key[0] === 'crawl-jobs' && (key[1] === job.source_id || key.length === 1)) ||
-              (Array.isArray(key) && key[0] === 'crawl-jobs-for-sources') ||
-              (Array.isArray(key) && key[0] === 'crawl-jobs-for-sources-bar') ||
-              (Array.isArray(key) && key[0] === 'crawl-jobs-main-for-sources') ||
-              // Add-page jobs are now crawl_jobs with explicit_crawl_urls
-              (Array.isArray(key) && key[0] === 'add-page-job' && key[1] === conversationId && key[2] === job.source_id && job.explicit_crawl_urls != null)
-            );
-          }});
-          queryClient.invalidateQueries({ queryKey: ['conversation-sources', conversationId] });
+            if (!Array.isArray(key)) return false;
+            const [prefix, arg1, arg2] = key;
+            if (queryKeyMatches(key, CRAWL_JOB_SINGLE, job.source_id)) return true;
+            if (prefix === CRAWL_JOBS_LIST && (arg1 === job.source_id || key.length === 1)) return true;
+            if (CRAWL_JOB_INVALIDATION_PREFIXES.includes(prefix as (typeof CRAWL_JOB_INVALIDATION_PREFIXES)[number])) return true;
+            if (prefix === ADD_PAGE_JOB && arg1 === conversationId && arg2 === job.source_id && job.explicit_crawl_urls != null) return true;
+            return false;
+          };
+          queryClient.invalidateQueries({ predicate });
+          queryClient.invalidateQueries({ queryKey: [CONVERSATION_SOURCES, conversationId] });
         }
         )
         .subscribe();
@@ -70,13 +114,9 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
     }
 
     const syncAfterSubscribe = () => {
-      queryClient.invalidateQueries({ predicate: (query) => {
-        const key = query.queryKey;
-        return (
-          (Array.isArray(key) && key[0] === 'conversation-pages' && key[1] === conversationId) ||
-          (Array.isArray(key) && key[0] === 'conversation-page-edges' && key[1] === conversationId)
-        );
-      }});
+      queryClient.invalidateQueries({
+        predicate: predicateForKeys(conversationId, [[CONVERSATION_PAGES], [CONVERSATION_PAGE_EDGES]]),
+      });
     };
 
     // Subscribe to pages INSERTs for sources in this conversation.
@@ -92,19 +132,15 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
                 table: 'pages',
                 filter: `source_id=in.(${sourceIds.join(',')})`,
               },
-        (payload) => {
-          if (pagesDebounceTimerRef.current) clearTimeout(pagesDebounceTimerRef.current);
-          pagesDebounceTimerRef.current = setTimeout(() => {
-            pagesDebounceTimerRef.current = null;
-            queryClient.invalidateQueries({ predicate: (query) => {
-              const key = query.queryKey;
-              return (
-                (Array.isArray(key) && key[0] === 'pages') ||
-                (Array.isArray(key) && key[0] === 'conversation-pages' && key[1] === conversationId)
-              );
-            }});
-            queryClient.invalidateQueries({ queryKey: ['conversation-sources', conversationId] });
-          }, 300);
+        () => {
+          debouncedInvoke(pagesDebounceTimerRef, PAGES_DEBOUNCE_MS, () => {
+            queryClient.invalidateQueries({
+              predicate: (query) =>
+                queryKeyMatches(query.queryKey, PAGES) ||
+                queryKeyMatches(query.queryKey, CONVERSATION_PAGES, conversationId),
+            });
+            queryClient.invalidateQueries({ queryKey: [CONVERSATION_SOURCES, conversationId] });
+          })();
         }
       )
             .subscribe((status) => {
@@ -126,6 +162,8 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
         () => {
           // Debounce: 2000+ edge INSERTs during crawl would exhaust browser connections.
           // One sync per DEBOUNCE_MS during burst, one final after TRAILING_MS of silence.
+          const edgesPredicate = (query: { queryKey: unknown }) =>
+            queryKeyMatches(query.queryKey, CONVERSATION_PAGE_EDGES, conversationId);
           const doSync = () => {
             const t = Date.now();
             if (import.meta.env.DEV) {
@@ -133,14 +171,8 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
               console.log('[realtime] edges sync', since ? `${since}ms since last` : 'initial');
             }
             edgesLastSyncRef.current = t;
-            queryClient.invalidateQueries({ predicate: (query) => {
-              const key = query.queryKey;
-              return Array.isArray(key) && key[0] === 'conversation-page-edges' && key[1] === conversationId;
-            }});
-            queryClient.refetchQueries({ predicate: (query) => {
-              const key = query.queryKey;
-              return Array.isArray(key) && key[0] === 'conversation-page-edges' && key[1] === conversationId;
-            }});
+            queryClient.invalidateQueries({ predicate: edgesPredicate });
+            queryClient.refetchQueries({ predicate: edgesPredicate });
           };
           const now = Date.now();
           if (edgesLastSyncRef.current === 0 || now - edgesLastSyncRef.current >= EDGES_DEBOUNCE_MS) {
@@ -173,12 +205,10 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
                 table: 'encoded_discovered',
               },
               () => {
-                if (discoveredLinksDebounceRef.current) clearTimeout(discoveredLinksDebounceRef.current);
-                discoveredLinksDebounceRef.current = setTimeout(() => {
-                  discoveredLinksDebounceRef.current = null;
-                  queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
-                  queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-count' });
-                }, DISCOVERED_LINKS_DEBOUNCE_MS);
+                debouncedInvoke(discoveredLinksDebounceRef, DISCOVERED_LINKS_DEBOUNCE_MS, () => {
+                  queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_COUNTS_BY_CONVERSATION, conversationId] });
+                  queryClient.invalidateQueries({ predicate: (q) => queryKeyMatches(q.queryKey, DISCOVERED_LINKS_COUNT_PER_SOURCE) });
+                })();
               }
             )
             .on(
@@ -189,17 +219,23 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
                 table: 'encoded_discovered',
               },
               () => {
-                if (discoveredLinksDebounceRef.current) clearTimeout(discoveredLinksDebounceRef.current);
-                discoveredLinksDebounceRef.current = setTimeout(() => {
-                  discoveredLinksDebounceRef.current = null;
-                  queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
-                  queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] });
-                  queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-count' });
-                  queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'discovered-links-encoded-count' });
+                debouncedInvoke(discoveredLinksDebounceRef, DISCOVERED_LINKS_DEBOUNCE_MS, () => {
+                  queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_COUNTS_BY_CONVERSATION, conversationId] });
+                  queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION, conversationId] });
+                  queryClient.invalidateQueries({ predicate: (q) => queryKeyMatches(q.queryKey, DISCOVERED_LINKS_COUNT_PER_SOURCE) });
+                  queryClient.invalidateQueries({ predicate: (q) => queryKeyMatches(q.queryKey, DISCOVERED_LINKS_ENCODED_COUNT_PER_SOURCE) });
                   // encoding_discovered_done lives on crawl_jobs; invalidate so progress bar gets latest (crawl_jobs realtime may not fire for worker updates)
-                  queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === 'crawl-jobs-main-for-sources' && q.queryKey[2] === conversationId });
-                  queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && (q.queryKey[0] === 'crawl-jobs-for-sources' || q.queryKey[0] === 'crawl-jobs-for-sources-bar') });
-                }, DISCOVERED_LINKS_DEBOUNCE_MS);
+                  queryClient.invalidateQueries({
+                    predicate: (q) =>
+                      Array.isArray(q.queryKey) &&
+                      q.queryKey[0] === CRAWL_JOBS_MAIN_FOR_SOURCES &&
+                      q.queryKey[2] === conversationId,
+                  });
+                  queryClient.invalidateQueries({
+                    predicate: (q) =>
+                      queryKeyMatches(q.queryKey, CRAWL_JOBS_FOR_SOURCES) || queryKeyMatches(q.queryKey, CRAWL_JOBS_FOR_SOURCES_BAR),
+                  });
+                })();
               }
             )
             .subscribe()

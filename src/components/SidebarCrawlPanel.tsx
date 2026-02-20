@@ -8,6 +8,11 @@ import { useConversationSources } from '@/hooks/useConversationSources';
 import { useAddPageJob } from '@/hooks/useAddPageJob';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import type { CrawlJob } from '@/lib/db/types';
+import {
+  CRAWL_JOBS_MAIN_FOR_SOURCES,
+  DISCOVERED_LINKS_COUNTS_BY_CONVERSATION,
+  DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION,
+} from '@/lib/queryKeys';
 import { useQuery } from '@tanstack/react-query';
 import { Zap, Waves, Anchor } from 'lucide-react';
 import {
@@ -31,7 +36,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds.join(',')]);
   const { data: crawlJobsData = [] } = useQuery({
-    queryKey: ['crawl-jobs-main-for-sources', sourceIdsKey, conversationId ?? ''],
+    queryKey: [CRAWL_JOBS_MAIN_FOR_SOURCES, sourceIdsKey, conversationId ?? ''],
     queryFn: async () => {
       if (!conversationId || sourceIds.length === 0) return [];
       return crawlJobsApi.listLatestMainBySources(sourceIds, conversationId);
@@ -57,12 +62,12 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   }
   const { data: edges = [], isLoading: edgesLoading, error: edgesError } = useConversationPageEdges(conversationId);
   const { data: discoveredCountsMap = {} } = useQuery({
-    queryKey: ['discovered-links-counts', conversationId],
+    queryKey: [DISCOVERED_LINKS_COUNTS_BY_CONVERSATION, conversationId],
     queryFn: () => (conversationId ? discoveredLinksApi.countsByConversation(conversationId) : {}),
     enabled: !!conversationId,
   });
   const { data: encodedDiscoveredCountsMap = {} } = useQuery({
-    queryKey: ['discovered-links-encoded-counts', conversationId],
+    queryKey: [DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION, conversationId],
     queryFn: () => (conversationId ? discoveredLinksApi.countsEncodedByConversation(conversationId) : {}),
     enabled: !!conversationId && sources.some(s => s.crawlDepth === 'dynamic'),
   });

@@ -5,6 +5,18 @@ import { useMessages, useCreateMessage, useUpdateMessage } from './useMessages';
 import { useConversationSources, useAddSourceToConversation, useRemoveSourceFromConversation, useCheckExistingSource } from './useConversationSources';
 import { recrawlSource as recrawlSourceApi } from '@/lib/db/recrawl';
 import { crawlJobsApi } from '@/lib/db';
+import {
+  ADD_PAGE_JOB,
+  CONVERSATION_PAGE_EDGES,
+  CONVERSATION_PAGES,
+  CONVERSATION_SOURCES,
+  CRAWL_JOB_SINGLE,
+  CRAWL_JOBS_MAIN_FOR_SOURCES,
+  DISCOVERED_LINKS_COUNT_PER_SOURCE,
+  DISCOVERED_LINKS_COUNTS_BY_CONVERSATION,
+  DISCOVERED_LINKS_ENCODED_COUNT_PER_SOURCE,
+  DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION,
+} from '@/lib/queryKeys';
 import { useSourceWithData } from './useSourceWithData';
 import { useRealtimeCrawlUpdates } from './useRealtimeCrawlUpdates';
 import { useAuthContext } from '@/contexts/AuthContext';
@@ -120,7 +132,6 @@ export const useChatDatabase = () => {
     [conversationSourcesData]
   );
 
-  // Set up realtime subscriptions for crawl updates
   useRealtimeCrawlUpdates(activeConversationId, sourceIds);
 
   // Load sources with full data (pages, crawl jobs)
@@ -243,21 +254,21 @@ export const useChatDatabase = () => {
     console.log('[recrawl] useChatDatabase: calling recrawl API', { activeConversationId: activeConversationId.slice(0, 8), sourceId: sourceId.slice(0, 8) });
     await recrawlSourceApi(activeConversationId, sourceId);
     console.log('[recrawl] useChatDatabase: API done, invalidating + refetching queries');
-    queryClient.invalidateQueries({ queryKey: ['conversation-sources', activeConversationId] });
-    queryClient.invalidateQueries({ queryKey: ['conversation-pages', activeConversationId] });
-    queryClient.invalidateQueries({ queryKey: ['conversation-page-edges', activeConversationId] });
-    queryClient.invalidateQueries({ queryKey: ['crawl-jobs-main-for-sources'] });
-    queryClient.invalidateQueries({ queryKey: ['crawl-job', sourceId] });
-    queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', activeConversationId] });
-    queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', activeConversationId] });
+    queryClient.invalidateQueries({ queryKey: [CONVERSATION_SOURCES, activeConversationId] });
+    queryClient.invalidateQueries({ queryKey: [CONVERSATION_PAGES, activeConversationId] });
+    queryClient.invalidateQueries({ queryKey: [CONVERSATION_PAGE_EDGES, activeConversationId] });
+    queryClient.invalidateQueries({ queryKey: [CRAWL_JOBS_MAIN_FOR_SOURCES] });
+    queryClient.invalidateQueries({ queryKey: [CRAWL_JOB_SINGLE, sourceId] });
+    queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_COUNTS_BY_CONVERSATION, activeConversationId] });
+    queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION, activeConversationId] });
     queryClient.invalidateQueries({
       predicate: (q) =>
         Array.isArray(q.queryKey) &&
-        (q.queryKey[0] === 'discovered-links-count' || q.queryKey[0] === 'discovered-links-encoded-count'),
+        (q.queryKey[0] === DISCOVERED_LINKS_COUNT_PER_SOURCE || q.queryKey[0] === DISCOVERED_LINKS_ENCODED_COUNT_PER_SOURCE),
     });
     // Force immediate refetch of crawl jobs so UI updates right away
-    await queryClient.refetchQueries({ queryKey: ['crawl-jobs-main-for-sources'] });
-    await queryClient.refetchQueries({ queryKey: ['crawl-job', sourceId] });
+    await queryClient.refetchQueries({ queryKey: [CRAWL_JOBS_MAIN_FOR_SOURCES] });
+    await queryClient.refetchQueries({ queryKey: [CRAWL_JOB_SINGLE, sourceId] });
     console.log('[recrawl] useChatDatabase: refetch complete');
   }, [activeConversationId, queryClient]);
 
@@ -296,17 +307,17 @@ export const useChatDatabase = () => {
     // Page already exists – done
     if (data?.page) {
       console.log('[addPageToSource] page already exists', data.page.id?.slice(0, 8));
-      queryClient.invalidateQueries({ queryKey: ['add-page-job', conversationId, sourceId] });
+      queryClient.invalidateQueries({ queryKey: [ADD_PAGE_JOB, conversationId, sourceId] });
       queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-      queryClient.invalidateQueries({ queryKey: ['conversation-pages', conversationId] });
-      queryClient.invalidateQueries({ queryKey: ['conversation-page-edges', conversationId] });
-      queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
-      queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] });
+      queryClient.invalidateQueries({ queryKey: [CONVERSATION_PAGES, conversationId] });
+      queryClient.invalidateQueries({ queryKey: [CONVERSATION_PAGE_EDGES, conversationId] });
+      queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_COUNTS_BY_CONVERSATION, conversationId] });
+      queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION, conversationId] });
       await Promise.all([
-        queryClient.refetchQueries({ queryKey: ['conversation-pages', conversationId] }),
-        queryClient.refetchQueries({ queryKey: ['conversation-page-edges', conversationId] }),
-        queryClient.refetchQueries({ queryKey: ['discovered-links-counts', conversationId] }),
-        queryClient.refetchQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] }),
+        queryClient.refetchQueries({ queryKey: [CONVERSATION_PAGES, conversationId] }),
+        queryClient.refetchQueries({ queryKey: [CONVERSATION_PAGE_EDGES, conversationId] }),
+        queryClient.refetchQueries({ queryKey: [DISCOVERED_LINKS_COUNTS_BY_CONVERSATION, conversationId] }),
+        queryClient.refetchQueries({ queryKey: [DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION, conversationId] }),
       ]);
       return data;
     }
@@ -332,17 +343,17 @@ export const useChatDatabase = () => {
       throw new Error(finalJob.error_message ?? 'Add page failed');
     }
 
-    queryClient.invalidateQueries({ queryKey: ['add-page-job', conversationId, sourceId] });
+    queryClient.invalidateQueries({ queryKey: [ADD_PAGE_JOB, conversationId, sourceId] });
     queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-    queryClient.invalidateQueries({ queryKey: ['conversation-pages', conversationId] });
-    queryClient.invalidateQueries({ queryKey: ['conversation-page-edges', conversationId] });
-    queryClient.invalidateQueries({ queryKey: ['discovered-links-counts', conversationId] });
-    queryClient.invalidateQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] });
+    queryClient.invalidateQueries({ queryKey: [CONVERSATION_PAGES, conversationId] });
+    queryClient.invalidateQueries({ queryKey: [CONVERSATION_PAGE_EDGES, conversationId] });
+    queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_COUNTS_BY_CONVERSATION, conversationId] });
+    queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION, conversationId] });
     await Promise.all([
-      queryClient.refetchQueries({ queryKey: ['conversation-pages', conversationId] }),
-      queryClient.refetchQueries({ queryKey: ['conversation-page-edges', conversationId] }),
-      queryClient.refetchQueries({ queryKey: ['discovered-links-counts', conversationId] }),
-      queryClient.refetchQueries({ queryKey: ['discovered-links-encoded-counts', conversationId] }),
+      queryClient.refetchQueries({ queryKey: [CONVERSATION_PAGES, conversationId] }),
+      queryClient.refetchQueries({ queryKey: [CONVERSATION_PAGE_EDGES, conversationId] }),
+      queryClient.refetchQueries({ queryKey: [DISCOVERED_LINKS_COUNTS_BY_CONVERSATION, conversationId] }),
+      queryClient.refetchQueries({ queryKey: [DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION, conversationId] }),
     ]);
     return { page: {}, message: 'Page added' };
   }, [queryClient]);

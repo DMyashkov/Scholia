@@ -7,6 +7,7 @@ import { ChatMessage, TypingIndicator } from './ChatMessage';
 import { ThoughtProcessView } from './ThoughtProcessView';
 import { ChatInput, type DisableReason } from './ChatInput';
 import { useQuery } from '@tanstack/react-query';
+import { CRAWL_JOBS_MAIN_FOR_SOURCES } from '@/lib/queryKeys';
 import { crawlJobsApi } from '@/lib/db';
 import { WelcomeScreen } from './WelcomeScreen';
 import { SourcesBar } from './SourcesBar';
@@ -66,7 +67,7 @@ export const ChatArea = ({
   const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds.join(',')]);
   const conversationId = conversation?.id ?? null;
   const { data: mainCrawlJobs = [] } = useQuery({
-    queryKey: ['crawl-jobs-main-for-sources', sourceIdsKey, conversationId ?? ''],
+    queryKey: [CRAWL_JOBS_MAIN_FOR_SOURCES, sourceIdsKey, conversationId ?? ''],
     queryFn: async () => {
       if (!conversationId || sourceIds.length === 0) return [];
       return crawlJobsApi.listLatestMainBySources(sourceIds, conversationId);

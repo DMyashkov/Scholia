@@ -1,4 +1,4 @@
--- Add source_label for human-readable display (e.g. "Joe Biden"). Keep domain as hostname (e.g. en.wikipedia.org).
+-- Add source_label for human-readable display (e.g. page or site name). Keep domain as hostname (e.g. example.com).
 ALTER TABLE sources ADD COLUMN IF NOT EXISTS source_label TEXT;
 
 -- Fix sources where domain was overwritten with page title (contains spaces or looks like a title).

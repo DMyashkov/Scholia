@@ -51,7 +51,7 @@ export interface Message {
   suggestedPage?: SuggestedPage | null;
   /** Points to the previous message this is a follow-up of (add page + re-answer) */
   followsMessageId?: string;
-  /** Display text for divider: "Indexed American Horses - Wikipedia" */
+  /** Display text for divider when follow-up indexed a new page (e.g. "Indexed Page Title - site.com") */
   scrapedPageDisplay?: string;
   /** Evidence-First RAG: slots, steps, iteration count, completeness */
   thoughtProcess?: ThoughtProcess | null;

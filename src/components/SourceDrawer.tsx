@@ -103,8 +103,9 @@ export const SourceDrawer = ({
     () => (allSourceIds?.length ? allSourceIds : source?.id ? [source.id] : []),
     [allSourceIds, source?.id]
   );
+  const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds.join(',')]);
   const { data: allCrawlJobs = [] } = useQuery({
-    queryKey: ['crawl-jobs-main-for-sources', sourceIds, conversationId ?? ''],
+    queryKey: ['crawl-jobs-main-for-sources', sourceIdsKey, conversationId ?? ''],
     queryFn: async () => {
       if (!conversationId || sourceIds.length === 0) return [];
       return crawlJobsApi.listLatestMainBySources(sourceIds, conversationId);

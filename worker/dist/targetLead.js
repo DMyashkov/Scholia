@@ -1,6 +1,6 @@
 /**
  * Fetch the first ~200 chars (lead) of a target page for encoded_discovered.
- * Strips common fluff: CSS, coordinates, "From Wikipedia...", etc.
+ * Strips common fluff: CSS, coordinates, site boilerplate (e.g. "From X, the free encyclopedia"), etc.
  */
 import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';

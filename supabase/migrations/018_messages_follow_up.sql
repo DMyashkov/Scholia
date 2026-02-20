@@ -5,4 +5,4 @@
 ALTER TABLE messages
   ADD COLUMN IF NOT EXISTS follows_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS indexed_page_display TEXT DEFAULT NULL;
--- indexed_page_display: e.g. "American Quarter Horse Hall of Fame - Wikipedia" shown below divider
+-- indexed_page_display: e.g. "Page Title - site.com" shown below divider when user added a suggested page

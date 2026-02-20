@@ -338,9 +338,7 @@ const MessageContent = ({
 
 function getDomainDisplay(url: string): string {
   try {
-    const host = new URL(url).hostname.replace(/^www\./, '');
-    if (host === 'en.wikipedia.org' || host.endsWith('.wikipedia.org')) return 'Wikipedia';
-    return host;
+    return new URL(url).hostname.replace(/^www\./, '');
   } catch {
     return '';
   }

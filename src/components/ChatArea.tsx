@@ -63,9 +63,10 @@ export const ChatArea = ({
   const [addSourcePromptMessage, setAddSourcePromptMessage] = useState<string | null>(null);
 
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
+  const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds.join(',')]);
   const conversationId = conversation?.id ?? null;
   const { data: mainCrawlJobs = [] } = useQuery({
-    queryKey: ['crawl-jobs-main-for-sources', sourceIds, conversationId ?? ''],
+    queryKey: ['crawl-jobs-main-for-sources', sourceIdsKey, conversationId ?? ''],
     queryFn: async () => {
       if (!conversationId || sourceIds.length === 0) return [];
       return crawlJobsApi.listLatestMainBySources(sourceIds, conversationId);

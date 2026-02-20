@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import type { CrawlJobInsert } from './types';
 import { crawlJobsApi } from './crawl-jobs';
 
 const RECRAWL_DEBUG = true; // Set to false to disable recrawl logs
@@ -85,7 +86,7 @@ export async function recrawlSource(conversationId: string, sourceId: string): P
   if (pagesErr) recrawlLog('pages delete error:', pagesErr);
 
   // 7. Create new crawl job (with explicit_crawl_urls for dynamic full recrawl) - explicit 0 for all progress fields
-  const newJobPayload = {
+  const newJobPayload: CrawlJobInsert = {
     source_id: sourceId,
     status: 'queued',
     indexed_count: 0,

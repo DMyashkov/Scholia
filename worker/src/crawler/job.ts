@@ -32,21 +32,21 @@ export async function updateJobStatus(
     .eq('id', jobId);
 }
 
+/** Single-worker job claim: reset stale running jobs (e.g. after restart), then take the next queued job. */
 export async function claimJob(): Promise<CrawlJob | null> {
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const staleThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   const { data: stuckJobs } = await supabase
     .from('crawl_jobs')
-    .select('*')
+    .select('id')
     .eq('status', 'running')
-    .lt('last_activity_at', fiveMinutesAgo)
+    .lt('last_activity_at', staleThreshold)
     .limit(10);
 
-  if (stuckJobs && stuckJobs.length > 0) {
-    const stuckIds = stuckJobs.map((j) => j.id);
+  if (stuckJobs?.length) {
     await supabase
       .from('crawl_jobs')
       .update({ status: 'queued', updated_at: new Date().toISOString() })
-      .in('id', stuckIds);
+      .in('id', stuckJobs.map((j) => j.id));
   }
 
   const { data: jobs, error: fetchError } = await supabase
@@ -61,45 +61,26 @@ export async function claimJob(): Promise<CrawlJob | null> {
     return null;
   }
 
-  if (!jobs || jobs.length === 0) {
+  if (!jobs?.length) {
     _noQueuedLogCounter++;
-    const shouldLog = _noQueuedLogCounter <= 2 || _noQueuedLogCounter % 12 === 0;
-    if (shouldLog) {
-      const { data: allJobs, error: allError } = await supabase
-        .from('crawl_jobs')
-        .select('id, status, source_id, created_at')
-        .order('created_at', { ascending: false })
-        .limit(10);
-      if (allError) {
-        console.log('crawl: no jobs queued, DB error:', allError.message);
-      } else if (!allJobs || allJobs.length === 0) {
-        console.log('crawl: no jobs queued');
-      } else {
-        type JobRow = { id?: string; status?: string; created_at?: string };
-        const summary = (allJobs as JobRow[]).map((j) => ({ id: j.id?.slice(0, 8), status: j.status, created: j.created_at?.slice(11, 19) }));
-        console.log('crawl: no jobs queued, recent:', summary);
-      }
+    if (_noQueuedLogCounter <= 2 || _noQueuedLogCounter % 12 === 0) {
+      console.log('crawl: no jobs queued');
     }
     return null;
   }
   _noQueuedLogCounter = 0;
 
-  const jobToClaim = jobs[0];
+  const job = jobs[0];
   const now = new Date().toISOString();
   const { data: updated, error: updateError } = await supabase
     .from('crawl_jobs')
-    .update({
-      status: 'running',
-      last_activity_at: now,
-      updated_at: now,
-    })
-    .eq('id', jobToClaim.id)
-    .eq('status', 'queued')
+    .update({ status: 'running', last_activity_at: now, updated_at: now })
+    .eq('id', job.id)
     .select()
     .single();
 
   if (updateError || !updated) {
-    console.log('crawl: claim failed (someone else took it)', jobToClaim.id?.slice(0, 8));
+    console.error('crawl: claim failed', job.id?.slice(0, 8), updateError);
     return null;
   }
 

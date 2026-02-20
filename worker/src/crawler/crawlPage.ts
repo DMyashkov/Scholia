@@ -1,12 +1,19 @@
 import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
 import { supabase } from '../db';
-import type { CrawlJob, Page, Source } from '../types';
+import type { Page, Source } from '../types';
+import {
+  CRAWLER_USER_AGENT,
+  DEFAULT_PAGE_TITLE,
+  LOG_URL_MAX_LENGTH,
+  MAIN_CONTENT_SELECTOR,
+  MAX_PAGE_CONTENT_LENGTH,
+  PAGE_TITLE_SUFFIX_REGEX,
+} from './constants';
 
 export async function crawlPage(
   url: string,
   source: Source,
-  job: CrawlJob,
   conversationId: string
 ): Promise<{ page: Page; html: string } | null> {
   if (!conversationId) {
@@ -15,9 +22,7 @@ export async function crawlPage(
 
   try {
     const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'ScholiaCrawler/1.0',
-      },
+      headers: { 'User-Agent': CRAWLER_USER_AGENT },
     });
 
     if (!response.ok) {
@@ -27,16 +32,15 @@ export async function crawlPage(
     const html = await response.text();
     const $ = cheerio.load(html);
 
-    const title = $('title').first().text().trim() ||
+    const rawTitle = $('title').first().text().trim() ||
       $('h1').first().text().trim() ||
-      'Untitled';
+      DEFAULT_PAGE_TITLE;
+    const title = rawTitle.replace(PAGE_TITLE_SUFFIX_REGEX, '').trim() || rawTitle;
 
-    const content = $('main, article, .content, #content')
-      .first()
-      .text()
-      .trim()
-      .substring(0, 50000) ||
-      $('body').text().trim().substring(0, 50000);
+    // Main content: try semantic/standard selectors (main, article, #content, #bodyContent, etc.); fall back to body if none match or text is empty
+    const mainContent = $(MAIN_CONTENT_SELECTOR).first();
+    const mainText = (mainContent.length > 0 ? mainContent.text() : $('body').text()).trim().substring(0, MAX_PAGE_CONTENT_LENGTH);
+    const content = mainText || $('body').text().trim().substring(0, MAX_PAGE_CONTENT_LENGTH);
 
     const urlObj = new URL(url);
     const path = urlObj.pathname + urlObj.search;
@@ -74,13 +78,13 @@ export async function crawlPage(
       if (existing) {
         return { page: existing as Page, html };
       }
-      console.error('crawl: page insert failed', url.slice(0, 60), error.message);
+      console.error('crawl: page insert failed', url.slice(0, LOG_URL_MAX_LENGTH), error.message);
       return null;
     }
     return { page: page as Page, html };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error('crawl: page fetch failed', url.slice(0, 60), msg);
+    console.error('crawl: page fetch failed', url.slice(0, LOG_URL_MAX_LENGTH), msg);
     return null;
   }
 }

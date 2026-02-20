@@ -3,7 +3,7 @@ import RobotsParser from 'robots-parser';
 import { supabase } from '../db';
 import { indexConversationForRag } from '../indexer';
 import type { CrawlJob, Source } from '../types';
-import { MAX_PAGES, PAGE_TITLE_SUFFIX_REGEX } from './constants';
+import { MAX_LINKS_PER_PAGE_DYNAMIC, MAX_PAGES } from './constants';
 import { crawlPage } from './crawlPage';
 import { extractLinks, extractLinksWithContext } from './links';
 import { updateJobStatus } from './job';
@@ -58,13 +58,8 @@ async function crawlSourceWithConversationId(
 
   const visited = new Set<string>();
   const discovered = new Set<string>();
-  const queue: Array<{ url: string; depth: number; priority: number }> = seedUrls.map((url) => ({
-    url,
-    depth: 0,
-    priority: 0,
-  }));
+  const queue: string[] = [...seedUrls];
   seedUrls.forEach((u) => discovered.add(u));
-  const directLinksFromStart: string[] = [];
 
   let sourceTitleUpdated = false;
 
@@ -77,8 +72,9 @@ async function crawlSourceWithConversationId(
       const robotsText = await robotsResponse.text();
       robotsParser = RobotsParser(robotsUrl, robotsText);
     }
-  } catch {
-    /* no robots.txt */
+  } catch (err) {
+    console.warn('crawl: robots.txt unavailable', firstSeedUrl.slice(0, 50), err instanceof Error
+     ? err.message : err);
   }
 
   if (queue.length === 0) {
@@ -88,13 +84,8 @@ async function crawlSourceWithConversationId(
   const sourceShort = new URL(firstSeedUrl).pathname?.replace(/^\/wiki\//, '') || firstSeedUrl.slice(0, 40);
   console.log('crawl: started', sourceShort, 'max', maxPages);
 
-  let loopIterations = 0;
   while (queue.length > 0 && visited.size < maxPages) {
-    loopIterations++;
-    if (loopIterations === 1 && queue.length === 0) break;
-
-    queue.sort((a, b) => a.priority - b.priority);
-    const { url, depth, priority } = queue.shift()!;
+    const url = queue.shift()!;
 
     const urlObj = new URL(url);
     urlObj.hash = '';
@@ -106,16 +97,13 @@ async function crawlSourceWithConversationId(
     }
     const normalizedUrl = urlObj.toString();
 
-    if (visited.has(normalizedUrl)) continue;
-    if (depth > 2) continue;
-
     if (robotsParser && !robotsParser.isAllowed(normalizedUrl, 'ScholiaCrawler')) {
       continue;
     }
 
     try {
       if (!conversationId) throw new Error(`conversationId is null before calling crawlPage!`);
-      const result = await crawlPage(normalizedUrl, source, job, conversationId);
+      const result = await crawlPage(normalizedUrl, source, conversationId);
       if (!result) {
         visited.add(normalizedUrl);
         continue;
@@ -125,15 +113,15 @@ async function crawlSourceWithConversationId(
       visited.add(normalizedUrl);
 
       if (!sourceTitleUpdated && page.title) {
-        const pageTitle = page.title.replace(PAGE_TITLE_SUFFIX_REGEX, '').trim();
-        if (pageTitle && pageTitle.length > 0) {
+        const label = page.title.trim().substring(0, 100);
+        if (label) {
           try {
             const { error } = await supabase
               .from('sources')
-              .update({ source_label: pageTitle.substring(0, 100) })
+              .update({ source_label: label })
               .eq('id', source.id);
             if (!error) {
-              (source as { source_label?: string }).source_label = pageTitle.substring(0, 100);
+              (source as { source_label?: string }).source_label = label;
             }
             sourceTitleUpdated = true;
           } catch {
@@ -146,37 +134,19 @@ async function crawlSourceWithConversationId(
       const links = extractLinks(html, normalizedUrl, source);
       const linksWithContext = isDynamic ? extractLinksWithContext(html, normalizedUrl, source) : [];
 
-      const newLinks: string[] = [];
       const edgesToInsert: Array<{ from_page_id: string; to_url: string; owner_id: string }> = [];
-      const linksToProcess = links.slice(0, 200);
+      const linksToProcess = isDynamic ? links.slice(0, MAX_LINKS_PER_PAGE_DYNAMIC) : links;
 
       for (const link of linksToProcess) {
-        const linkUrlObj = new URL(link);
-        linkUrlObj.hash = '';
-        linkUrlObj.search = '';
-        if (linkUrlObj.pathname === '/' || linkUrlObj.pathname === '') {
-          linkUrlObj.pathname = '/';
-        } else if (linkUrlObj.pathname.endsWith('/')) {
-          linkUrlObj.pathname = linkUrlObj.pathname.slice(0, -1);
-        }
-        const normalizedLink = linkUrlObj.toString();
-
         edgesToInsert.push({
           from_page_id: page.id,
-          to_url: normalizedLink,
+          to_url: link,
           owner_id: source.owner_id,
         });
 
-        if (!discovered.has(normalizedLink)) {
-          discovered.add(normalizedLink);
-          newLinks.push(normalizedLink);
-          if (priority === 0 && depth === 0) {
-            directLinksFromStart.push(normalizedLink);
-          }
-          if (depth <= 2 && queue.length < maxPages * 15) {
-            const linkPriority = priority === 0 ? 1 : priority + 1;
-            queue.push({ url: normalizedLink, depth: depth + 1, priority: linkPriority });
-          }
+        if (!discovered.has(link) && !visited.has(link)) {
+          discovered.add(link);
+          queue.push(link);
         }
       }
 
@@ -242,35 +212,6 @@ async function crawlSourceWithConversationId(
       if (error instanceof Error && error.message.includes('was deleted')) throw error;
       console.error('crawl: error on page', url.slice(0, 50), error);
       visited.add(normalizedUrl);
-    }
-  }
-
-  const normalizedFirst = (() => {
-    const u = new URL(firstSeedUrl);
-    u.hash = '';
-    u.search = '';
-    if (u.pathname === '/' || u.pathname === '') u.pathname = '/';
-    else if (u.pathname.endsWith('/')) u.pathname = u.pathname.slice(0, -1);
-    return u.toString();
-  })();
-  const { data: seedPage } = await supabase
-    .from('pages')
-    .select('id, url')
-    .eq('source_id', source.id)
-    .eq('url', normalizedFirst)
-    .single();
-  if (seedPage) {
-    const { data: existingEdge } = await supabase
-      .from('page_edges')
-      .select('id')
-      .eq('from_page_id', seedPage.id)
-      .limit(1)
-      .maybeSingle();
-    if (!existingEdge) {
-      await supabase.from('page_edges').upsert(
-        { from_page_id: seedPage.id, to_url: seedPage.url, owner_id: source.owner_id },
-        { onConflict: 'from_page_id,to_url', ignoreDuplicates: true }
-      );
     }
   }
 

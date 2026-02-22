@@ -17,3 +17,5 @@ export const MAX_TOTAL_SUBQUERIES = 60;
 export const MAX_EXPANSIONS = 2;
 export const STAGNATION_THRESHOLD = 0; // no new slot_items in last iter
 export const INCLUDE_FILL_STATUS_BY_SLOT = true;
+/** Max chunks passed to the final-answer prompt; allocated fairly across slots (see capWithFairAllocation). */
+export const FINAL_ANSWER_CHUNKS_CAP = 80;

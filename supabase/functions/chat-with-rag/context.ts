@@ -117,9 +117,16 @@ export async function loadRagContext(
   if (appendToMessageId) {
     const { data: slotRows } = await supabase
       .from('slots')
-      .select('id, name, type, description, required, depends_on_slot_id')
+      .select('id, name, type, description, required, depends_on_slot_id, target_item_count, current_item_count, attempt_count, finished_querying, last_queries')
       .eq('root_message_id', rootMessageId);
-    slots = (slotRows ?? []) as SlotDb[];
+    slots = (slotRows ?? []).map((r) => ({
+      ...r,
+      target_item_count: (r as { target_item_count?: number }).target_item_count ?? 0,
+      current_item_count: (r as { current_item_count?: number }).current_item_count ?? 0,
+      attempt_count: (r as { attempt_count?: number }).attempt_count ?? 0,
+      finished_querying: (r as { finished_querying?: boolean }).finished_querying ?? false,
+      last_queries: Array.isArray((r as { last_queries?: string[] }).last_queries) ? (r as { last_queries: string[] }).last_queries : [],
+    })) as SlotDb[];
     slotIdByName = new Map(slots.map((s) => [s.name, s.id]));
     const { data: firstStep } = await supabase
       .from('reasoning_steps')

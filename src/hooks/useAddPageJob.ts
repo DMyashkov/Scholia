@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ADD_PAGE_JOB } from '@/lib/queryKeys';
+import { LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE } from '@/lib/queryKeys';
 import { crawlJobsApi } from '@/lib/db';
 
 /**
@@ -8,7 +8,7 @@ import { crawlJobsApi } from '@/lib/db';
  */
 export function useAddPageJob(conversationId: string | null, sourceId: string | null) {
   return useQuery({
-    queryKey: [ADD_PAGE_JOB, conversationId, sourceId],
+    queryKey: [LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE, conversationId, sourceId],
     queryFn: () =>
       conversationId && sourceId
         ? crawlJobsApi.getLatestWithExplicitUrlsBySource(conversationId, sourceId)

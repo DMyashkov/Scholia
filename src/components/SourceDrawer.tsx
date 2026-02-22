@@ -23,9 +23,9 @@ import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import type { CrawlJob } from '@/lib/db/types';
 import { useAddPageJob } from '@/hooks/useAddPageJob';
 import {
-  CRAWL_JOBS_MAIN_FOR_SOURCES,
-  DISCOVERED_LINKS_COUNT_PER_SOURCE,
-  DISCOVERED_LINKS_ENCODED_COUNT_PER_SOURCE,
+  LATEST_MAIN_CRAWL_JOB_BY_SOURCES,
+  COUNT_OF_DISCOVERED_LINKS_BY_SOURCE,
+  ENCODED_COUNT_OF_DISCOVERED_LINKS_BY_SOURCE,
 } from '@/lib/queryKeys';
 import { useQuery } from '@tanstack/react-query';
 // MAX_PAGES defined inline
@@ -110,7 +110,7 @@ export const SourceDrawer = ({
   );
   const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds.join(',')]);
   const { data: allCrawlJobs = [] } = useQuery({
-    queryKey: [CRAWL_JOBS_MAIN_FOR_SOURCES, sourceIdsKey, conversationId ?? ''],
+    queryKey: [LATEST_MAIN_CRAWL_JOB_BY_SOURCES, sourceIdsKey],
     queryFn: async () => {
       if (!conversationId || sourceIds.length === 0) return [];
       return crawlJobsApi.listLatestMainBySources(sourceIds, conversationId);
@@ -177,7 +177,7 @@ export const SourceDrawer = ({
   const { data: allPages = [], isLoading: pagesLoading } = useConversationPages(graphConversationId);
   const { data: allEdges = [], isLoading: edgesLoading } = useConversationPageEdges(graphConversationId);
   const { data: discoveredCount = 0 } = useQuery({
-    queryKey: [DISCOVERED_LINKS_COUNT_PER_SOURCE, graphConversationId, source?.id],
+    queryKey: [COUNT_OF_DISCOVERED_LINKS_BY_SOURCE, graphConversationId, source?.id],
     queryFn: async () => {
       const count = graphConversationId && source?.id ? await discoveredLinksApi.countBySource(graphConversationId, source.id) : 0;
       if (import.meta.env.DEV) console.log('[recrawl] discovered-links-count', count);
@@ -186,7 +186,7 @@ export const SourceDrawer = ({
     enabled: !!graphConversationId && !!source?.id,
   });
   const { data: encodedDiscoveredCount = 0 } = useQuery({
-    queryKey: [DISCOVERED_LINKS_ENCODED_COUNT_PER_SOURCE, graphConversationId, source?.id],
+    queryKey: [ENCODED_COUNT_OF_DISCOVERED_LINKS_BY_SOURCE, graphConversationId, source?.id],
     queryFn: async () => {
       const count = graphConversationId && source?.id ? await discoveredLinksApi.countEncodedBySource(graphConversationId, source.id) : 0;
       if (import.meta.env.DEV) console.log('[recrawl] discovered-links-encoded-count', count);

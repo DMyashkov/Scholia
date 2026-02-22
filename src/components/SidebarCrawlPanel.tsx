@@ -9,9 +9,9 @@ import { useAddPageJob } from '@/hooks/useAddPageJob';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import type { CrawlJob } from '@/lib/db/types';
 import {
-  CRAWL_JOBS_MAIN_FOR_SOURCES,
-  DISCOVERED_LINKS_COUNTS_BY_CONVERSATION,
-  DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION,
+  LATEST_MAIN_CRAWL_JOB_BY_SOURCES,
+  COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION,
+  ENCODED_COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION,
 } from '@/lib/queryKeys';
 import { useQuery } from '@tanstack/react-query';
 import { Zap, Waves, Anchor } from 'lucide-react';
@@ -36,7 +36,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds.join(',')]);
   const { data: crawlJobsData = [] } = useQuery({
-    queryKey: [CRAWL_JOBS_MAIN_FOR_SOURCES, sourceIdsKey, conversationId ?? ''],
+    queryKey: [LATEST_MAIN_CRAWL_JOB_BY_SOURCES, sourceIdsKey],
     queryFn: async () => {
       if (!conversationId || sourceIds.length === 0) return [];
       return crawlJobsApi.listLatestMainBySources(sourceIds, conversationId);
@@ -62,12 +62,12 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   }
   const { data: edges = [], isLoading: edgesLoading, error: edgesError } = useConversationPageEdges(conversationId);
   const { data: discoveredCountsMap = {} } = useQuery({
-    queryKey: [DISCOVERED_LINKS_COUNTS_BY_CONVERSATION, conversationId],
+    queryKey: [COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION, conversationId],
     queryFn: () => (conversationId ? discoveredLinksApi.countsByConversation(conversationId) : {}),
     enabled: !!conversationId,
   });
   const { data: encodedDiscoveredCountsMap = {} } = useQuery({
-    queryKey: [DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION, conversationId],
+    queryKey: [ENCODED_COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION, conversationId],
     queryFn: () => (conversationId ? discoveredLinksApi.countsEncodedByConversation(conversationId) : {}),
     enabled: !!conversationId && sources.some(s => s.crawlDepth === 'dynamic'),
   });
@@ -367,9 +367,9 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
             {isDynamic && (
               <StatItem
                 label="Encoded Discovered"
-                value={encDiscoveredTotal > 0 ? encDiscoveredDone : totalEncodedDiscovered}
+                value={encDiscoveredTotal > 0 ? Math.max(encDiscoveredDone, totalEncodedDiscovered) : totalEncodedDiscovered}
                 highlight={isAddPageResponding || encodingPhase === 'encoding-discovered' || ((isIndexingFromJob || isAddPageEncoding) && encDiscoveredTotal > 0)}
-                tooltip="Links with embedded context; used for AI suggestions when adding pages. Animates over 1.5s when realtime updates arrive."
+                tooltip="Links with embedded context; used for AI suggestions when adding pages."
               />
             )}
           </div>

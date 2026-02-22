@@ -32,6 +32,10 @@ export interface PlanSlot {
   description?: string;
   required?: boolean;
   dependsOn?: string;
+  /** For list: number of items user asked for (e.g. "top 5" → 5), or 0 if no concrete number. For mapping: set 0; backend computes from list target × per-key count. */
+  target_item_count?: number;
+  /** For mapping: items per key (e.g. "top 2 achievements per product" → 2). Used with dependency list's target_item_count to compute slot target. */
+  items_per_key?: number;
 }
 
 export interface PlanSubquery {
@@ -71,6 +75,8 @@ export interface ExtractResult {
   cited_snippets?: Record<string, string>;
   /** When next_action is expand_corpus: 1–10 to pick which of the precomputed candidate pages to suggest (optional). */
   suggested_page_index?: number;
+  /** Only meaningful when backend sent "broad" for this slot this step. Slot names for which the model believes no more retrieval is needed (broad query was sufficient). */
+  broad_query_completed_slot_fully?: string[];
 }
 
 export type ChunkRow = {
@@ -87,7 +93,19 @@ export type PageRow = { id: string; source_id: string; title: string | null; pat
 export type SourceRow = { id: string; domain: string };
 
 // RAG context (index.ts split)
-export type SlotDb = { id: string; name: string; type: string; description?: string | null; required: boolean; depends_on_slot_id?: string | null };
+export type SlotDb = {
+  id: string;
+  name: string;
+  type: string;
+  description?: string | null;
+  required: boolean;
+  depends_on_slot_id?: string | null;
+  target_item_count: number;
+  current_item_count: number;
+  attempt_count: number;
+  finished_querying: boolean;
+  last_queries: string[] | null;
+};
 export type StepDb = { id: string; iteration_number: number; action: string; why?: string | null; completeness_score?: number | null };
 
 export interface RagContextReady {

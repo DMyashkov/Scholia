@@ -1,20 +1,18 @@
 import { useEffect, useMemo, useRef } from 'react';
 import {
-  ADD_PAGE_JOB,
-  CRAWL_JOBS_FOR_SOURCES,
-  CRAWL_JOBS_FOR_SOURCES_BAR,
-  CRAWL_JOBS_LIST,
-  CRAWL_JOBS_MAIN_FOR_SOURCES,
+  LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE,
+  PAGE_EDGES_FOR_CONVERSATION,
+  PAGES_FOR_CONVERSATION,
+  SOURCES_FOR_CONVERSATION,
+  CURRENT_CRAWL_JOB_BY_SOURCE,
+  LATEST_MAIN_CRAWL_JOB_BY_SOURCES,
+  LIST_OF_CRAWL_JOBS_BY_SOURCE,
   CRAWL_JOB_INVALIDATION_PREFIXES,
-  CRAWL_JOB_SINGLE,
-  CONVERSATION_PAGE_EDGES,
-  CONVERSATION_PAGES,
-  CONVERSATION_SOURCES,
-  DISCOVERED_LINKS_COUNT_PER_SOURCE,
-  DISCOVERED_LINKS_COUNTS_BY_CONVERSATION,
-  DISCOVERED_LINKS_ENCODED_COUNT_PER_SOURCE,
-  DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION,
-  PAGES,
+  COUNT_OF_DISCOVERED_LINKS_BY_SOURCE,
+  COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION,
+  ENCODED_COUNT_OF_DISCOVERED_LINKS_BY_SOURCE,
+  ENCODED_COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION,
+  PAGES_BY_SOURCE,
 } from '@/lib/queryKeys';
 import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
@@ -98,14 +96,14 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
             const key = query.queryKey;
             if (!Array.isArray(key)) return false;
             const [prefix, arg1, arg2] = key;
-            if (queryKeyMatches(key, CRAWL_JOB_SINGLE, job.source_id)) return true;
-            if (prefix === CRAWL_JOBS_LIST && (arg1 === job.source_id || key.length === 1)) return true;
+            if (queryKeyMatches(key, CURRENT_CRAWL_JOB_BY_SOURCE, job.source_id)) return true;
+            if (prefix === LIST_OF_CRAWL_JOBS_BY_SOURCE && (arg1 === job.source_id || key.length === 1)) return true;
             if (CRAWL_JOB_INVALIDATION_PREFIXES.includes(prefix as (typeof CRAWL_JOB_INVALIDATION_PREFIXES)[number])) return true;
-            if (prefix === ADD_PAGE_JOB && arg1 === conversationId && arg2 === job.source_id && job.explicit_crawl_urls != null) return true;
+            if (prefix === LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE && arg1 === conversationId && arg2 === job.source_id && job.explicit_crawl_urls != null) return true;
             return false;
           };
           queryClient.invalidateQueries({ predicate });
-          queryClient.invalidateQueries({ queryKey: [CONVERSATION_SOURCES, conversationId] });
+          queryClient.invalidateQueries({ queryKey: [SOURCES_FOR_CONVERSATION, conversationId] });
         }
         )
         .subscribe();
@@ -115,7 +113,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
 
     const syncAfterSubscribe = () => {
       queryClient.invalidateQueries({
-        predicate: predicateForKeys(conversationId, [[CONVERSATION_PAGES], [CONVERSATION_PAGE_EDGES]]),
+        predicate: predicateForKeys(conversationId, [[PAGES_FOR_CONVERSATION], [PAGE_EDGES_FOR_CONVERSATION]]),
       });
     };
 
@@ -136,10 +134,10 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
           debouncedInvoke(pagesDebounceTimerRef, PAGES_DEBOUNCE_MS, () => {
             queryClient.invalidateQueries({
               predicate: (query) =>
-                queryKeyMatches(query.queryKey, PAGES) ||
-                queryKeyMatches(query.queryKey, CONVERSATION_PAGES, conversationId),
+                queryKeyMatches(query.queryKey, PAGES_BY_SOURCE) ||
+                queryKeyMatches(query.queryKey, PAGES_FOR_CONVERSATION, conversationId),
             });
-            queryClient.invalidateQueries({ queryKey: [CONVERSATION_SOURCES, conversationId] });
+            queryClient.invalidateQueries({ queryKey: [SOURCES_FOR_CONVERSATION, conversationId] });
           })();
         }
       )
@@ -160,10 +158,8 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
           table: 'page_edges',
         },
         () => {
-          // Debounce: 2000+ edge INSERTs during crawl would exhaust browser connections.
-          // One sync per DEBOUNCE_MS during burst, one final after TRAILING_MS of silence.
           const edgesPredicate = (query: { queryKey: unknown }) =>
-            queryKeyMatches(query.queryKey, CONVERSATION_PAGE_EDGES, conversationId);
+            queryKeyMatches(query.queryKey, PAGE_EDGES_FOR_CONVERSATION, conversationId);
           const doSync = () => {
             const t = Date.now();
             if (import.meta.env.DEV) {
@@ -206,8 +202,8 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
               },
               () => {
                 debouncedInvoke(discoveredLinksDebounceRef, DISCOVERED_LINKS_DEBOUNCE_MS, () => {
-                  queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_COUNTS_BY_CONVERSATION, conversationId] });
-                  queryClient.invalidateQueries({ predicate: (q) => queryKeyMatches(q.queryKey, DISCOVERED_LINKS_COUNT_PER_SOURCE) });
+                  queryClient.invalidateQueries({ queryKey: [COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION, conversationId] });
+                  queryClient.invalidateQueries({ predicate: (q) => queryKeyMatches(q.queryKey, COUNT_OF_DISCOVERED_LINKS_BY_SOURCE) });
                 })();
               }
             )
@@ -220,20 +216,14 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
               },
               () => {
                 debouncedInvoke(discoveredLinksDebounceRef, DISCOVERED_LINKS_DEBOUNCE_MS, () => {
-                  queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_COUNTS_BY_CONVERSATION, conversationId] });
-                  queryClient.invalidateQueries({ queryKey: [DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION, conversationId] });
-                  queryClient.invalidateQueries({ predicate: (q) => queryKeyMatches(q.queryKey, DISCOVERED_LINKS_COUNT_PER_SOURCE) });
-                  queryClient.invalidateQueries({ predicate: (q) => queryKeyMatches(q.queryKey, DISCOVERED_LINKS_ENCODED_COUNT_PER_SOURCE) });
+                  queryClient.invalidateQueries({ queryKey: [COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION, conversationId] });
+                  queryClient.invalidateQueries({ queryKey: [ENCODED_COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION, conversationId] });
+                  queryClient.invalidateQueries({ predicate: (q) => queryKeyMatches(q.queryKey, COUNT_OF_DISCOVERED_LINKS_BY_SOURCE) });
+                  queryClient.invalidateQueries({ predicate: (q) => queryKeyMatches(q.queryKey, ENCODED_COUNT_OF_DISCOVERED_LINKS_BY_SOURCE) });
                   // encoding_discovered_done lives on crawl_jobs; invalidate so progress bar gets latest (crawl_jobs realtime may not fire for worker updates)
                   queryClient.invalidateQueries({
                     predicate: (q) =>
-                      Array.isArray(q.queryKey) &&
-                      q.queryKey[0] === CRAWL_JOBS_MAIN_FOR_SOURCES &&
-                      q.queryKey[2] === conversationId,
-                  });
-                  queryClient.invalidateQueries({
-                    predicate: (q) =>
-                      queryKeyMatches(q.queryKey, CRAWL_JOBS_FOR_SOURCES) || queryKeyMatches(q.queryKey, CRAWL_JOBS_FOR_SOURCES_BAR),
+                      Array.isArray(q.queryKey) && q.queryKey[0] === LATEST_MAIN_CRAWL_JOB_BY_SOURCES,
                   });
                 })();
               }

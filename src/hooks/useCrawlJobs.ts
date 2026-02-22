@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { CRAWL_JOB_SINGLE, CRAWL_JOBS_LIST } from '@/lib/queryKeys';
+import { CURRENT_CRAWL_JOB_BY_SOURCE, LIST_OF_CRAWL_JOBS_BY_SOURCE } from '@/lib/queryKeys';
 import { crawlJobsApi } from '@/lib/db/crawl-jobs';
 
 /**
@@ -9,7 +9,7 @@ import { crawlJobsApi } from '@/lib/db/crawl-jobs';
  */
 export const useCrawlJob = (sourceId: string | null, conversationId?: string | null) => {
   return useQuery({
-    queryKey: [CRAWL_JOB_SINGLE, sourceId, conversationId ?? ''],
+    queryKey: [CURRENT_CRAWL_JOB_BY_SOURCE, sourceId],
     queryFn: async () => {
       if (!sourceId) throw new Error('Source ID required');
       const jobs = await crawlJobsApi.listBySource(sourceId);
@@ -28,7 +28,7 @@ export const useCrawlJob = (sourceId: string | null, conversationId?: string | n
 
 export const useCrawlJobs = (sourceId: string | null) => {
   return useQuery({
-    queryKey: [CRAWL_JOBS_LIST, sourceId],
+    queryKey: [LIST_OF_CRAWL_JOBS_BY_SOURCE, sourceId],
     queryFn: () => {
       if (!sourceId) throw new Error('Source ID required');
       return crawlJobsApi.listBySource(sourceId);

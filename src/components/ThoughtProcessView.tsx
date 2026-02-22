@@ -31,14 +31,18 @@ function PhaseContent({
   showBanner,
   suggestedPage,
   stacked,
+  isLive,
 }: {
   tp: ThoughtProcess;
   showBanner?: boolean;
   suggestedPage?: { title: string; url?: string; fromPageTitle?: string } | null;
   /** When in a multi-phase layout: tight padding around dividers */
   stacked?: 'first' | 'middle' | 'last';
+  /** When true, last step "answer" is still in progress (show "Answering..." without filled background) */
+  isLive?: boolean;
 }) {
   const outcome = outcomeLabel(tp);
+  const answeringFromEvidence = isLive && outcome === 'Answered from evidence';
   const hasStopOrNote = Boolean(tp.hardStopReason || tp.partialAnswerNote || (tp.extractionGaps?.length ?? 0) > 0 || tp.expandCorpusReason);
 
   const paddingClass =
@@ -235,11 +239,12 @@ function PhaseContent({
               <div
                 className={cn(
                   'mt-3 flex items-center gap-2.5 rounded-lg border px-3 py-2 text-sm font-medium',
-                  outcome === 'Answered from evidence' &&
+                  !answeringFromEvidence && outcome === 'Answered from evidence' &&
                     'border-green-700/20 bg-green-400/10 text-green-700/90 dark:text-green-600/80',
                   outcome === 'Suggested a page' &&
                     'border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300',
-                  (outcome === 'Searched again' || outcome === 'Asked for clarification') &&
+                  (answeringFromEvidence || outcome === 'Searched again' || outcome === 'Asked for clarification') &&
+                    !(outcome === 'Suggested a page') &&
                     'border-border/60 bg-muted/40 text-foreground'
                 )}
               >
@@ -260,7 +265,7 @@ function PhaseContent({
                 ) : outcome === 'Answered from evidence' ? (
                   <>
                     <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600/70 dark:text-green-500/70" />
-                    <span>Answered from evidence</span>
+                    <span>{answeringFromEvidence ? 'Answering from evidence…' : 'Answered from evidence'}</span>
                   </>
                 ) : (
                   <>
@@ -415,6 +420,7 @@ export function ThoughtProcessView({
                 showBanner={i === phases.length - 1}
                 suggestedPage={i === phases.length - 1 ? suggestedPage : null}
                 stacked={hasMultiplePhases ? (i === 0 ? 'first' : i === phases.length - 1 ? 'last' : 'middle') : undefined}
+                isLive={isLive && i === phases.length - 1}
               />
             </div>
           ))}

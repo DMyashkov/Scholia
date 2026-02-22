@@ -1,52 +1,53 @@
 /**
- * React Query key prefixes and strings. Single source of truth for cache keys
- * used by crawl jobs, pages, graph, and discovered-links queries/invalidations.
+ * React Query key prefixes. Single source of truth for cache keys used by
+ * crawl jobs, pages, graph, and discovered-links. Constant names read like
+ * sentences; string value = constant name with underscores → hyphens.
+ * Key shape is [PREFIX, ...args] as documented below.
  */
 
-/** Crawl job: key [sourceId, conversationId]. useCrawlJobs. */
-export const CRAWL_JOB_SINGLE = 'crawl-job';
+// ─── Crawl jobs ─────────────────────────────────────────────────────────────
+/** Key [sourceId]. Current job (in-progress or latest main) for one source. useCrawlJob. */
+export const CURRENT_CRAWL_JOB_BY_SOURCE = 'current-crawl-job-by-source';
 
-/** Crawl jobs list: key [sourceId]. useCrawlJobs. */
-export const CRAWL_JOBS_LIST = 'crawl-jobs';
+/** Key [sourceId]. Full list of jobs for one source. useCrawlJobs (list). */
+export const LIST_OF_CRAWL_JOBS_BY_SOURCE = 'list-of-crawl-jobs-by-source';
 
-/** Crawl jobs for multiple sources: key [sourceIdsKey, conversationId]. SidebarCrawlPanel, SourcesBar, SourceDrawer, ChatArea. */
-export const CRAWL_JOBS_MAIN_FOR_SOURCES = 'crawl-jobs-main-for-sources';
+/** Key [sourceIdsKey]. Latest “main” crawl job per source (explicit_crawl_urls is null; excludes add-page jobs). */
+export const LATEST_MAIN_CRAWL_JOB_BY_SOURCES = 'latest-main-crawl-job-by-sources';
 
-export const CRAWL_JOBS_FOR_SOURCES = 'crawl-jobs-for-sources';
-export const CRAWL_JOBS_FOR_SOURCES_BAR = 'crawl-jobs-for-sources-bar';
-
-/** All prefixes we invalidate on crawl_jobs table change (realtime). */
+/** Prefixes invalidated on crawl_jobs or encoded_discovered change (realtime). */
 export const CRAWL_JOB_INVALIDATION_PREFIXES = [
-  CRAWL_JOB_SINGLE,
-  CRAWL_JOBS_LIST,
-  CRAWL_JOBS_FOR_SOURCES,
-  CRAWL_JOBS_FOR_SOURCES_BAR,
-  CRAWL_JOBS_MAIN_FOR_SOURCES,
+  CURRENT_CRAWL_JOB_BY_SOURCE,
+  LIST_OF_CRAWL_JOBS_BY_SOURCE,
+  LATEST_MAIN_CRAWL_JOB_BY_SOURCES,
 ] as const;
 
-/** Add-page job: key [conversationId, sourceId]. useAddPageJob. */
-export const ADD_PAGE_JOB = 'add-page-job';
+/** Key [conversationId, sourceId]. Latest add-page job for a source. useAddPageJob. */
+export const LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE = 'latest-add-page-job-by-conversation-and-source';
 
-/** Sources for a conversation: key [conversationId]. useConversationSources. */
-export const CONVERSATION_SOURCES = 'conversation-sources';
+// ─── Conversation-scoped (key [conversationId]) ─────────────────────────────
+/** Sources attached to a conversation. useConversationSources. */
+export const SOURCES_FOR_CONVERSATION = 'sources-for-conversation';
 
-/** Pages for a conversation: key [conversationId]. usePages. */
-export const CONVERSATION_PAGES = 'conversation-pages';
+/** Pages belonging to the conversation’s sources. useConversationPages. */
+export const PAGES_FOR_CONVERSATION = 'pages-for-conversation';
 
-/** Page edges (graph links) for a conversation: key [conversationId]. usePages. */
-export const CONVERSATION_PAGE_EDGES = 'conversation-page-edges';
+/** Page edges (graph links) for the conversation. useConversationPageEdges. */
+export const PAGE_EDGES_FOR_CONVERSATION = 'page-edges-for-conversation';
 
-/** Pages for a single source: key [sourceId]. usePages. */
-export const PAGES = 'pages';
+// ─── By source ──────────────────────────────────────────────────────────────
+/** Key [sourceId]. All pages for one source. usePages. */
+export const PAGES_BY_SOURCE = 'pages-by-source';
 
-/** Discovered links: key [conversationId] → counts for all sources. SidebarCrawlPanel. */
-export const DISCOVERED_LINKS_COUNTS_BY_CONVERSATION = 'discovered-links-counts';
+// ─── Discovered links (conversation-scoped) ──────────────────────────────────
+/** Key [conversationId]. Counts per source (map). SidebarCrawlPanel. */
+export const COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION = 'counts-of-discovered-links-by-conversation';
 
-/** Discovered links: key [conversationId, sourceId] → count for one source. SourceDrawer. */
-export const DISCOVERED_LINKS_COUNT_PER_SOURCE = 'discovered-links-count';
+/** Key [conversationId, sourceId]. Count for one source. SourceDrawer. */
+export const COUNT_OF_DISCOVERED_LINKS_BY_SOURCE = 'count-of-discovered-links-by-source';
 
-/** Encoded discovered: key [conversationId] → encoded counts for all sources. */
-export const DISCOVERED_LINKS_ENCODED_COUNTS_BY_CONVERSATION = 'discovered-links-encoded-counts';
+/** Key [conversationId]. Encoded counts per source (map). */
+export const ENCODED_COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION = 'encoded-counts-of-discovered-links-by-conversation';
 
-/** Encoded discovered: key [conversationId, sourceId] → encoded count for one source. */
-export const DISCOVERED_LINKS_ENCODED_COUNT_PER_SOURCE = 'discovered-links-encoded-count';
+/** Key [conversationId, sourceId]. Encoded count for one source. */
+export const ENCODED_COUNT_OF_DISCOVERED_LINKS_BY_SOURCE = 'encoded-count-of-discovered-links-by-source';

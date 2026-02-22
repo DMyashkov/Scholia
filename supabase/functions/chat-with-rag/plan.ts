@@ -6,19 +6,27 @@ const PLAN_SYSTEM = `You plan semantic search and evidence gathering for a quest
 Output JSON only with this shape:
 - action: "retrieve" | "clarify" | "answer"
 - why: short reason for this action
-- slots: array of { name, type, description?, required?, dependsOn? }
+- slots: array of { name, type, description?, required?, dependsOn?, target_item_count?, items_per_key? }
   - type is one of: "scalar" (one value), "list" (set of items), "mapping" (key->value per list item; use dependsOn: slot name of the list)
-  - dependsOn: name of another slot that must have at least one value before this slot can be queried (e.g. mapping depends on list; or "archetype" slot depends on "loved_thing" scalar)
+
+  - dependsOn: slot whose extracted values are required to build this slot’s query. 
+  Use only when independent querying can't be meaningfully done without those values. (mapping always depends on a list)
+
   - description: one short sentence for what this slot represents (helps extraction and UI)
-- subqueries: array of { slot, query } — each query is a search phrase for the slot (slot = slot name string)
+  
+  - target_item_count: for list slots only. Set to the number of items the user asked for (e.g. "top 5 products" -> 5). 
+  Set to 0 if the user did not specify a concrete number. Omit or 0 for scalar/mapping.
+
+  - items_per_key: for mapping slots only. Number of values per key (e.g. "top 2 achievements per product" -> 2). 
+  Backend computes total target from dependency list target_item_count x items_per_key.
+
+- subqueries: array of { slot, query } — only for slots that have no dependencies (omit dependsOn). 
+Each query is a search phrase for the slot. Do not include subqueries for mapping slots or any slot that dependsOn another; those are run later once dependencies are filled.
 
 Rules:
 - Start with action "retrieve" unless the question is ambiguous (then "clarify" with questions).
-- Slots: identify what information is needed to answer (e.g. birth_date scalar, product_list list, region_per_product mapping with dependsOn product_list). Any slot can depend on another: use dependsOn whenever slot B cannot be filled until slot A has values.
-- Subqueries
-  - for scalar slots - 1–2 focused queries
-  - for list slots - 1–2 broad discovery queries
-  - for mapping slots - 1 broad mapping query`;
+- Subqueries: only for slots with no dependencies (scalars and lists that do not dependOn another slot). 
+For scalar slots use 1–2 focused queries. For list slots use 1–2 high-level discovery (BROAD) queries (e.g. "company product list", "Biden major achievements").`;
 
 export async function callPlan(apiKey: string, userMessage: string): Promise<PlanResult> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -56,8 +64,11 @@ export async function callPlan(apiKey: string, userMessage: string): Promise<Pla
       description: typeof s.description === 'string' ? s.description : undefined,
       required: s.required !== false,
       dependsOn: typeof s.dependsOn === 'string' ? s.dependsOn : undefined,
+      target_item_count: typeof s.target_item_count === 'number' && Number.isInteger(s.target_item_count) && s.target_item_count >= 0 ? s.target_item_count : undefined,
+      items_per_key: typeof s.items_per_key === 'number' && Number.isInteger(s.items_per_key) && s.items_per_key >= 1 ? s.items_per_key : undefined,
     }))
     .filter((s) => s.name.length > 0);
+  const slotNamesWithNoDeps = new Set(slots.filter((s) => !s.dependsOn).map((s) => s.name));
   const subqueriesRaw = Array.isArray(obj.subqueries) ? obj.subqueries : [];
   const subqueries: PlanSubquery[] = subqueriesRaw
     .filter((q): q is Record<string, unknown> => q != null && typeof q === 'object')
@@ -65,7 +76,7 @@ export async function callPlan(apiKey: string, userMessage: string): Promise<Pla
       slot: String(q.slot ?? ''),
       query: String(q.query ?? ''),
     }))
-    .filter((q) => q.query.length > 0);
+    .filter((q) => q.query.length > 0 && slotNamesWithNoDeps.has(q.slot));
 
   return { action, why, slots: slots.length > 0 ? slots : [{ name: 'answer', type: 'scalar', required: true }], subqueries };
 }

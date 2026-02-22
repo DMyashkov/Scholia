@@ -4,9 +4,8 @@ import { OPENAI_CHAT_MODEL } from './config.ts';
 const PLAN_SYSTEM = `You plan semantic search and evidence gathering for a question over indexed documents.
 
 Output JSON only with this shape:
-- action: "retrieve" | "clarify" | "answer"
 - why: short reason for this action
-- slots: array of { name, type, description?, required?, dependsOn?, target_item_count?, items_per_key? }
+- slots: array of slot objects. Fields: name, type, description?, required?, dependsOn?, target_item_count? (list), items_per_key? (mapping only).
   - type is one of: "scalar" (one value), "list" (set of items), "mapping" (key->value per list item; use dependsOn: slot name of the list)
 
   - dependsOn: slot whose extracted values are required to build this slot’s query. 
@@ -17,8 +16,7 @@ Output JSON only with this shape:
   - target_item_count: for list slots only. Set to the number of items the user asked for (e.g. "top 5 products" -> 5). 
   Set to 0 if the user did not specify a concrete number. Omit or 0 for scalar/mapping.
 
-  - items_per_key: for mapping slots only. Number of values per key (e.g. "top 2 achievements per product" -> 2). 
-  Backend computes total target from dependency list target_item_count x items_per_key.
+  - items_per_key: (mapping only) Values per key (e.g. "top 2 achievements per product" -> 2). Backend: target = dependency target_item_count × items_per_key. Include in slots array for every mapping slot.
 
 - subqueries: array of { slot, query } — only for slots that have no dependencies (omit dependsOn). 
 Each query is a search phrase for the slot. Do not include subqueries for mapping slots or any slot that dependsOn another; those are run later once dependencies are filled.

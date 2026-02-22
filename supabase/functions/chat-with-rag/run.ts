@@ -4,7 +4,7 @@
 /// <reference path="./deno_types.d.ts" />
 import type { SupabaseClient } from 'supabase';
 import { createClient } from 'supabase';
-import type { PlanResult, PlanSlot } from './types.ts';
+import type { PlanResult, PlanSlot, ExtractSubquery } from './types.ts';
 import type { RagContextReady, SlotDb, StepDb } from './types.ts';
 import { loadRagContext, type LoadRagBody } from './context.ts';
 import { insertNoPagesMessage, insertClarifyMessage, insertExpandCorpusMessage, insertRetrieveHardStopMessage } from './actions.ts';
@@ -133,6 +133,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       required: s.required !== false,
       depends_on_slot_id: null as string | null,
       target_item_count: s.type === 'list' ? (s.target_item_count ?? 0) : 0,
+      items_per_key: s.type === 'mapping' && s.items_per_key != null ? s.items_per_key : null,
     }));
     const { data: insertedSlots } = await supabase.from('slots').insert(slotInserts).select('id, name');
     const insertedSlotsList = (insertedSlots ?? []) as { id: string; name: string }[];
@@ -145,16 +146,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         if (depId) await supabase.from('slots').update({ depends_on_slot_id: depId }).eq('id', row.id);
       }
     }
-    slots = (await supabase.from('slots').select('id, name, type, description, required, depends_on_slot_id, target_item_count, current_item_count, attempt_count, finished_querying, last_queries').eq('root_message_id', rootMessageId)).data as SlotDb[] ?? [];
-    for (const s of slots) {
-      const planSlot = planResult.slots.find((p) => p.name === s.name);
-      if (s.type === 'mapping' && s.depends_on_slot_id && planSlot?.items_per_key) {
-        const depSlot = slots.find((d) => d.id === s.depends_on_slot_id);
-        const depTarget = depSlot?.target_item_count ?? 0;
-        await supabase.from('slots').update({ target_item_count: depTarget * planSlot.items_per_key }).eq('id', s.id);
-      }
-    }
-    slots = (await supabase.from('slots').select('id, name, type, description, required, depends_on_slot_id, target_item_count, current_item_count, attempt_count, finished_querying, last_queries').eq('root_message_id', rootMessageId)).data as SlotDb[] ?? [];
+    slots = (await supabase.from('slots').select('id, name, type, description, required, depends_on_slot_id, target_item_count, items_per_key, current_item_count, attempt_count, finished_querying, last_queries').eq('root_message_id', rootMessageId)).data as SlotDb[] ?? [];
     slotIdByName = new Map(slots.map((s) => [s.name, s.id]));
     for (const q of planResult.subqueries) {
       const sid = slotIdByName.get(q.slot);
@@ -179,15 +171,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     };
     await emit({ thoughtProcess: initialThought });
   }
-
-  const slotRowsForExtract: SlotRow[] = slots.map((s) => ({
-    id: s.id,
-    name: s.name,
-    type: s.type,
-    description: s.description ?? undefined,
-    depends_on_slot_id: s.depends_on_slot_id ?? undefined,
-    ...((s.type === 'list' || s.type === 'mapping') && s.target_item_count != null ? { target_item_count: s.target_item_count } : {}),
-  }));
 
   let totalSubqueriesRun = 0;
   let iteration = 0;
@@ -238,6 +221,14 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
   const slotsWithAttempts = slots.filter((s) => s.type === 'list' || s.type === 'mapping');
 
+  /** Effective target for list = target_item_count; for mapping = dep list count × items_per_key. */
+  const getEffectiveTarget = (slot: SlotDb, counts: Map<string, number>): number => {
+    if (slot.type === 'list') return slot.target_item_count ?? 0;
+    if (slot.type === 'mapping' && slot.depends_on_slot_id && slot.items_per_key != null)
+      return (counts.get(slot.depends_on_slot_id) ?? 0) * slot.items_per_key;
+    return 0;
+  };
+
   /** Structured slot state for extraction: slot name -> { type, items }. Enables reliable parsing and mapping-key awareness. */
   const getCurrentSlotItemsState = async (): Promise<Record<string, { type: string; items: { key?: string | null; value: unknown }[] }>> => {
     const { data: items } = await supabase
@@ -269,7 +260,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
   let validQuoteIdsForSave = new Set<string>();
   // All evidence chunks seen across iterations, keyed by chunk id
   const evidenceChunksById = new Map<string, string>();
-  let lastExtractResult: { next_action?: string; why?: string; final_answer?: string; subqueries?: { slot: string; query: string }[]; extractionGaps?: string[]; cited_snippets?: Record<string, string> } | null = null;
+  let lastExtractResult: { next_action?: string; why?: string; final_answer?: string; subqueries?: ExtractSubquery[]; extractionGaps?: string[]; cited_snippets?: Record<string, string> } | null = null;
   const extractionGapsAccumulated: string[] = [];
   let slotItemCountBySlotId = new Map<string, number>();
 
@@ -292,6 +283,17 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
   while (!done && iteration < MAX_ITERATIONS) {
     iteration++;
     slotItemCountBySlotId = await getSlotItemCountBySlotId();
+
+    // Set finished_querying so "all required finished" can be a single check (scalar: filled; list/mapping: at target)
+    for (const slot of slots) {
+      const count = slotItemCountBySlotId.get(slot.id) ?? 0;
+      if (slot.type === 'scalar') {
+        if (count >= 1) slot.finished_querying = true;
+      } else if (slot.type === 'list' || slot.type === 'mapping') {
+        const effectiveTarget = getEffectiveTarget(slot, slotItemCountBySlotId);
+        if (effectiveTarget > 0 && count >= effectiveTarget) slot.finished_querying = true;
+      }
+    }
 
     const stepList = (await supabase
       .from('reasoning_steps')
@@ -316,7 +318,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
           if (!slot || slot.finished_querying) return false;
           const count = slotItemCountBySlotId.get(slot.id) ?? 0;
           if (slot.type === 'scalar' && count >= 1) return false;
-          if ((slot.type === 'list' || slot.type === 'mapping') && slot.target_item_count > 0 && count >= slot.target_item_count) return false;
           if (!slot.depends_on_slot_id) return true;
           return (slotItemCountBySlotId.get(slot.depends_on_slot_id) ?? 0) >= 1;
         });
@@ -335,9 +336,38 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         .single();
       if (!newStep?.id) break;
       currentStepId = newStep.id;
-      const nextSubs = lastExtractResult?.subqueries?.length
-        ? lastExtractResult.subqueries
+      const subsInput: ExtractSubquery[] = lastExtractResult?.subqueries?.length
+        ? (lastExtractResult.subqueries as ExtractSubquery[])
         : [{ slot: 'answer', query: userMsg.slice(0, 200) }];
+      // Expand __map__ subqueries into one query per key from the mapping slot's dependency list (matrix)
+      const currentSlotStateForExpand = await getCurrentSlotItemsState();
+      const nextSubs: { slot: string; query: string }[] = [];
+      for (const q of subsInput) {
+        if (q.query !== '__map__') {
+          nextSubs.push({ slot: q.slot, query: q.query });
+          continue;
+        }
+        const sid = slotIdByName.get(q.slot);
+        const slot = sid ? slots.find((s) => s.id === sid) : null;
+        const mapDesc = (q as { map_description?: string }).map_description;
+        if (!slot || slot.type !== 'mapping' || !slot.depends_on_slot_id) {
+          nextSubs.push({ slot: q.slot, query: mapDesc || slot?.description || q.slot });
+          continue;
+        }
+        const depSlot = slots.find((s) => s.id === slot.depends_on_slot_id);
+        const depItems = depSlot ? (currentSlotStateForExpand[depSlot.name]?.items ?? []) : [];
+        const keys = depItems.map((item) =>
+          typeof item.value === 'string' ? item.value : (item.key != null ? String(item.key) : JSON.stringify(item.value))
+        );
+        if (keys.length === 0) {
+          nextSubs.push({ slot: q.slot, query: mapDesc || slot.description || q.slot });
+          continue;
+        }
+        const phrase = mapDesc || slot.description || q.slot;
+        for (const key of keys) {
+          nextSubs.push({ slot: q.slot, query: `${phrase} for ${key}` });
+        }
+      }
       // Iteration 2+: gate by dependency, finished_querying, scalar-already-filled, list-at-target
       const nextSubsFiltered = nextSubs.filter((q) => {
         const sid = slotIdByName.get(q.slot);
@@ -346,7 +376,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         if (!slot || slot.finished_querying) return false;
         const count = slotItemCountBySlotId.get(slot.id) ?? 0;
         if (slot.type === 'scalar' && count >= 1) return false;
-        if ((slot.type === 'list' || slot.type === 'mapping') && slot.target_item_count > 0 && count >= slot.target_item_count) return false;
         if (!slot.depends_on_slot_id) return true;
         return (slotItemCountBySlotId.get(slot.depends_on_slot_id) ?? 0) >= 1;
       });
@@ -435,6 +464,17 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     log('extract-call', { iteration, chunkCount: evidenceChunksForExtract.length, topSuggestedCount: topSuggestedPages?.length ?? 0 });
     const snippetPreviews = evidenceChunksForExtract.map((q) => (q.snippet ?? '').slice(0, 120));
     log('extract-evidence-preview', { iteration, snippetPreviews });
+    const slotRowsForExtract: SlotRow[] = slots.map((s) => {
+      const target = getEffectiveTarget(s, slotItemCountBySlotId);
+      return {
+        id: s.id,
+        name: s.name,
+        type: s.type,
+        description: s.description ?? undefined,
+        depends_on_slot_id: s.depends_on_slot_id ?? undefined,
+        ...((s.type === 'list' || s.type === 'mapping') && target > 0 ? { target_item_count: target } : {}),
+      };
+    });
     const extractResult = await callExtractAndDecide(
       openaiKey,
       slotRowsForExtract,
@@ -505,6 +545,11 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       const currentCount = slotItemCountBySlotId.get(slot.id) ?? 0;
       const hadSubqueriesThisStep = thisStepQueriesBySlotId.has(slot.id);
       slot.current_item_count = currentCount;
+      // Mark finished when list/mapping has reached target (list: target_item_count; mapping: dep count × items_per_key)
+      const effectiveTarget = getEffectiveTarget(slot, slotItemCountBySlotId);
+      if (effectiveTarget > 0 && currentCount >= effectiveTarget) {
+        slot.finished_querying = true;
+      }
       if (hadSubqueriesThisStep) {
         slot.attempt_count += 1;
         slot.last_queries = thisStepQueriesBySlotId.get(slot.id) ?? slot.last_queries ?? [];
@@ -513,16 +558,14 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         if (currentCount === prevCount) slot.finished_querying = true;
       }
     }
-    for (const slot of slotsWithAttempts) {
-      await supabase
-        .from('slots')
-        .update({
-          current_item_count: slot.current_item_count,
-          attempt_count: slot.attempt_count,
-          finished_querying: slot.finished_querying,
-          last_queries: slot.last_queries ?? [],
-        })
-        .eq('id', slot.id);
+    for (const slot of slots) {
+      const payload: { finished_querying: boolean; current_item_count?: number; attempt_count?: number; last_queries?: string[] } = { finished_querying: slot.finished_querying };
+      if (slot.type === 'list' || slot.type === 'mapping') {
+        payload.current_item_count = slot.current_item_count;
+        payload.attempt_count = slot.attempt_count;
+        payload.last_queries = slot.last_queries ?? [];
+      }
+      await supabase.from('slots').update(payload).eq('id', slot.id);
     }
     // Strip subqueries for slots that just became finished (broad_query_completed_slot_fully or stagnation)
     // so we never run or persist them; the prompt didn't know they were finished yet.
@@ -531,7 +574,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       lastExtractResult.subqueries = lastExtractResult.subqueries.filter((q) => !nowFinishedNames.has(q.slot));
     }
     const slotMetaBySlotId = new Map<string, SlotCompletenessMeta>(
-      slots.map((s) => [s.id, { target_item_count: s.target_item_count, finished_querying: s.finished_querying }]),
+      slots.map((s) => [s.id, { target_item_count: getEffectiveTarget(s, slotItemCountBySlotId), finished_querying: s.finished_querying }]),
     );
     const slotsForCompleteness: SlotForCompleteness[] = slots.map((s) => ({
       id: s.id,
@@ -540,6 +583,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       depends_on_slot_id: s.depends_on_slot_id ?? null,
     }));
     const completeness = overallCompleteness(slotsForCompleteness, slotItemCountBySlotId, slotMetaBySlotId);
+    const allFinished = slots.filter((s) => s.required).every((s) => s.finished_querying);
+    const effectiveNextAction = (extractResult.next_action === 'retrieve' && allFinished) ? 'answer' : extractResult.next_action;
 
     await supabase
       .from('reasoning_steps')
@@ -592,7 +637,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       completeness,
       fillStatusBySlot: INCLUDE_FILL_STATUS_BY_SLOT ? fillStatusBySlot : undefined,
       statements: stepStatements,
-      nextAction: extractResult.next_action,
+      nextAction: effectiveNextAction,
       ...(Object.keys(listSlotDebug).length > 0 ? { listSlotState: listSlotDebug } : {}),
     };
     thoughtProcess.steps.push(stepEntry);
@@ -605,8 +650,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       step: iteration,
       totalSteps: MAX_ITERATIONS,
       iter: iteration,
-      action: extractResult.next_action,
-      label: extractResult.next_action === 'answer' ? 'Answering' : extractResult.next_action === 'retrieve' ? 'Retrieving again' : extractResult.next_action,
+      action: effectiveNextAction,
+      label: effectiveNextAction === 'answer' ? 'Answering' : effectiveNextAction === 'retrieve' ? 'Retrieving again' : effectiveNextAction,
       why: extractResult.why,
       quotesFound: retrievedChunks.length,
       claims: extractResult.claims,
@@ -619,10 +664,13 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const zeroCompletenessGiveUp = completeness === 0 && iteration >= 1;
     prevSlotItemCount = currentSlotItemCount;
 
-    if (extractResult.next_action === 'answer') {
+    if (effectiveNextAction === 'answer') {
       const finalResult = await produceFinalAnswer();
       finalAnswer = finalResult.finalAnswer;
       lastExtractResult = { ...extractResult, cited_snippets: finalResult.cited_snippets };
+      if (extractResult.next_action === 'retrieve' && allFinished) {
+        (lastExtractResult as { next_action?: string }).next_action = 'answer';
+      }
       validQuoteIdsForSave = finalResult.validQuoteIds;
       done = true;
       break;

@@ -79,7 +79,8 @@ export async function getEvidenceChunksForFinalAnswer(
   return selected;
 }
 
-const FINAL_ANSWER_SYSTEM = `You write the final answer to the user's question using only the provided evidence (chunks). Each chunk has an id in brackets; use [[quote:uuid]] in your answer for every chunk you cite (uuid = chunk id).
+const FINAL_ANSWER_SYSTEM = `You write the final answer to the user's question using only the provided evidence (chunks). 
+Each chunk has an id in brackets; use [[quote:uuid]] in your answer for every chunk you cite (uuid = chunk id).
 
 Output JSON only:
 {
@@ -90,7 +91,8 @@ Output JSON only:
 Rules:
 - Base the answer only on the evidence below. Cite every claim with [[quote:uuid]] using the chunk id from the evidence block.
 - In cited_snippets, map each cited chunk uuid to the exact verbatim passage you are quoting (one sentence or short passage). Copy from the evidence exactly.
-- If some parts of the question could not be answered from the evidence: (1) briefly say why (e.g. no evidence in the provided sources); (2) present what you did find with citations; (3) at the end list what could not be found. Do not ask the user to clarify.`;
+- If some parts of the question could not be answered from the evidence: 
+(1) briefly say why (e.g. no evidence in the provided sources); (2) present what you did find with citations; (3) at the end list what could not be found.`;
 
 export async function callFinalAnswer(
   apiKey: string,

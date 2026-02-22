@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ExtractClaim, ExtractResult } from './types.ts';
+import type { ExtractClaim, ExtractResult, ExtractSubquery } from './types.ts';
 import type { SuggestedPage } from './expand.ts';
 import { OPENAI_CHAT_MODEL } from './config.ts';
 
@@ -27,22 +27,32 @@ Output JSON only:
   ],
   "next_action": "retrieve" | "expand_corpus" | "clarify" | "answer",
   "why": "short reason",
-  "subqueries": "optional: when next_action is retrieve, array of { \"slot\": \"slot_name\", \"query\": \"search phrase\" } for the next retrieval round",
+  "subqueries": "optional: when next_action is retrieve, array of { \"slot\": \"slot_name\", \"query\": \"search phrase\" } or for mapping slots { \"slot\": \"slot_name\", \"query\": \"__map__\", \"map_description\": \"optional phrase per key (e.g. achievements)\" }; backend expands __map__ to one query per key from the dependency list",
   "questions": "optional: when next_action is clarify, array of clarifying question strings",
-  "suggested_page_index": "optional: when next_action is expand_corpus and a candidate list was provided, integer 1–10 indicating which candidate page to suggest (1 = first); omit to suggest the first",
-  "broad_query_completed_slot_fully": "optional: array of slot names. Only include slots that the backend listed as BROAD this step. Set a slot name here only if you believe no more retrieval is needed for that slot (evidence is sufficient)."
+  "suggested_page_index": "optional: when next_action is expand_corpus and a candidate list was provided, integer 1–10 (1 = first); omit for first",
+  "broad_query_completed_slot_fully": "optional: array of BROAD slot names (listed below) for which no more retrieval is needed; evidence sufficient."
 }
 
 Rules:
-- Only output claims that are directly supported by the given chunks. Each claim must list at least one chunkId from the evidence (the UUID in brackets above).
-- Use the exact chunk id (UUID) in chunkIds—copy from the [uuid] line for each chunk you cite.
-- For scalar slots: one value, key omitted. For list slots: one claim per list item, value = the item. For mapping slots: key must be one of the entity names (keys) from the slot's dependency (see current slot state); value = the mapping value. Do not invent mapping keys—only use keys that already exist in the dependency slot's items.
-- Prefer extracting claims when the evidence clearly states the information. Use "expand_corpus" only when the evidence genuinely does not contain the needed facts, not when it is merely spread across several chunks.
-- If evidence is insufficient for required slots, set next_action to "retrieve" or "expand_corpus". Do NOT use "clarify" merely because evidence is missing—use "clarify" only when the question itself is ambiguous (e.g. which of several things the user means).
-- When to answer: Set next_action to "answer" when all required slots have finished querying or are complete, or when you have partial evidence and retrieval has finished/stagnated. Do not suggest subqueries for slots that have finished querying (see "Slots that have finished querying" below). The backend will then run a separate final-answer step with all supporting evidence; you do not write the answer text here.
-- Subqueries to omit (keep the response minimal): Do not include subqueries for (a) slots that have finished querying (listed below), (b) scalar slots that already have a value in the current slot state, or (c) list/mapping slots that have already reached their target item count (compare current slot state item counts to the slot targets in "Slots to fill" below; target 0 means no fixed target—continue until broad_query_completed_slot_fully or stagnate). Only suggest subqueries for slots that still need more retrieval even after your extracted claims.
-- BROAD vs TARGETED: The backend lists which slots are in BROAD mode this step. Use broad-style only for those; targeted for other list/mapping slots. For BROAD slots only you may set "broad_query_completed_slot_fully" if no more retrieval is needed. Never repeat an identical query; use "last queries and items" per slot to try something different.
-- When candidate suggested pages are provided, prefer "expand_corpus" only when evidence genuinely lacks the information AND a candidate is clearly relevant; otherwise prefer "retrieve" with subqueries or "answer". If expand_corpus, you may set "suggested_page_index" (1–10); omit to suggest the first.`;
+- Claims: only from given chunks; each claim must list at least one chunkId (exact UUID from [uuid] lines). 
+Scalar: one value, no key. List: one claim per item. Mapping: key = one of the dependency slot's entity names from current slot state; do not invent keys.
+
+- Prefer "retrieve" or "answer"; use "expand_corpus" only when evidence genuinely lacks the facts (not merely spread across chunks). 
+Use "clarify" only when the question is ambiguous, not when evidence is missing.
+
+- Answer: Set next_action to "answer" when required slots are finished/complete or retrieval has stagnated with partial evidence. 
+Backend runs a separate final-answer step; you do not write answer text.
+
+- Subqueries: omit for (a) slots that have finished querying (listed below), (b) scalar slots that already have a value in current slot state, 
+(c) list/mapping slots that have reached target (see "Slots to fill" targets; target 0 = no fixed target, continue until broad_query_completed_slot_fully or stagnate). 
+Only suggest subqueries for slots that still need retrieval after your claims.
+For mapping slots you may output a single map directive: { \"slot\": \"slot_name\", \"query\": \"__map__\", \"map_description\": \"optional phrase per key\" }; backend will expand it into one query per key from the dependency list (matrix).
+
+- BROAD vs TARGETED: Backend lists BROAD slots this step. Use broad-style only for those; targeted for other list/mapping. 
+For BROAD slots you may set broad_query_completed_slot_fully if no more retrieval needed. Never repeat an identical query; use "last queries and items" to try something different.
+
+- Candidate suggested pages: prefer "expand_corpus" only when evidence genuinely lacks info AND a candidate is clearly relevant; 
+otherwise "retrieve" with subqueries or "answer". If expand_corpus, set suggested_page_index (1–10) or omit for first.`;
 
 export async function callExtractAndDecide(
   apiKey: string,
@@ -72,7 +82,7 @@ export async function callExtractAndDecide(
   if (previousAttemptsBySlot && previousAttemptsBySlot.trim().length > 0) {
     previousAttemptsBlock = `
 
-Previous attempt (for slots not yet completed — try different queries):
+Previous attempt (slots not yet completed — try different queries):
 ${previousAttemptsBySlot}`;
   }
 
@@ -83,41 +93,43 @@ ${previousAttemptsBySlot}`;
       .join('\n');
     dynamicBlock = `
 
-Candidate suggested pages (non-indexed links; only suggest if one is clearly relevant and evidence lacks the information):
+Candidate suggested pages (suggest expand_corpus only if one is clearly relevant and evidence lacks the info):
 ${candidateList}
 
-When you choose expand_corpus, you may set "suggested_page_index" (1–${topSuggestedPages.length}) to pick which candidate to suggest; if omitted the first is used. Prefer retrieve with subqueries when more retrieval could fill slots (e.g. list not full).`;
+expand_corpus: set suggested_page_index (1–${topSuggestedPages.length}) or omit for first. Prefer retrieve when more retrieval could fill slots.`;
   } else if (suggestExpandWhenNoEvidence) {
-    dynamicBlock = '\nThis conversation has dynamic sources. When evidence is insufficient to fill required slots, prefer next_action "expand_corpus" with why describing what kind of page might help, instead of "retrieve".';
+    dynamicBlock = '\nDynamic sources: when evidence is insufficient, prefer next_action "expand_corpus" with why (what kind of page would help).';
   }
 
-  let broadAndFinishedBlock = '';
-  if (broadSlotNamesThisStep.length > 0 || finishedQueryingSlotNames.length > 0) {
-    const lines: string[] = [];
-    if (broadSlotNamesThisStep.length > 0) {
-      lines.push(`Slots in BROAD mode this step (first retrieval; you may set broad_query_completed_slot_fully for these only): ${broadSlotNamesThisStep.join(', ')}.`);
-    }
-    if (finishedQueryingSlotNames.length > 0) {
-      lines.push(`Slots that have finished querying (do not suggest subqueries for these): ${finishedQueryingSlotNames.join(', ')}. When all required are finished or complete, set next_action to "answer".`);
-    }
-    broadAndFinishedBlock = '\n\n' + lines.join('\n');
+  let broadBlock = '';
+  if (broadSlotNamesThisStep.length > 0) {
+    broadBlock = `\n\nBROAD slots this step (may set broad_query_completed_slot_fully): ${broadSlotNamesThisStep.join(', ')}.`;
   }
+
+  const finishedBlock =
+    finishedQueryingSlotNames.length > 0
+      ? `
+ ${finishedQueryingSlotNames.join(', ')}. Set next_action to "answer" when all required are finished or complete.`
+      : '';
 
   const userContent = `Question: ${userMessage}
 
 Slots to fill:
 ${slotBlock}
 
-Current slot state (structured JSON — use this to see existing keys per slot and, for mapping slots, which keys are allowed):
+Slots already finished (no subqueries needed):
+${finishedBlock}
+
+Current slot state (JSON — existing keys per slot; for mapping, which keys are allowed):
 ${currentSlotStateJson || '{}'}
 ${previousAttemptsBlock}
 
-Evidence (quotes with ids — use these exact UUIDs in each claim's quoteIds):
+Evidence (use exact UUIDs in each claim's chunkIds):
 ---
 ${quoteBlock}
----${dynamicBlock}${broadAndFinishedBlock}
+---${dynamicBlock}${broadBlock}
 
-Output JSON: claims, next_action, why; when next_action is retrieve include subqueries; when expand_corpus include suggested_page_index (1–10); when BROAD slots need no more retrieval include broad_query_completed_slot_fully.`;
+Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_page_index if expand_corpus; broad_query_completed_slot_fully for BROAD slots needing no more retrieval.`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -151,10 +163,21 @@ Output JSON: claims, next_action, why; when next_action is retrieve include subq
     : 'retrieve';
   const why = typeof obj.why === 'string' ? obj.why : undefined;
   const subqueriesRaw = Array.isArray(obj.subqueries) ? obj.subqueries : [];
-  const subqueries = subqueriesRaw
+  const subqueries: ExtractSubquery[] = subqueriesRaw
     .filter((q): q is Record<string, unknown> => q != null && typeof q === 'object')
-    .map((q) => ({ slot: String(q.slot ?? ''), query: String(q.query ?? '') }))
-    .filter((q) => q.slot.length > 0 && q.query.length > 0);
+    .map((q) => {
+      const slot = String(q.slot ?? '').trim();
+      const queryRaw = q.query;
+      const query = queryRaw === '__map__' ? '__map__' : String(queryRaw ?? '');
+      if (slot.length === 0) return null;
+      if (query === '__map__') {
+        const map_description = typeof q.map_description === 'string' ? q.map_description.trim() || undefined : undefined;
+        return { slot, query: '__map__' as const, ...(map_description ? { map_description } : {}) };
+      }
+      if (typeof query === 'string' && query.length > 0) return { slot, query };
+      return null;
+    })
+    .filter((q): q is ExtractSubquery => q != null);
   const questionsRaw = Array.isArray(obj.questions) ? obj.questions : [];
   const questions = questionsRaw.filter((q): q is string => typeof q === 'string' && q.trim().length > 0).map((q) => q.trim());
   const claimsRaw = Array.isArray(obj.claims) ? obj.claims : [];

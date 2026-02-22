@@ -43,6 +43,21 @@ export interface PlanSubquery {
   query: string;
 }
 
+/** Normal subquery: explicit search phrase for one retrieval. */
+export interface NormalSubquery {
+  slot: string;
+  query: string;
+}
+
+/** Map subquery: backend expands to one query per key from the mapping slot's dependency list. */
+export interface MapSubquery {
+  slot: string;
+  query: '__map__';
+  map_description?: string;
+}
+
+export type ExtractSubquery = NormalSubquery | MapSubquery;
+
 export interface PlanResult {
   action: 'retrieve' | 'expand_corpus' | 'clarify' | 'answer';
   why?: string;
@@ -65,8 +80,8 @@ export interface ExtractResult {
   next_action: 'retrieve' | 'expand_corpus' | 'clarify' | 'answer';
   why?: string;
   final_answer?: string;
-  /** When next_action is retrieve, optional follow-up subqueries for the next iteration */
-  subqueries?: { slot: string; query: string }[];
+  /** When next_action is retrieve, optional follow-up subqueries for the next iteration (normal or __map__ for mapping slots). */
+  subqueries?: ExtractSubquery[];
   /** When next_action is clarify, optional list of questions for the user */
   questions?: string[];
   /** e.g. "Could not parse claim for slot X" when parse fails or slot missing */
@@ -101,6 +116,8 @@ export type SlotDb = {
   required: boolean;
   depends_on_slot_id?: string | null;
   target_item_count: number;
+  /** Mapping slots only: values per key. Target = dep list current_item_count * items_per_key. */
+  items_per_key?: number | null;
   current_item_count: number;
   attempt_count: number;
   finished_querying: boolean;

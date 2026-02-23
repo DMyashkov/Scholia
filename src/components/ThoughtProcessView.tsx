@@ -4,7 +4,7 @@ import type { ThoughtProcess } from '@/types/chat';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-/** User-facing label for next_action (no technical terms). */
+
 function nextActionLabel(nextAction: string): string {
   switch (nextAction) {
     case 'expand_corpus': return 'Suggest closest page from encoded discovered';
@@ -15,7 +15,7 @@ function nextActionLabel(nextAction: string): string {
   }
 }
 
-/** Outcome line for footer and header subtitle. */
+
 function outcomeLabel(tp: ThoughtProcess): string | null {
   const last = tp.steps?.[tp.steps.length - 1];
   const action = last?.nextAction;
@@ -36,9 +36,9 @@ function PhaseContent({
   tp: ThoughtProcess;
   showBanner?: boolean;
   suggestedPage?: { title: string; url?: string; fromPageTitle?: string } | null;
-  /** When in a multi-phase layout: tight padding around dividers */
+  
   stacked?: 'first' | 'middle' | 'last';
-  /** When true, last step "answer" is still in progress (show "Answering..." without filled background) */
+  
   isLive?: boolean;
 }) {
   const outcome = outcomeLabel(tp);
@@ -312,15 +312,15 @@ function PhaseContent({
 
 interface ThoughtProcessViewProps {
   thoughtProcess: ThoughtProcess;
-  /** When present, show previous phase(s) above the current (e.g. before suggested page was added). */
+  
   thoughtProcessBefore?: ThoughtProcess | null;
-  /** When set, use this ordered list of phases (oldest first) instead of deriving from thoughtProcess + thoughtProcessBefore. Supports 3+ phases. */
+  
   phases?: ThoughtProcess[] | null;
-  /** When set and outcome is "Suggested a page", footer shows "Suggested **{title}** (branching out from …)" when fromPageTitle is set */
+  
   suggestedPage?: { title: string; url?: string; fromPageTitle?: string } | null;
-  /** When true, show as live/streaming (no collapse, subtle pulse) */
+  
   isLive?: boolean;
-  /** When false (saved message), panel is collapsible and starts collapsed */
+  
   defaultOpen?: boolean;
 }
 

@@ -6,26 +6,18 @@ import { optimisticUpdateSingle } from '@/hooks/optimisticMutation';
 
 const STORAGE_KEY = 'scholia-copy-include-evidence';
 
-/** For guests: get from localStorage */
+
 function getLocal(): boolean {
   if (typeof window === 'undefined') return true;
-  try {
-    const v = localStorage.getItem(STORAGE_KEY);
-    if (v === 'false') return false;
-    if (v === 'true') return true;
-  } catch {
-    /* ignore */
-  }
+  const v = localStorage.getItem(STORAGE_KEY);
+  if (v === 'false') return false;
+  if (v === 'true') return true;
   return true;
 }
 
-/** For guests: save to localStorage */
+
 function setLocal(include: boolean): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, String(include));
-  } catch {
-    /* ignore */
-  }
+  localStorage.setItem(STORAGE_KEY, String(include));
 }
 
 export function useCopyIncludeEvidence() {
@@ -73,7 +65,7 @@ export function useCopyIncludeEvidence() {
     }
   };
 
-  // Sync guest state from localStorage when user becomes null (e.g. logout)
+  
   useEffect(() => {
     if (!user) setGuestValue(getLocal());
   }, [user]);

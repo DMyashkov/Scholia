@@ -7,7 +7,7 @@ import { capWithFairAllocation } from './utils.ts';
 
 export interface RetrieveResult {
   chunks: ChunkRow[];
-  /** Chunk count per query (same order as queries) for transparency. */
+  
   chunksPerSubquery: number[];
 }
 
@@ -52,7 +52,3 @@ export async function doRetrieve(
   );
   return { chunks, chunksPerSubquery };
 }
-
-// Previously: doRetrieveAndCreateQuotes created a quote row per chunk at retrieval time.
-// In the new architecture, retrieval only returns chunks; quotes are created later
-// at finalization for chunks actually cited in the final answer.

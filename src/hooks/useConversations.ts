@@ -96,7 +96,7 @@ export const useDeleteConversation = () => {
   return useMutation({
     mutationFn: (id: string) => conversationsApi.delete(id),
     onSuccess: () => {
-      // Invalidate all conversation-related queries
+      
       queryClient.invalidateQueries({ queryKey: ['conversations', userId] });
       queryClient.invalidateQueries({ queryKey: ['conversations'] });
       queryClient.invalidateQueries({ queryKey: ['conversation'] });
@@ -121,5 +121,3 @@ export const useDeleteAllConversations = () => {
     },
   });
 };
-
-

@@ -42,9 +42,9 @@ export interface Source {
   conversation_id: string;
   initial_url: string;
   domain: string;
-  source_label?: string | null; // Human-readable label from first page (e.g. "Joe Biden"). domain = hostname.
+  source_label?: string | null; 
   crawl_depth: 'shallow' | 'medium' | 'deep' | 'singular' | 'dynamic';
-  suggestion_mode: SuggestionMode; // surface = link context (faster), dive = fetch target page lead (slower)
+  suggestion_mode: SuggestionMode; 
   same_domain_only: boolean;
   created_at: string;
   updated_at: string;
@@ -98,9 +98,9 @@ export interface PageEdge {
   to_url?: string | null;
   created_at: string;
   owner_id: string;
-  /** Derived from from_page_id via pages; present in API response for convenience */
+  
   source_id?: string;
-  /** Derived from from_page_id via pages; present in API response for convenience */
+  
   conversation_id?: string;
 }
 
@@ -130,7 +130,7 @@ export interface Quote {
   created_at: string;
 }
 
-// Insert types (omitting auto-generated fields)
+
 export type ConversationInsert = Omit<Conversation, 'id' | 'created_at' | 'updated_at' | 'owner_id'> & {
   owner_id?: string | null;
 };
@@ -146,4 +146,3 @@ export type SourceInsert = Omit<Source, 'id' | 'created_at' | 'updated_at' | 'ow
 export type CrawlJobInsert = Omit<CrawlJob, 'id' | 'created_at' | 'updated_at' | 'owner_id'> & {
   owner_id?: string | null;
 };
-

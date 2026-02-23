@@ -10,11 +10,11 @@ export type DisableReason = 'no_sources' | 'processing' | 'loading' | 'adding_pa
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
   isLoading: boolean;
-  /** When true, send is disabled */
+  
   isDisabled?: boolean;
-  /** Why send is disabled - used for Enter key feedback */
+  
   disableReason?: DisableReason;
-  /** Called when user presses Enter with no sources - open add source modal */
+  
   onRequestAddSource?: () => void;
 }
 

@@ -35,12 +35,12 @@ export const KnowledgeTrail = ({ sources, onSourceClick }: KnowledgeTrailProps) 
                   onClick={() => onSourceClick(source.id)}
                   className="flex items-center group"
                 >
-                  {/* Connecting line */}
+                  {}
                   {index > 0 && (
                     <div className="w-4 h-px bg-border/40 group-hover:bg-primary/30 transition-colors" />
                   )}
                   
-                  {/* Source pill */}
+                  {}
                   <div className={cn(
                     'flex items-center gap-1 px-2 py-0.5 rounded-full',
                     'bg-secondary/60 border border-border/30',

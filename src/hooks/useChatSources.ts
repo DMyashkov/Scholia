@@ -104,7 +104,7 @@ export const useChatSources = ({ sources, onSourcesChange }: UseChatSourcesOptio
     const newSources = [...sources, newSource];
     onSourcesChange(newSources);
     
-    // Start the crawl simulation with the new sources array
+    
     setTimeout(() => startCrawlSimulation(id, newSources), 0);
 
     return id;

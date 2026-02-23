@@ -19,7 +19,7 @@ export const userSettingsApi = {
       .single();
 
     if (error) {
-      if (error.code === 'PGRST116') return null; // no rows
+      if (error.code === 'PGRST116') return null; 
       throw error;
     }
     return data as UserSettings;

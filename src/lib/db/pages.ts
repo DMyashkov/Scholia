@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import type { Page, PageEdge } from './types';
 
-/** Supabase/PostgREST default max rows per request; we paginate to get all edges. */
+
 const PAGE_EDGES_CHUNK = 1000;
 
 async function fetchAllPageEdges(pageIds: string[]): Promise<Record<string, unknown>[]> {
@@ -36,7 +36,7 @@ export const pagesApi = {
   },
 
   async listByConversation(conversationId: string) {
-    // Get source_ids for conversation, then filter pages by source_id
+    
     const { data: sources } = await supabase
       .from('sources')
       .select('id')
@@ -48,7 +48,7 @@ export const pagesApi = {
       .from('pages')
       .select('*')
       .in('source_id', sourceIds)
-      .eq('status', 'indexed') // Only show indexed pages, not discovered ones
+      .eq('status', 'indexed') 
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -145,6 +145,3 @@ export const pageEdgesApi = {
     })) as PageEdge[];
   },
 };
-
-
-

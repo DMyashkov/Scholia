@@ -103,9 +103,9 @@ export async function loadRagContext(
   } else if (bodyRootMessageId) {
     rootMessageId = bodyRootMessageId;
   } else {
-    // In the current app flow, the frontend always creates the user message
-    // and passes its id as rootMessageId. Reaching this branch means the
-    // conversation/message state is inconsistent.
+    
+    
+    
     return { kind: 'error', error: 'Root message missing; conversation may be corrupted' };
   }
 

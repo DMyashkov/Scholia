@@ -49,7 +49,7 @@ const StatusIcon = ({ status }: { status: Source['status'] }) => {
     case 'ready':
       return <Check className="h-3 w-3 text-emerald-400" />;
     case 'crawling':
-      return null; // Progress shown in favicon area
+      return null; 
     case 'error':
       return <AlertTriangle className="h-3 w-3 text-destructive" />;
     case 'outdated':
@@ -80,11 +80,11 @@ const SourceChip = ({
               'flex items-center gap-2 px-3 py-1.5 rounded-full relative',
               'bg-secondary/80 hover:bg-secondary border border-border/50',
               'transition-all duration-300 group',
-              // Subtle one-time glow when recently used
+              
               isRecentlyUsed && 'shadow-[0_0_12px_hsl(var(--primary)/0.25)] border-primary/40'
             )}
           >
-            {/* Favicon placeholder with progress ring for crawling */}
+            {}
             <div className={cn(
               'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-semibold relative',
               'bg-primary/20 text-primary',
@@ -92,10 +92,10 @@ const SourceChip = ({
             )}>
               {initial}
               
-              {/* Circular progress ring for crawling state */}
+              {}
               {source.status === 'crawling' && (
                 <svg className="absolute inset-0 -rotate-90" viewBox="0 0 20 20">
-                  {/* Background circle */}
+                  {}
                   <circle
                     cx="10"
                     cy="10"
@@ -104,7 +104,7 @@ const SourceChip = ({
                     stroke="hsl(var(--border))"
                     strokeWidth="2"
                   />
-                  {/* Progress circle */}
+                  {}
                   <circle
                     cx="10"
                     cy="10"
@@ -120,11 +120,11 @@ const SourceChip = ({
               )}
             </div>
             
-            {/* Display name (source_label or domain) */}
+            {}
             <span className="text-xs text-foreground/80 group-hover:text-foreground max-w-[160px] truncate">
               {displayName}
             </span>
-            {/* Dynamic source indicator - lightning bolt + Surface/Dive icon */}
+            {}
             {source.crawlDepth === 'dynamic' && (
               <>
                 <span title="Dynamic"><Zap className="h-3 w-3 text-amber-500 dark:text-amber-400 shrink-0" /></span>
@@ -136,10 +136,10 @@ const SourceChip = ({
               </>
             )}
             
-            {/* Status icon (only for non-crawling states) */}
+            {}
             <StatusIcon status={source.status} />
             
-            {/* Progress text for crawling */}
+            {}
             {source.status === 'crawling' && (
               <span className="text-[10px] text-muted-foreground font-mono">
                 {source.pagesIndexed}/{source.totalPages}
@@ -189,7 +189,7 @@ export const SourcesBar = ({
   const { data: conversationPages = [] } = useConversationPages(conversationId ?? null);
   const { data: addPageJob } = useAddPageJob(conversationId ?? null, addingPageSourceId ?? null);
 
-  // Freeze totalPages for add-page flow (avoids 2/3 when new page arrives before status update)
+  
   const prevAddingRef = useRef<string | null>(null);
   const addPageInitialCountRef = useRef<number>(0);
   if (addingPageSourceId) {
@@ -200,7 +200,7 @@ export const SourcesBar = ({
   } else {
     prevAddingRef.current = null;
   }
-  // Load crawl jobs for all sources to determine real status (filter by conversation so switching convs shows correct state)
+  
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
   const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds]);
   const { data: crawlJobsData = [] } = useQuery({
@@ -212,21 +212,21 @@ export const SourcesBar = ({
     enabled: sourceIds.length > 0 && !!conversationId,
   });
   
-  // Create a map of sourceId -> crawlJob
+  
   const crawlJobMap = useMemo(() => {
     const map = new Map<string, typeof crawlJobsData[0]>();
     crawlJobsData.forEach(job => map.set(job.source_id, job));
     return map;
   }, [crawlJobsData]);
   
-  // Update sources with real status from crawl jobs (and actual page count for dynamic)
+  
   const sourcesWithStatus = useMemo(() => {
     return sources.map(source => {
       const crawlJob = crawlJobMap.get(source.id);
       const sourcePages = conversationPages.filter(p => p.source_id === source.id);
       
-      // Determine status from crawl job
-      // Default to 'crawling' if no crawl job yet (source was just added)
+      
+      
       let status: Source['status'] = 'crawling';
       let pagesIndexed = source.pagesIndexed;
       let totalPages = source.totalPages;
@@ -258,7 +258,7 @@ export const SourcesBar = ({
           totalPages = maxPagesForDepth;
         }
       } else {
-        // No crawl job: being created or add-page flow (edge function)
+        
         status = 'crawling';
         pagesIndexed = sourcePages.length || 0;
         if (source.crawlDepth === 'dynamic') {
@@ -286,7 +286,7 @@ export const SourcesBar = ({
   if (sources.length === 0) {
     return (
       <div className={cn("sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border/30 flex items-center justify-between h-16 px-4 flex-1", className)}>
-        {/* Sources section - centered content */}
+        {}
         <div className="flex-1 flex items-center gap-3">
           <span className="text-xs text-muted-foreground font-medium">Sources:</span>
           <Button
@@ -303,7 +303,7 @@ export const SourcesBar = ({
           </span>
         </div>
         
-        {/* Sign in button - right edge of screen, matching New chat button style */}
+        {}
         {showSignIn && onSignIn && (
           <Button
             onClick={onSignIn}
@@ -319,7 +319,7 @@ export const SourcesBar = ({
 
   return (
     <div className={cn("sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border/30 flex items-center justify-between h-16 px-4 flex-1", className)}>
-      {/* Sources section */}
+      {}
       <div className="flex-1 flex items-center gap-3 overflow-x-auto scrollbar-thin">
         <span className="text-xs text-muted-foreground font-medium shrink-0">Sources:</span>
         
@@ -342,7 +342,7 @@ export const SourcesBar = ({
         </Button>
       </div>
       
-      {/* Dynamic mode toggle - only when we have dynamic sources */}
+      {}
       {hasDynamicSources && onDynamicModeChange && conversationId && (
         <TooltipProvider delayDuration={300}>
           <Tooltip>
@@ -366,7 +366,7 @@ export const SourcesBar = ({
         </TooltipProvider>
       )}
 
-      {/* Sign in button - right edge of screen, matching New chat button style */}
+      {}
       {showSignIn && onSignIn && (
         <Button
           onClick={onSignIn}

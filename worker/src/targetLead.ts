@@ -1,15 +1,15 @@
-/**
- * Fetch the first ~200 chars (lead) of a target page for encoded_discovered.
- * Strips common fluff: CSS, coordinates, site boilerplate (e.g. "From X, the free encyclopedia"), etc.
- */
+
+
+
+
 import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
 import { CONTEXT_SNIPPET_LENGTH, CRAWLER_USER_AGENT, MAIN_CONTENT_SELECTOR } from './crawler/constants';
 
-/** Delay between fetches to avoid hammering servers. */
+
 const FETCH_DELAY_MS = 400;
 
-/** Strip leading junk (CSS, coordinates, boilerplate) from page text */
+
 export function stripLeadFluff(text: string): string {
   let s = text.trim();
   if (!s) return '';
@@ -34,12 +34,12 @@ export function stripLeadFluff(text: string): string {
   });
   s = filtered.join('\n').trim();
 
-  // Collapse whitespace
+  
   s = s.replace(/\s+/g, ' ').trim();
   return s;
 }
 
-/** Fetch a URL and return the first ~200 chars of main content (lead), with fluff stripped */
+
 export async function fetchTargetPageLead(url: string): Promise<string> {
   try {
     const res = await fetch(url, {
@@ -58,7 +58,7 @@ export async function fetchTargetPageLead(url: string): Promise<string> {
   }
 }
 
-/** Fetch leads for multiple URLs with delay between requests. Returns map of url -> lead. */
+
 export async function fetchTargetLeadsBatch(
   urls: string[],
   onProgress?: (done: number, total: number) => void

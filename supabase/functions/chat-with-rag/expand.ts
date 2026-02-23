@@ -20,10 +20,10 @@ type MatchRow = {
   distance: number;
 };
 
-/**
- * Get top N suggested pages (non-indexed links) via match_discovered_links.
- * Uses fair allocation: up to floor(limit/numQueries) per query, then fill remaining spots by distance.
- */
+
+
+
+
 export async function getTopSuggestedPages(
   supabase: SupabaseClient,
   openaiKey: string,
@@ -88,10 +88,10 @@ export async function getTopSuggestedPages(
   }));
 }
 
-/**
- * When action is expand_corpus: get top non-indexed URL via match_discovered_links.
- * Used for terminal expand_corpus — returns a suggested page for the user to add (dynamic sources).
- */
+
+
+
+
 export async function doExpandCorpus(
   supabase: SupabaseClient,
   openaiKey: string,

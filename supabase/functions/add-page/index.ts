@@ -1,4 +1,4 @@
-// Edge Function: queue add-page job for worker (worker fetches, indexes, reports progress)
+
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Normalize URL (matches worker addPageProcessor)
+    
     let s = (url || '').trim();
     const hashIdx = s.indexOf('#');
     if (hashIdx >= 0) s = s.slice(0, hashIdx);
@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
     if (qIdx >= 0) s = s.slice(0, qIdx);
     s = s.trim();
     s = s.replace(/^(https?:\/\/)+/i, '');
-    s = 'https://' + s;
+    if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
     let normalizedUrl = s;
     try {
       const u = new URL(s);
@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Check if page already exists
+    
     const { data: existing } = await supabase
       .from('pages')
       .select('id, url, title, path')
@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
 
     if (existing) {
       console.log('[add-page] page already exists', existing.id);
-      // Backfill to_page_id on edges pointing to this URL so the graph shows the page connected (not disconnected).
+      
       const { data: sourcePages } = await supabase.from('pages').select('id').eq('source_id', sourceId);
       const fromPageIds = (sourcePages ?? []).map((p: { id: string }) => p.id);
       if (fromPageIds.length > 0) {
@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Get owner_id from source (crawl_jobs requires it)
+    
     const { data: source, error: srcErr } = await supabase
       .from('sources')
       .select('owner_id')
@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Create crawl_job with explicit_crawl_urls (add-page = single URL to crawl)
+    
     const { data: job, error: jobErr } = await supabase
       .from('crawl_jobs')
       .insert({

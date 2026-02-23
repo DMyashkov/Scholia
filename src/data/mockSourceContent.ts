@@ -1,6 +1,6 @@
 import { DiscoveredPage, Quote } from '@/types/source';
 
-// Mock page content for sources
+
 export const mockPageContents: Record<string, string> = {
   'stripe-pricing': `
 Stripe Pricing Guide
@@ -96,7 +96,7 @@ Custom pricing for organizations requiring dedicated infrastructure, advanced se
   `,
 };
 
-// Generate mock discovered pages for a domain
+
 export const generateMockPages = (domain: string, status: 'ready' | 'crawling'): DiscoveredPage[] => {
   const pagesMap: Record<string, { title: string; path: string; contentKey: string }[]> = {
     'stripe.com': [
@@ -131,7 +131,7 @@ export const generateMockPages = (domain: string, status: 'ready' | 'crawling'):
   }));
 };
 
-// Generate quotes based on user message keywords
+
 export const generateQuotesForMessage = (
   userMessage: string,
   sources: { id: string; domain: string; pages: DiscoveredPage[] }[]
@@ -202,7 +202,7 @@ export const generateQuotesForMessage = (
     ],
   };
 
-  // Find matching keywords
+  
   const matchedKeywords: string[] = [];
   for (const keyword of Object.keys(keywordQuotes)) {
     if (lowerMessage.includes(keyword)) {
@@ -210,13 +210,13 @@ export const generateQuotesForMessage = (
     }
   }
 
-  // If no specific keywords, pick a random one
+  
   if (matchedKeywords.length === 0 && sources.length > 0) {
     const allKeywords = Object.keys(keywordQuotes);
     matchedKeywords.push(allKeywords[Math.floor(Math.random() * allKeywords.length)]);
   }
 
-  // Generate quotes from available sources
+  
   for (const keyword of matchedKeywords) {
     const keywordData = keywordQuotes[keyword];
     for (const source of sources.slice(0, 2)) {
@@ -241,7 +241,7 @@ export const generateQuotesForMessage = (
   return quotes;
 };
 
-// Mock response that incorporates quotes
+
 export const generateSourcedResponse = (
   userMessage: string,
   hasReadySources: boolean,

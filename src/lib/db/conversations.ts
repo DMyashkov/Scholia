@@ -57,7 +57,7 @@ export const conversationsApi = {
   },
 
   async delete(id: string) {
-    // First check if conversation exists and get its owner_id for debugging
+    
     const { data: existing, error: fetchError } = await supabase
       .from('conversations')
       .select('id, owner_id')
@@ -80,7 +80,7 @@ export const conversationsApi = {
       throw new Error('You do not have permission to delete this conversation.');
     }
 
-    // Delete the conversation
+    
     const { error, data } = await supabase
       .from('conversations')
       .delete()
@@ -92,7 +92,7 @@ export const conversationsApi = {
       throw error;
     }
     
-    // If no rows were deleted, RLS blocked it
+    
     if (!data || data.length === 0) {
       console.error('RLS policy blocked deletion. Conversation owner_id:', existing.owner_id, 'Current user:', user.id);
       throw new Error('Failed to delete conversation. RLS policy may be blocking deletion. Please check your database policies.');
@@ -109,5 +109,3 @@ export const conversationsApi = {
     if (error) throw error;
   },
 };
-
-

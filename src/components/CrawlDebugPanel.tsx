@@ -1,7 +1,7 @@
-/**
- * Debug panel to show crawl job status and realtime updates
- * Only visible in development mode
- */
+
+
+
+
 
 import { useConversationSources } from '@/hooks/useConversationSources';
 import { useCrawlJob } from '@/hooks/useCrawlJobs';
@@ -13,7 +13,7 @@ interface CrawlDebugPanelProps {
   className?: string;
 }
 
-// Separate component to use hook properly
+
 function SourceDebugItem({ sourceId, domain }: { sourceId: string; domain: string }) {
   const { data: job } = useCrawlJob(sourceId);
   
@@ -43,7 +43,7 @@ export function CrawlDebugPanel({ conversationId, className }: CrawlDebugPanelPr
     return null;
   }
 
-  // Only show in development
+  
   if (import.meta.env.PROD) {
     return null;
   }

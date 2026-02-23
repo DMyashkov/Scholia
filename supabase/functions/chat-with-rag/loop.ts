@@ -9,7 +9,7 @@ export interface SlotRow {
   type: string;
   description?: string | null;
   depends_on_slot_id?: string | null;
-  /** For list/mapping: do not suggest subqueries once current slot state has this many items. 0 = no fixed target (continue until broad_query_completed_slot_fully or stagnate). */
+  
   target_item_count?: number;
 }
 
@@ -63,9 +63,9 @@ export async function callExtractAndDecide(
   suggestExpandWhenNoEvidence = false,
   topSuggestedPages: SuggestedPage[] | null = null,
   previousAttemptsBySlot?: string,
-  /** Slot names that are in BROAD mode this step (first retrieval for that slot). AI may set broad_query_completed_slot_fully only for these. */
+  
   broadSlotNamesThisStep: string[] = [],
-  /** Slot names that have finished_querying (backend set from stagnation or broadQueryCompletedSlotFully). AI should not suggest subqueries for these; use to decide when to answer. */
+  
   finishedQueryingSlotNames: string[] = [],
 ): Promise<ExtractResult> {
   const quoteBlock = evidenceChunks
@@ -245,11 +245,11 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
   };
 }
 
-/**
- * Insert claims as slot_items and claim_evidence. Dedupes by (slot_id, key, value_json).
- * For mapping slots, only accepts claims whose key is in allowedKeysByMappingSlotId (anchors to list slot).
- * Returns created slot_item ids (for callers that need them).
- */
+
+
+
+
+
 export async function insertClaims(
   supabase: SupabaseClient,
   params: {
@@ -277,7 +277,7 @@ export async function insertClaims(
     const valueJson = typeof claim.value === 'object' && claim.value !== null ? claim.value : claim.value;
     const key = claim.key ?? null;
 
-    // Dedupe: check existing slot_item with same slot_id, key, value_json
+    
     const { data: existingList } = await supabase
       .from('slot_items')
       .select('id, value_json')

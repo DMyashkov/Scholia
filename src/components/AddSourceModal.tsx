@@ -29,7 +29,7 @@ interface AddSourceModalProps {
     depth: CrawlDepth,
     options: { sameDomainOnly: boolean; suggestionMode?: SuggestionMode }
   ) => void | Promise<unknown>;
-  /** Optional message to show at top (e.g. "Add source first") */
+  
   promptMessage?: string | null;
 }
 
@@ -85,7 +85,7 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-6 pt-2">
-          {/* URL Input */}
+          {}
           <div className="space-y-2">
             <Label htmlFor="url" className="text-sm font-medium">
               Starting URL
@@ -100,7 +100,7 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
             />
           </div>
 
-          {/* Crawl Depth */}
+          {}
           <div className="space-y-3">
             <Label className="text-sm font-medium">Crawl Depth</Label>
             <div className="space-y-2">
@@ -225,7 +225,7 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
             </div>
           </div>
 
-          {/* Options */}
+          {}
           <div className="space-y-3">
             <Label className="text-sm font-medium">Options</Label>
             <div className="flex items-center justify-between bg-background/50 rounded-lg p-3 border border-border/50">
@@ -245,7 +245,7 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
             </div>
           </div>
 
-          {/* Submit */}
+          {}
           <div className="flex justify-end gap-2 pt-2">
             <Button
               type="button"

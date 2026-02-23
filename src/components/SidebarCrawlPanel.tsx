@@ -49,7 +49,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
 
   const { data: pages = [], isLoading: pagesLoading, error: pagesError } = useConversationPages(conversationId);
 
-  // Freeze totalPages for add-page flow: capture initial page count when add starts, use initial+1 as max throughout
+  
   const prevAddingRef = useRef<string | null>(null);
   const addPageInitialCountRef = useRef<number>(0);
   if (addingPageSourceId) {
@@ -135,21 +135,21 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     enabled: !!conversationId && sources.some(s => s.crawlDepth === 'dynamic'),
   });
 
-  // Create a map of sourceId -> crawlJob
+  
   const crawlJobMap = useMemo(() => {
     const map = new Map<string, typeof crawlJobsData[0]>();
     crawlJobsData.forEach(job => map.set(job.source_id, job));
     return map;
   }, [crawlJobsData]);
   
-  // Determine status and stats from crawl jobs and pages
+  
   const sourcesWithStatus = useMemo(() => {
     return sources.map(source => {
       const sourcePages = pages.filter(p => p.source_id === source.id);
       const crawlJob = crawlJobMap.get(source.id);
       
-      // Determine status from crawl job
-      // Default to 'crawling' if no crawl job yet (source was just added)
+      
+      
       let status: Source['status'] = 'crawling';
       let pagesIndexed = sourcePages.length;
       let totalPages = sourcePages.length;
@@ -165,16 +165,16 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           status = 'ready';
         }
         
-        // Use indexed_count when available; prefer actual DB count when we have pages
+        
         const jobIndexed = (crawlJob as CrawlJob).indexed_count ?? 0;
         pagesIndexed = Math.max(jobIndexed, sourcePages.length);
-        // For dynamic + add-page: target = current+1 until page is inserted. Once addPageJob is encoding/completed,
-        // the new page is in DB so use sourcePages.length (avoids 2/3 when realtime delivers page before status update).
+        
+        
         const maxPagesForDepth = source.crawlDepth === 'dynamic' || source.crawlDepth === 'singular' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
         if (source.crawlDepth === 'dynamic') {
           if (addingPageSourceId === source.id) {
             const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
-            // Use frozen initial+1 as max until job done (avoids 2/3 when realtime delivers new page before status update)
+            
             const frozenInitial = addPageInitialCountRef.current || sourcePages.length;
             totalPages = jobDone ? sourcePages.length : frozenInitial + 1;
           } else {
@@ -184,13 +184,13 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           totalPages = maxPagesForDepth;
         }
       } else {
-        // No crawl job: either being created, or add-page flow (edge function, no job)
+        
         status = 'crawling';
         pagesIndexed = sourcePages.length;
         if (source.crawlDepth === 'dynamic') {
           if (addingPageSourceId === source.id) {
             const jobDone = addPageJob?.status === 'encoding' || addPageJob?.status === 'completed';
-            // Use frozen initial+1 as max until job done (avoids 2/3)
+            
             const frozenInitial = addPageInitialCountRef.current || sourcePages.length;
             totalPages = jobDone ? sourcePages.length : frozenInitial + 1;
           } else {
@@ -219,11 +219,11 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   
   const crawlingSources = sourcesWithStatus.filter(s => s.status === 'crawling');
   
-  // Get active source or show all
+  
   const activeSource = activeSourceId ? sourcesWithStatus.find(s => s.id === activeSourceId) : null;
   const displaySources = activeSource ? [activeSource] : sourcesWithStatus;
   
-  // Aggregate stats - for dynamic use encoded_discovered count (includes add-page); else crawl job
+  
   const totalDiscovered = displaySources.reduce((sum, s) => {
     const dlCount = discoveredCountsMap[s.id] ?? 0;
     const crawlJob = crawlJobMap.get(s.id);
@@ -249,7 +249,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const isAddPageResponding = addPagePhase === 'completed' && !!addingPageSourceId;
   const hasAnySources = sources.length > 0;
 
-  // Five states: Crawling (static) | Adding Page (dynamic add) | Scraping Page (dynamic worker) | Indexing Crawled Pages | Encoding Discovered Pages | Responding (add-page done, chat answering)
+  
   const indexingJob = displaySources.find(s => crawlJobMap.get(s.id)?.status === 'indexing');
   const crawlJob = indexingJob ? crawlJobMap.get(indexingJob.id) : null;
   const isDynamic = displaySources.some(s => s.crawlDepth === 'dynamic');
@@ -274,14 +274,14 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     isIndexingFromJob,
     isDynamic
   );
-  // When adding a page, show progress for ONLY the adding source (avoid 2/3 from multi-source aggregation)
+  
   const progressSources = isAddingPageFlow && addingPageSourceId
     ? sourcesWithStatus.filter(s => s.id === addingPageSourceId)
     : displaySources;
 
-  // Get pages for current view - use pages directly from database (already filtered by conversation and status='indexed')
-  // Filter by active source if one is selected, then convert to DiscoveredPage format.
-  // When a source tab is selected, include the seed page from another source if this source has no page for it (skipped-insert case).
+  
+  
+  
   let displayPages = (activeSourceId
     ? pages.filter(p => p.source_id === activeSourceId)
     : pages
@@ -290,7 +290,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     title: p.title || 'Untitled',
     path: p.path,
     status: (p.status || 'indexed') as 'indexed' | 'crawling' | 'pending' | 'error',
-    url: p.url, // Include url for edge matching
+    url: p.url, 
   }));
   if (activeSourceId && seedPageFromConversation && !displayPages.some((p) => p.id === seedPageFromConversation.id)) {
     displayPages = [
@@ -305,11 +305,11 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     ];
   }
 
-  // Sort pages: when a source tab is selected put that source's page first; otherwise first source's URL first
+  
   if (displaySources.length > 0) {
     const startingSource = activeSource ?? displaySources[0];
     const startingUrl = startingSource.initial_url;
-    // Normalize URLs for comparison
+    
     const normalizeForSort = (url: string) => {
       if (!url) return '';
       try {
@@ -341,23 +341,19 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   if (isCrawling && displayPages.length === 0 && displaySources.length > 0) {
     const startingSource = activeSource ?? displaySources[0];
     const sourceUrl = startingSource.initial_url;
-    try {
-      const urlObj = new URL(sourceUrl);
-      const path = urlObj.pathname || '/';
-      displayPages = [{
-        id: `placeholder-${startingSource.id}`,
-        title: getSourceDisplayLabel(startingSource) || urlObj.hostname,
-        path: path,
-        status: 'crawling' as const,
-        url: sourceUrl,
-      }];
-    } catch (e) {
-      // Invalid URL, skip placeholder
-    }
+    const urlObj = new URL(sourceUrl);
+    const path = urlObj.pathname || '/';
+    displayPages = [{
+      id: `placeholder-${startingSource.id}`,
+      title: getSourceDisplayLabel(startingSource) || urlObj.hostname,
+      path: path,
+      status: 'crawling' as const,
+      url: sourceUrl,
+    }];
   }
   
-  // Use actual page count from database, but fallback to crawl job indexed_count if pages haven't loaded yet
-  // This prevents showing "discovering pages" forever when crawl is complete but pages query is slow
+  
+  
   const displayPagesIndexed = Math.max(
     displayPages.length,
     displaySources.reduce((sum, s) => {
@@ -367,13 +363,13 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     }, 0)
   );
   const activeDisplayName = activeSource ? getSourceDisplayLabel(activeSource) : null;
-  const activeDomain = activeSource?.domain; // Hostname for URL construction (ForceGraph)
+  const activeDomain = activeSource?.domain; 
 
   if (!hasAnySources) return null;
 
   return (
     <div className={cn('border-t border-border bg-card/50', className)}>
-      {/* Stats Header */}
+      {}
       <div className="p-3 space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
@@ -387,7 +383,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           )}
         </div>
         
-        {/* Source tabs - only show if multiple sources */}
+        {}
         {sources.length > 1 && (
           <div className="flex gap-1 flex-wrap items-center">
             <button
@@ -425,7 +421,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           </div>
         )}
         
-        {/* Stats grid */}
+        {}
         <TooltipProvider>
           <div className={cn('grid gap-2', isDynamic ? 'grid-cols-3' : 'grid-cols-2')}>
             <StatItem
@@ -451,7 +447,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           </div>
         </TooltipProvider>
         
-        {/* Three-phase progress bar: crawl | indexing chunks | encoding discovered */}
+        {}
         {((isCrawling && !activeSource) || isAddingPageFlow) && (progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1) > 0 ? (
           <EncodingProgressBar
             crawlDone={isAddingPageFlow ? progressSources.reduce((s, x) => s + x.pagesIndexed, 0) : totalIndexed}
@@ -468,7 +464,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         ) : null}
       </div>
       
-      {/* Graph */}
+      {}
       <div className="px-3 pb-3">
         <ForceGraph 
           pages={displayPages}
@@ -478,7 +474,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         />
       </div>
       
-      {/* Source list - ALWAYS visible, with highlight for active source */}
+      {}
       <div className="px-3 pb-3 space-y-1">
         {sourcesWithStatus.map(source => (
           <button 

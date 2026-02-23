@@ -6,7 +6,7 @@ export function normalizeUrlForCrawl(input: string): string {
   if (qIdx >= 0) s = s.slice(0, qIdx);
   s = s.trim();
   s = s.replace(/^(https?:\/\/)+/i, '');
-  s = 'https://' + s;
+  if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
   try {
     const u = new URL(s);
     u.hash = '';

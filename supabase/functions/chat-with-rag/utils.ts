@@ -1,8 +1,8 @@
-/**
- * Fair allocation: take up to floor(cap/numQueries) best items per query so every query
- * is represented, then fill remaining slots with next-best by distance (lower is better).
- * Single source of truth for both chunk retrieval and suggested-page expansion.
- */
+
+
+
+
+
 export function capWithFairAllocation<T>(
   map: Map<string, T>,
   groups: T[][],
@@ -74,7 +74,7 @@ export function deriveTitleFromUrl(url: string): string {
   }
 }
 
-/** Extract meaningful terms for re-ranking (skip stopwords) */
+
 export function extractQueryTerms(query: string): string[] {
   const stop = new Set(['a', 'an', 'the', 'of', 'to', 'for', 'in', 'on', 'at', 'by', 'with', 'other', 'than', 'give', 'me', 'get', 'show', 'find']);
   return query
@@ -84,7 +84,7 @@ export function extractQueryTerms(query: string): string[] {
     .filter((w) => w.length > 1 && !stop.has(w));
 }
 
-/** Partition: pages whose URL/anchor matches query terms go first */
+
 export function partitionByTermMatch<T extends { to_url: string; anchor_text: string | null }>(
   list: T[],
   terms: string[],

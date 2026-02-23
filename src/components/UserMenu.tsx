@@ -36,7 +36,7 @@ export const UserMenu = () => {
     navigate('/auth');
   };
 
-  // Guest mode - show login prompt
+  
   if (!user) {
     return (
       <div className="p-4 border-t border-border">

@@ -16,7 +16,7 @@ import {
 
 interface ChatMessageProps {
   message: Message;
-  /** Follow-up assistant message (add page + re-answer flow) - rendered below divider */
+  
   followUp?: Message;
   isStreaming?: boolean;
   sources?: { id: string; domain: string }[];
@@ -118,22 +118,22 @@ export const ChatMessage = ({
             )}
           </div>
 
-          {/* Quote Cards for assistant messages */}
+          {}
           {!isUser && !isStreaming && quotes.length > 0 && onQuoteClick && (
             <QuoteCardsList quotes={quotes} onQuoteClick={onQuoteClick} />
           )}
 
-          {/* Cited pages - specific pages from quotes, not just source name */}
+          {}
           {!isUser && !isStreaming && quotes.length > 0 && onQuoteClick && (
             <CitedPages quotes={quotes} onQuoteClick={onQuoteClick} />
           )}
 
-          {/* Thought process: when there's a follow-up, show combined panel in follow-up block (B4); otherwise show for this message */}
+          {}
           {!isUser && !isStreaming && !followUp && tp && (tp.slots?.length || tp.steps?.length) ? (
             <ThoughtProcessView thoughtProcess={tp} suggestedPage={message.suggestedPage} isLive={false} defaultOpen={false} />
           ) : null}
 
-          {/* Follow-up: separate assistant message after user added suggested page */}
+          {}
           {!isUser && !isStreaming && followUp && (
             <>
               <div className="my-4 h-px bg-border" />
@@ -188,7 +188,7 @@ export const ChatMessage = ({
             </>
           )}
 
-          {/* "Would you like to index X?" when context can't answer (hidden when follow-up exists) */}
+          {}
           {!isUser && !isStreaming && !followUp && message.suggestedPage && onAddSuggestedPage && conversationId && (
             <IndexSuggestionCard
               suggestedPage={message.suggestedPage}
@@ -202,7 +202,7 @@ export const ChatMessage = ({
   );
 };
 
-/** Renders inline markdown (bold, italic, code) in a string. Returns React nodes. */
+
 function renderInlineMarkdown(text: string): React.ReactNode {
   if (!text) return null;
   const parts: React.ReactNode[] = [];
@@ -262,7 +262,7 @@ const MessageContent = ({
           </button>
         );
       } else {
-        // Orphaned citation - no matching quote (model used [n] but quote missing/filtered)
+        
         parts.push(
           <span
             key={`${lineKey}-${match.index}`}
@@ -418,23 +418,23 @@ function IndexSuggestionCard({
 }
 
 interface TypingIndicatorProps {
-  /** When true, show only three dots (no icon/name). Used when adding suggested page + waiting for answer. */
+  
   minimal?: boolean;
-  /** RAG step progress labels (e.g. "Gathering context", "Extracting...") */
+  
   stepLabels?: Array<{ current: number; total: number; label: string }>;
 }
 
 export const TypingIndicator = ({ minimal = false, stepLabels = [] }: TypingIndicatorProps) => {
   const currentStep = stepLabels.length > 0 ? stepLabels[stepLabels.length - 1] : null;
 
-  // Shared layout: same as ChatMessage assistant row (py-6, max-w-3xl, avatar + content)
+  
   const containerClass = 'flex gap-4 px-4 py-6 bg-chat-assistant animate-fade-in';
   const innerClass = 'max-w-3xl mx-auto w-full flex gap-4';
   const avatarClass = 'shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-primary/20';
   const contentClass = 'flex-1 space-y-2 min-w-0';
 
   if (minimal) {
-    // Adding suggested page: show as a proper assistant row (avatar + "Indexing…" + dots)
+    
     return (
       <div className={containerClass}>
         <div className={innerClass}>

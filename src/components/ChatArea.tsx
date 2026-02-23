@@ -32,7 +32,7 @@ interface ChatAreaProps {
   onToggleSidebar?: () => void;
   showSignIn?: boolean;
   onSignIn?: () => void;
-  /** Called when a guest tries to add a source or start a conversation */
+  
   onGuestRequired?: () => void;
   onDynamicModeChange?: (enabled: boolean) => void;
   onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, scrapedPageDisplay?: string) => Promise<void>;
@@ -89,7 +89,7 @@ export const ChatArea = ({
     });
   }, [sources, mainCrawlJobMap]);
 
-  // Auto-remove sources that failed on initial add (0 pages) - unblocks conversation
+  
   const failedInitialSourceIds = useMemo(() => {
     return sources.filter(s => {
       const job = mainCrawlJobMap.get(s.id);
@@ -102,7 +102,7 @@ export const ChatArea = ({
     failedInitialSourceIds.forEach(sourceId => {
       onRemoveSource(sourceId);
     });
-    // Toast once per batch
+    
     toast.error('Source failed to load and was removed. Try adding it again.');
   }, [failedInitialSourceIds, onRemoveSource]);
 
@@ -146,10 +146,10 @@ export const ChatArea = ({
 
   const hasMessages = conversation && conversation.messages.length > 0;
 
-  // Get all quotes from the conversation for navigation
+  
   const allQuotes = conversation?.messages.flatMap(m => m.quotes || []) || [];
 
-  // Get recently used source IDs from the last assistant message
+  
   const lastAssistantMessage = conversation?.messages.filter(m => m.role === 'assistant').pop();
   const recentlyUsedSourceIds = lastAssistantMessage?.sourcesUsed || [];
 
@@ -164,7 +164,7 @@ export const ChatArea = ({
   };
 
   const handleKnowledgeTrailClick = (sourceId: string) => {
-    // Find a quote from this source in the current message
+    
     const quote = allQuotes.find(q => q.sourceId === sourceId);
     if (quote) {
       handleQuoteClick(quote);
@@ -177,7 +177,7 @@ export const ChatArea = ({
     const added = await onAddSource(url, depth, options);
     if (added) {
       setAddSourceOpen(false);
-      // Keep SourceDrawer closed when starting crawl
+      
     }
     return added;
   };
@@ -192,9 +192,9 @@ export const ChatArea = ({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Sources Bar with Sign in - always visible */}
+      {}
       <div className="flex items-center gap-2">
-        {/* Sidebar toggle when closed */}
+        {}
         {!sidebarOpen && onToggleSidebar && (
           <Button
             variant="ghost"
@@ -226,7 +226,7 @@ export const ChatArea = ({
           <ScrollArea className="flex-1 scrollbar-thin" ref={scrollRef}>
             <div className="pb-4">
               {conversation.messages.map((message, i) => {
-                // Skip messages that are follow-ups (rendered with their parent)
+                
                 if (message.followsMessageId) return null;
                 const next = conversation.messages[i + 1];
                 const followUp = next?.followsMessageId === message.id ? next : undefined;
@@ -296,7 +296,7 @@ export const ChatArea = ({
         </>
       )}
 
-      {/* Modals and Drawers */}
+      {}
       <AddSourceModal
         open={addSourceOpen}
         onOpenChange={handleAddSourceOpenChange}

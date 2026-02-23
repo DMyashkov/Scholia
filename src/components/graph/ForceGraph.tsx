@@ -8,7 +8,7 @@ import { useGraphZoom } from './useGraphZoom';
 import { ZoomIn, ZoomOut } from 'lucide-react';
 import type { PageEdge } from '@/lib/db/types';
 
-const DRAG_THRESHOLD = 6; // pixels - movement beyond this is a drag, not a click
+const DRAG_THRESHOLD = 6; 
 
 export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: ForceGraphProps & { edges?: PageEdge[] }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -19,10 +19,10 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
   const [zoomLevel, setZoomLevel] = useState(1);
   const [, forceUpdate] = useState({});
   
-  // Tooltip state
+  
   const [tooltipData, setTooltipData] = useState<{ node: GraphNode; x: number; y: number } | null>(null);
   
-  // Drag state for preventing click after drag
+  
   const dragStateRef = useRef<{ isDragging: boolean; startX: number; startY: number; hasMoved: boolean }>({
     isDragging: false,
     startX: 0,
@@ -30,7 +30,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
     hasMoved: false,
   });
   
-  // Store graph data with stable references
+  
   const graphDataRef = useRef<{ nodes: GraphNode[]; links: GraphLink[] }>({ nodes: [], links: [] });
   const prevPagesIndexedRef = useRef(0);
   const prevPageIdsKeyRef = useRef('');
@@ -150,11 +150,11 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
     }
   }, []);
 
-  // Handle mouse enter on node
+  
   const handleNodeMouseEnter = useCallback((node: GraphNode, e: React.MouseEvent) => {
     setHoveredNode(node.id);
     
-    // Get position for tooltip
+    
     const transform = getCurrentTransform();
     const x = (node.x || 0) * transform.k + transform.x;
     const y = (node.y || 0) * transform.k + transform.y;
@@ -162,13 +162,13 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
     setTooltipData({ node, x, y });
   }, [getCurrentTransform]);
 
-  // Handle mouse leave on node
+  
   const handleNodeMouseLeave = useCallback(() => {
     setHoveredNode(null);
     setTooltipData(null);
   }, []);
 
-  // Handle pointer down for drag initialization
+  
   const handlePointerDown = useCallback((node: GraphNode, e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -176,7 +176,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
     const svg = svgRef.current;
     if (!svg) return;
     
-    // Track drag start position
+    
     dragStateRef.current = {
       isDragging: true,
       startX: e.clientX,
@@ -184,7 +184,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
       hasMoved: false,
     };
     
-    // Pin node during drag
+    
     dragStart(node);
     
     const handlePointerMove = (moveEvent: PointerEvent) => {
@@ -195,7 +195,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
         dragStateRef.current.hasMoved = true;
       }
       
-      // Get SVG coordinates
+      
       const rect = svg.getBoundingClientRect();
       const transform = getCurrentTransform();
       const x = (moveEvent.clientX - rect.left - transform.x) / transform.k;
@@ -203,7 +203,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
       
       drag(node, x, y);
       
-      // Update tooltip position
+      
       setTooltipData({
         node,
         x: moveEvent.clientX - rect.left,
@@ -212,13 +212,13 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
     };
     
     const handlePointerUp = () => {
-      // Release node back into physics
+      
       dragEnd(node);
       
       document.removeEventListener('pointermove', handlePointerMove);
       document.removeEventListener('pointerup', handlePointerUp);
       
-      // Reset drag state after short delay
+      
       setTimeout(() => {
         dragStateRef.current.isDragging = false;
         dragStateRef.current.hasMoved = false;
@@ -230,16 +230,16 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
   }, [dragStart, drag, dragEnd, getCurrentTransform]);
 
 
-  // Get connected nodes for hover highlighting
+  
   const connectedNodes = useMemo(() => {
     if (!hoveredNode) return new Set<string>();
     return getConnectedNodeIds(hoveredNode, links);
   }, [hoveredNode, links]);
 
   const showLabels = zoomLevel > 0.5;
-  // Scale font with zoom: smaller when zoomed in (less overlap), larger when zoomed out. Zoom range is 0.2–5.
+  
   const labelFontSize = Math.max(4, Math.min(22, 10 / zoomLevel));
-  // More chars when zoomed in (more room between nodes)
+  
   const maxLabelChars = Math.round(22 + zoomLevel * 8);
 
   return (
@@ -257,7 +257,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
         className="absolute inset-0"
         style={{ cursor: 'grab' }}
       >
-        {/* Background for pan detection */}
+        {}
         <rect 
           className="graph-background" 
           width={dimensions.width} 
@@ -266,7 +266,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
         />
         
         <g ref={graphContainerRef}>
-          {/* Links with smooth transitions */}
+          {}
           {links.map((link, i) => {
             const source = link.source as GraphNode;
             const target = link.target as GraphNode;
@@ -292,7 +292,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
             );
           })}
 
-          {/* Nodes */}
+          {}
             {nodes.map((node) => {
             if (node.x === undefined || node.y === undefined) return null;
 
@@ -300,11 +300,11 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
             const isConnected = connectedNodes.has(node.id);
             const isFaded = hoveredNode && !isConnected;
             
-            // Truncate long titles - allow more chars when zoomed in (more room)
+            
             const displayTitle = node.title.length > maxLabelChars ? node.title.slice(0, maxLabelChars - 2) + '…' : node.title;
 
-            // Label layout: offset from node scales with font (smaller font = tighter to node)
-            // Padding scales with font so rect doesn't dwarf text at max zoom
+            
+            
             const charWidthApprox = labelFontSize * 0.55;
             const hPad = Math.max(2, labelFontSize * 0.5);
             const vPad = Math.max(1, labelFontSize * 0.35);
@@ -330,7 +330,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
                 onClick={(e) => handleNodeClick(node, e)}
                 onPointerDown={(e) => handlePointerDown(node, e)}
               >
-                {/* Glow effect for hovered/connected nodes */}
+                {}
                 {(isHovered || isConnected) && (
                   <circle
                     r={isHovered ? 14 : 10}
@@ -346,7 +346,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
                   strokeWidth={1.5}
                   style={{ transition: 'r 200ms ease' }}
                 />
-                {/* Label - rect centered under text, both positioned together */}
+                {}
                 {(showLabels || isHovered || isConnected) && (
                   <>
                     <rect
@@ -378,7 +378,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
         </g>
       </svg>
       
-      {/* Tooltip - fixed size (screen pixels), stays consistent regardless of zoom */}
+      {}
       {tooltipData && (
         <div 
           className="absolute z-20 px-2.5 py-1.5 text-xs max-w-[200px] bg-popover text-popover-foreground rounded-md shadow-lg border border-border pointer-events-none"
@@ -411,7 +411,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
         </div>
       )}
       
-      {/* Zoom controls - only 2 buttons */}
+      {}
       <div className="absolute bottom-2 right-2 flex gap-1">
         <button
           onClick={zoomIn}
@@ -429,7 +429,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
         </button>
       </div>
       
-      {/* Empty state - show message when no pages */}
+      {}
       {pages.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
           <div className="text-center px-4">

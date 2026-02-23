@@ -19,14 +19,14 @@ export const useForceSimulation = ({
   const nodesRef = useRef<GraphNode[]>(nodes);
   const linksRef = useRef<GraphLink[]>(links);
 
-  // Keep refs updated
+  
   useEffect(() => {
     nodesRef.current = nodes;
     linksRef.current = links;
   }, [nodes, links]);
 
   const initSimulation = useCallback(() => {
-    // Stop existing simulation
+    
     if (simulationRef.current) {
       simulationRef.current.stop();
     }
@@ -65,24 +65,24 @@ export const useForceSimulation = ({
 
   const dragStart = useCallback((node: GraphNode) => {
     if (!simulationRef.current) return;
-    // Gently reheat simulation during drag
+    
     simulationRef.current.alphaTarget(0.2).restart();
-    // Pin node to current position
+    
     node.fx = node.x;
     node.fy = node.y;
   }, []);
 
   const drag = useCallback((node: GraphNode, x: number, y: number) => {
-    // Update pinned position - edges update automatically via simulation tick
+    
     node.fx = x;
     node.fy = y;
   }, []);
 
   const dragEnd = useCallback((node: GraphNode) => {
     if (!simulationRef.current) return;
-    // Cool down simulation
+    
     simulationRef.current.alphaTarget(0);
-    // Release node back into physics simulation (unpins it)
+    
     node.fx = null;
     node.fy = null;
   }, []);
@@ -91,7 +91,7 @@ export const useForceSimulation = ({
     simulationRef.current?.stop();
   }, []);
 
-  // Cleanup on unmount
+  
   useEffect(() => {
     return () => {
       simulationRef.current?.stop();

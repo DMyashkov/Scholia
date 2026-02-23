@@ -9,7 +9,7 @@ export const useSourceWithData = (dbSource: DBSource | null): Source | null => {
 
   if (!dbSource) return null;
 
-  // Determine status from crawl job
+  
   let status: Source['status'] = 'ready';
   let pagesIndexed = 0;
   let totalPages = 0;
@@ -46,7 +46,7 @@ export const useSourceWithData = (dbSource: DBSource | null): Source | null => {
       path: p.path,
       status: p.status as DiscoveredPage['status'],
       content: p.content || undefined,
-      url: p.url, // Include URL for edge matching
+      url: p.url, 
     } as DiscoveredPage & { url?: string })),
   };
 };

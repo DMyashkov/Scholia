@@ -1,7 +1,7 @@
-/**
- * Component to load pages and crawl jobs for sources
- * This is needed because we can't use hooks conditionally in useChatDatabase
- */
+
+
+
+
 
 import { usePages } from '@/hooks/usePages';
 import { useCrawlJob } from '@/hooks/useCrawlJobs';
@@ -17,7 +17,7 @@ export const SourceDataLoader = ({ source, onDataLoaded }: SourceDataLoaderProps
   const { data: pages = [] } = usePages(source.id);
   const { data: crawlJob } = useCrawlJob(source.id, source.conversation_id);
 
-  // Convert to UI format
+  
   const uiSource: Source = {
     id: source.id,
     initial_url: source.initial_url,
@@ -40,8 +40,8 @@ export const SourceDataLoader = ({ source, onDataLoaded }: SourceDataLoaderProps
     })),
   };
 
-  // Call callback when data is ready
-  // This is a bit of a workaround - ideally we'd use this data directly
-  // But for now this allows us to load source data properly
+  
+  
+  
   return null;
 };

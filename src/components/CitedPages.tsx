@@ -8,7 +8,7 @@ interface CitedPagesProps {
   onQuoteClick: (quote: Quote) => void;
 }
 
-/** Dedupe quotes by pageId, keep first quote per page for click action */
+
 function getUniquePages(quotes: Quote[]): Quote[] {
   const seen = new Set<string>();
   return quotes.filter((q) => {

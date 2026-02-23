@@ -144,7 +144,7 @@ const Auth = () => {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <div className="w-full max-w-md -mt-16">
-          {/* Logo */}
+          {}
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-4">
               <BookOpen className="h-8 w-8 text-primary" />
@@ -211,7 +211,7 @@ const Auth = () => {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md -mt-16">
-        {/* Logo */}
+        {}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-4">
             <BookOpen className="h-8 w-8 text-primary" />
@@ -350,7 +350,7 @@ const Auth = () => {
                 </form>
               </TabsContent>
 
-              {/* Continue without account */}
+              {}
               <div className="mt-6 pt-6 border-t border-border">
                 <Button
                   type="button"

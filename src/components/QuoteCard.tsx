@@ -24,7 +24,7 @@ export const QuoteCard = ({ quote, refNumber, onClick }: QuoteCardProps) => {
       )}
     >
       <div className="flex items-start gap-3">
-        {/* Citation badge - matches inline [1] [2] in the text */}
+        {}
         {refNumber != null && (
           <span
             className="px-1 py-0.5 rounded text-[11px] font-semibold bg-primary/15 text-primary border border-primary/25 tabular-nums shrink-0"
@@ -34,13 +34,13 @@ export const QuoteCard = ({ quote, refNumber, onClick }: QuoteCardProps) => {
           </span>
         )}
         
-        {/* Quote text */}
+        {}
         <div className="flex-1 min-w-0 space-y-3">
           <p className="text-base text-foreground/90 leading-relaxed line-clamp-3 font-serif italic">
             "{quote.snippet}"
           </p>
           
-          {/* Source footer */}
+          {}
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <div className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-semibold bg-primary/20 text-primary">
               {initial}

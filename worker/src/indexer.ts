@@ -1,12 +1,12 @@
-/**
- * RAG indexer: chunk page content and embed via OpenAI, then insert into chunks.
- * Called once per conversation after a crawl completes (bulk).
- */
+
+
+
+
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import { supabase } from './db';
 import { fetchTargetPageLead } from './targetLead';
 
-// Align with supabase/functions/add-page: same chunk params and progress batch sizes
+
 const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 const CHUNK_MAX_CHARS = 600;
 const CHUNK_OVERLAP_CHARS = 100;
@@ -28,7 +28,7 @@ type ChunkSpec = {
   owner_id: string;
 };
 
-/** Embed a batch of texts and insert chunk rows; returns number inserted. Stops on first error. */
+
 async function embedAndInsertChunks(
   chunkSpecs: ChunkSpec[],
   apiKey: string,
@@ -65,11 +65,11 @@ async function embedAndInsertChunks(
 type IndexChunkOptions = {
   crawlJobId?: string;
   conversationId?: string;
-  /** add-page flow: set status/updated_at on job and in progress updates */
+  
   addPageStyle?: boolean;
 };
 
-/** Shared: update crawl_jobs, embed chunks, optionally embed discovered links. */
+
 async function indexChunkSpecsForRag(
   chunkSpecs: ChunkSpec[],
   apiKey: string,
@@ -206,7 +206,7 @@ export async function indexSourceForRag(
   });
 }
 
-/** Index all sources in a conversation (e.g. full re-index). Prefer indexSourceForRag after a single-source crawl. */
+
 export async function indexConversationForRag(
   conversationId: string,
   crawlJobId?: string
@@ -244,7 +244,7 @@ export async function indexConversationForRag(
   });
 }
 
-/** Index a single page for RAG and report progress to crawl_jobs (add-page flow) */
+
 export async function indexSinglePageForRag(
   pageId: string,
   content: string,
@@ -264,9 +264,9 @@ export async function indexSinglePageForRag(
   });
 }
 
-/** Embed encoded_discovered for a single page (add-page flow) and report progress to crawl_jobs.
- * Skips links pointing to already-indexed pages - we never suggest those.
- * In dive mode: fetches each target page, gets lead, then embeds (progress = fetch+encode per link). */
+
+
+
 export async function embedDiscoveredLinksForPage(
   conversationId: string,
   pageId: string,
@@ -409,7 +409,7 @@ export async function embedDiscoveredLinksForPage(
   return updated;
 }
 
-/** Normalize URL for comparison (strip hash, query, lowercase) */
+
 function normalizeUrlForCompare(url: string): string {
   try {
     const u = new URL(url.startsWith('http') ? url : `https://${url}`);
@@ -551,7 +551,7 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
   const surfaceCount = toEmbed.length - diveCount;
   console.log('[indexer] embedDiscoveredLinks mode=surface|dive', { surface: surfaceCount, dive: diveCount, total: toEmbed.length });
 
-  // Process in batches; for dive mode we fetch each target before embedding (progress = fetch+encode per link)
+  
   const hasAnyDive = diveCount > 0;
   const BATCH_SIZE = hasAnyDive ? 1 : EMBED_BATCH_SIZE;
   let updated = 0;

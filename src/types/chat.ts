@@ -5,16 +5,16 @@ export interface SuggestedPage {
   title: string;
   snippet: string;
   sourceId: string;
-  /** When present: "can't answer" flow - add page then re-ask this question */
+  
   promptedByQuestion?: string;
-  /** Title of the page this link was discovered from (for "branching out from X") */
+  
   fromPageTitle?: string;
 }
 
-/** Thought process from Evidence-First RAG (collapsible UI). Streamed in real time. */
+
 export interface ThoughtProcess {
   slots?: { name: string; type: string; description?: string; dependsOn?: string }[];
-  /** Why we chose this plan (from plan step). */
+  
   planReason?: string;
   steps?: {
     iter: number;
@@ -26,9 +26,9 @@ export interface ThoughtProcess {
     claims?: unknown[];
     completeness?: number;
     fillStatusBySlot?: Record<string, string>;
-    /** One-after-the-other narrative statements (retrieve, extract, fill). */
+    
     statements?: string[];
-    /** After this step: answer | retrieve | expand_corpus | clarify */
+    
     nextAction?: string;
   }[];
   iterationCount?: number;
@@ -49,11 +49,11 @@ export interface Message {
   sourcesUsed?: string[];
   wasMultiStep?: boolean;
   suggestedPage?: SuggestedPage | null;
-  /** Points to the previous message this is a follow-up of (add page + re-answer) */
+  
   followsMessageId?: string;
-  /** Display text for divider when follow-up indexed a new page (e.g. "Indexed Page Title - site.com") */
+  
   scrapedPageDisplay?: string;
-  /** Evidence-First RAG: slots, steps, iteration count, completeness */
+  
   thoughtProcess?: ThoughtProcess | null;
 }
 

@@ -1,6 +1,6 @@
-/**
- * Save final assistant message, attach quotes, update context, optionally suggest conversation title.
- */
+
+
+
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PageRow, SourceRow } from './types.ts';
 import type { QuoteOut } from './types.ts';
@@ -78,7 +78,7 @@ export async function saveAssistantMessageWithQuotes(params: SaveAnswerParams): 
     await supabase.from('messages').update({ suggested_page: null }).eq('id', appendToMessageId);
   }
 
-  // Materialize quotes for the chunks actually cited in the final answer.
+  
   if (quoteIdsOrdered.length > 0) {
     const { data: chunkRows = [] } = await supabase
       .from('chunks')

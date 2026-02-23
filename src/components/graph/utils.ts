@@ -2,12 +2,12 @@ import { GraphNode, GraphLink, GraphData } from './types';
 import { DiscoveredPage } from '@/types/source';
 import type { PageEdge } from '@/lib/db/types';
 
-/**
- * Normalize URL for matching. Must match worker normalization exactly so
- * edge to_url (stored by worker via links.ts normalizeLinkUrl) matches page.url.
- * Worker links.ts: hash='', search='', pathname '' or '/' -> '/', else strip trailing slash.
- * We also accept both root forms (with/without trailing slash) so edges always match.
- */
+
+
+
+
+
+
 function normalizeUrlForMatching(url: string): string {
   try {
     const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
@@ -89,11 +89,11 @@ function dedupePagesByUrl(
   return { canonicalPages, pageIdToCanonicalId };
 }
 
-/**
- * Convert pages and edges to graph data structure.
- * Only real edges from the API are used; no synthetic/fallback links.
- * Pages with the same URL (e.g. from two sources) are merged into one node so edges from both attach to it.
- */
+
+
+
+
+
 export const createGraphData = (
   pages: DiscoveredPage[], 
   pagesIndexed: number,
@@ -104,41 +104,37 @@ export const createGraphData = (
   const { canonicalPages, pageIdToCanonicalId } = dedupePagesByUrl(pages, domain);
   const visiblePages = canonicalPages;
 
-  // Create maps for edge matching: URL -> page ID and page ID -> page
+  
   const urlToPageId = new Map<string, string>();
   const pageIdMap = new Map<string, DiscoveredPage>();
   
   visiblePages.forEach(page => {
-    // Prefer canonical page.url (from DB); fallback to domain+path so edge matching works.
+    
     const pageUrl = (page as DiscoveredPage & { url?: string }).url || (domain ? `https://${domain}${page.path}` : `https://example.com${page.path}`);
     const normalizedUrl = normalizeUrlForMatching(pageUrl);
-    // Add all match variants so worker-stored edge to_url (any form) resolves
+    
     urlMatchVariants(pageUrl).forEach((v) => urlToPageId.set(v, page.id));
     urlMatchVariants(normalizedUrl).forEach((v) => urlToPageId.set(v, page.id));
     urlToPageId.set(pageUrl, page.id);
     urlToPageId.set(pageUrl.toLowerCase(), page.id);
     addUrlVariantsToMap(normalizedUrl, page.id, urlToPageId);
-    try {
-      const u = new URL(normalizedUrl);
-      const withoutProtocol = `${u.hostname}${u.pathname}`;
-      urlToPageId.set(withoutProtocol, page.id);
-      urlToPageId.set(withoutProtocol.toLowerCase(), page.id);
-    } catch {
-      // ignore
-    }
+    const u = new URL(normalizedUrl);
+    const withoutProtocol = `${u.hostname}${u.pathname}`;
+    urlToPageId.set(withoutProtocol, page.id);
+    urlToPageId.set(withoutProtocol.toLowerCase(), page.id);
     pageIdMap.set(page.id, page);
   });
   
   const nodes: GraphNode[] = visiblePages.map((page, i) => {
     const pageUrl = (page as DiscoveredPage & { url?: string }).url || (domain ? `https://${domain}${page.path}` : `https://example.com${page.path}`);
-    // First page (starting page) should be at center, others spread around
+    
     const isStartingPage = i === 0;
     return {
     id: page.id,
     title: page.title,
     status: page.status,
       url: pageUrl,
-      // Starting page at center, others spread around in a circle
+      
       x: isStartingPage 
         ? dimensions.width / 2 
         : dimensions.width / 2 + Math.cos((i - 1) * (2 * Math.PI / Math.max(visiblePages.length - 1, 1))) * 80,
@@ -148,7 +144,7 @@ export const createGraphData = (
     };
   });
 
-  // Use real edges if available
+  
   const links: GraphLink[] = [];
   const edgesArray = edges || [];
 
@@ -164,7 +160,7 @@ export const createGraphData = (
     const visiblePageIds = new Set(visiblePages.map(p => p.id));
     const linkSet = new Set<string>();
 
-    /** Map edge endpoint to canonical page id so duplicate pages (same URL, different source) merge into one node. */
+    
     const toCanonical = (id: string | null | undefined): string | undefined =>
       id ? pageIdToCanonicalId.get(id) ?? (visiblePageIds.has(id) ? id : undefined) : undefined;
 
@@ -184,13 +180,9 @@ export const createGraphData = (
           }
         }
         if (!raw) {
-          try {
-            const urlObj = new URL(normalizedEdgeUrl);
-            const withoutProtocol = `${urlObj.hostname}${urlObj.pathname}`;
-            raw = urlToPageId.get(withoutProtocol) || urlToPageId.get(withoutProtocol.toLowerCase());
-          } catch {
-            // ignore
-          }
+          const urlObj = new URL(normalizedEdgeUrl);
+          const withoutProtocol = `${urlObj.hostname}${urlObj.pathname}`;
+          raw = urlToPageId.get(withoutProtocol) || urlToPageId.get(withoutProtocol.toLowerCase());
         }
         toPageId = raw && visiblePageIds.has(raw) ? raw : undefined;
       }
@@ -252,9 +244,9 @@ export const createGraphData = (
   return { nodes, links };
 };
 
-/**
- * Get node color based on status
- */
+
+
+
 export const getNodeColor = (status: GraphNode['status']): string => {
   switch (status) {
     case 'indexed':
@@ -268,9 +260,9 @@ export const getNodeColor = (status: GraphNode['status']): string => {
   }
 };
 
-/**
- * Get connected node IDs for a given node
- */
+
+
+
 export const getConnectedNodeIds = (nodeId: string, links: GraphLink[]): Set<string> => {
   const connectedIds = new Set<string>([nodeId]);
   

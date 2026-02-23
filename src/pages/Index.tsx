@@ -53,12 +53,12 @@ const Index = () => {
     addPageAndContinueResponse,
   } = useChatDatabase();
 
-  // Toggle with animation
+  
   const handleToggleSidebar = useCallback(() => {
     setSidebarOpen(prev => !prev);
   }, []);
 
-  // Resize handlers - no animation during drag
+  
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizing(true);
@@ -142,7 +142,7 @@ const Index = () => {
     return addSourceToConversation(newSource);
   }, [user, addSourceToConversation]);
 
-  // Clear add-page state when switching conversations so we don't show another conversation's loading
+  
   useEffect(() => {
     setAddingPageSourceId(null);
   }, [activeConversationId]);
@@ -187,7 +187,7 @@ const Index = () => {
 
   return (
     <div className="h-screen overflow-hidden bg-background flex">
-      {/* Sidebar container - animate only when not resizing */}
+      {}
       <div 
         className={cn(
           "shrink-0 border-r border-border overflow-hidden relative",
@@ -209,13 +209,13 @@ const Index = () => {
           />
         </div>
         
-        {/* Resize handle with drag indicator */}
+        {}
         {sidebarOpen && (
           <div
             className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-primary/30 transition-colors z-10 group"
             onMouseDown={handleResizeStart}
           >
-            {/* Drag indicator dots */}
+            {}
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-40 group-hover:opacity-70 transition-opacity">
               <div className="w-0.5 h-0.5 rounded-full bg-muted-foreground" />
               <div className="w-0.5 h-0.5 rounded-full bg-muted-foreground" />
@@ -225,7 +225,7 @@ const Index = () => {
         )}
       </div>
       
-      {/* Main Content */}
+      {}
       <div className="flex-1 min-w-0 relative">
         <ChatArea
           conversation={activeConversation}

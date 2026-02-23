@@ -30,7 +30,7 @@ export const useSources = () => {
 
   const selectedSource = sources.find(s => s.id === selectedSourceId) || null;
 
-  // Cleanup intervals on unmount
+  
   useEffect(() => {
     const intervals = crawlIntervals.current;
     return () => {
@@ -51,7 +51,7 @@ export const useSources = () => {
         const newPagesIndexed = Math.min(source.pagesIndexed + 1, source.totalPages);
         const isComplete = newPagesIndexed >= source.totalPages;
 
-        // Update discovered pages status
+        
         const updatedPages = source.discoveredPages.map((page, index) => ({
           ...page,
           status: index < newPagesIndexed ? 'indexed' as const : page.status,
@@ -88,10 +88,10 @@ export const useSources = () => {
     const totalPages = getTotalPagesForDepth(depth);
     const id = generateId();
 
-    // Generate mock pages for this source
+    
     const discoveredPages = generateMockPages(domain, 'crawling');
     
-    // Add more mock pages based on depth
+    
     while (discoveredPages.length < totalPages) {
       discoveredPages.push({
         id: `${domain}-page-${discoveredPages.length}`,
@@ -117,14 +117,14 @@ export const useSources = () => {
 
     setSources(prev => [...prev, newSource]);
     
-    // Start the crawl simulation
+    
     startCrawlSimulation(id);
 
     return id;
   }, [startCrawlSimulation]);
 
   const removeSource = useCallback((sourceId: string) => {
-    // Clear any running interval
+    
     const interval = crawlIntervals.current.get(sourceId);
     if (interval) {
       clearInterval(interval);
@@ -138,7 +138,7 @@ export const useSources = () => {
   }, [selectedSourceId]);
 
   const recrawlSource = useCallback((sourceId: string) => {
-    // Clear any existing interval
+    
     const existingInterval = crawlIntervals.current.get(sourceId);
     if (existingInterval) {
       clearInterval(existingInterval);

@@ -1,8 +1,8 @@
-/**
- * Sources are now one-to-many with conversations (sources.conversation_id).
- * This module provides backward-compatible API that proxies to sources.
- * @deprecated Prefer sourcesApi.listByConversation, sourcesApi.create, sourcesApi.delete directly.
- */
+
+
+
+
+
 import { sourcesApi } from './sources';
 import { crawlJobsApi } from './crawl-jobs';
 import type { Source } from './types';

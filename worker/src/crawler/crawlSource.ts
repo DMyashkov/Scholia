@@ -61,12 +61,12 @@ async function crawlSourceWithConversationId(
   const discovered = new Set<string>();
   const queue: string[] = [...seedUrls];
   seedUrls.forEach((u) => discovered.add(u));
-  /** Only count newly inserted pages toward maxPages so depth n always adds n new pages. */
+  
   let newPagesCount = 0;
 
-  /** URLs that already exist as pages in this conversation (any source). We skip these so depth n adds n new pages. */
+  
   const existingInConversation = new Set<string>();
-  /** Normalized URL -> page id for existing conversation pages; used to create edges from existing nodes when we skip insert. */
+  
   const existingPageIdByUrl = new Map<string, string>();
   const { data: convSources } = await supabase.from('sources').select('id').eq('conversation_id', conversationId);
   const convSourceIds = (convSources ?? []).map((s: { id: string }) => s.id);
@@ -160,24 +160,20 @@ async function crawlSourceWithConversationId(
         existingPageIdByUrl.set(norm, page.id);
       }
 
-      /** When we skipped insert (page null), use existing page in conversation so we can create edges from it to new links. */
+      
       const fromPageId: string | null = page?.id ?? existingPageIdByUrl.get(urlNormForLookup) ?? null;
 
       if (page && !sourceTitleUpdated && page.title) {
         const label = page.title.trim().substring(0, 100);
         if (label) {
-          try {
-            const { error } = await supabase
-              .from('sources')
-              .update({ source_label: label })
-              .eq('id', source.id);
-            if (!error) {
-              (source as { source_label?: string }).source_label = label;
-            }
-            sourceTitleUpdated = true;
-          } catch {
-            /* ignore */
+          const { error } = await supabase
+            .from('sources')
+            .update({ source_label: label })
+            .eq('id', source.id);
+          if (!error) {
+            (source as { source_label?: string }).source_label = label;
           }
+          sourceTitleUpdated = true;
         }
       }
 
@@ -239,9 +235,9 @@ async function crawlSourceWithConversationId(
       }
 
       if (page) {
-        // Backfill to_page_id for ALL edges in this conversation that point to this URL,
-        // so edges from other sources' pages (e.g. existing Donald Trump node) get to_page_id set
-        // and appear in the graph (listGraphEdgesByConversation requires to_page_id non-null).
+        
+        
+        
         const { data: convPageIds } = await supabase.from('pages').select('id').in('source_id', convSourceIds);
         const fromPageIds = (convPageIds ?? []).map((p: { id: string }) => p.id);
         if (fromPageIds.length > 0) {

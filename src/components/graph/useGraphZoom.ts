@@ -25,16 +25,16 @@ export const useGraphZoom = ({
     const svg = d3.select(svgRef.current);
     const container = d3.select(containerRef.current);
 
-    // Remove any existing zoom behavior
+    
     svg.on('.zoom', null);
 
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([minScale, maxScale])
       .filter((event) => {
-        // Allow wheel events and drag events (not on nodes)
+        
         if (event.type === 'wheel') return true;
         if (event.type === 'mousedown' || event.type === 'touchstart') {
-          // Only allow zoom drag on the background, not on nodes
+          
           const target = event.target as Element;
           return target.tagName === 'svg' || target.classList.contains('graph-background');
         }
@@ -87,7 +87,7 @@ export const useGraphZoom = ({
     return transformRef.current;
   }, []);
 
-  // Cleanup
+  
   useEffect(() => {
     const svgEl = svgRef.current;
     return () => {

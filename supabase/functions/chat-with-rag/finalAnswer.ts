@@ -1,7 +1,7 @@
-/**
- * Final-answer step: separate prompt that runs when we finish (answer or forced by stagnation/hard stop).
- * Receives all evidence that supports any slot_item, fairly allocated across slots, so we can cite early and late findings.
- */
+
+
+
+
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { OPENAI_CHAT_MODEL } from './config.ts';
 import { FINAL_ANSWER_CHUNKS_CAP } from './config.ts';
@@ -17,10 +17,10 @@ export interface FinalAnswerResult {
   cited_snippets: Record<string, string>;
 }
 
-/**
- * Get chunk ids that support slot_items for the given slots (via claim_evidence), grouped by slot_id.
- * Then return chunk objects (from evidenceChunksById) fairly allocated across slots up to cap.
- */
+
+
+
+
 export async function getEvidenceChunksForFinalAnswer(
   supabase: SupabaseClient,
   slotIds: string[],

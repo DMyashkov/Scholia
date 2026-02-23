@@ -14,10 +14,10 @@ export interface Source {
   id: string;
   initial_url: string;
   domain: string;
-  source_label?: string | null; // Human-readable label (e.g. "Joe Biden"). domain = hostname.
+  source_label?: string | null; 
   status: SourceStatus;
   crawlDepth: CrawlDepth;
-  suggestionMode: SuggestionMode; // surface = link context (faster), dive = fetch target page lead (slower)
+  suggestionMode: SuggestionMode; 
   sameDomainOnly: boolean;
   pagesIndexed: number;
   totalPages: number;
@@ -33,12 +33,12 @@ export interface Quote {
   pageTitle: string;
   pagePath: string;
   domain: string;
-  pageUrl?: string; // Full canonical URL - prefer over constructing from domain+path
+  pageUrl?: string; 
   contextBefore?: string;
   contextAfter?: string;
 }
 
 export interface SourcedMessage {
   quotes: Quote[];
-  sourcesUsed: string[]; // source IDs
+  sourcesUsed: string[]; 
 }

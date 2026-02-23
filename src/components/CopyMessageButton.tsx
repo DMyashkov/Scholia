@@ -17,7 +17,7 @@ function stripCitations(content: string): string {
   return content
     .replace(/\s*\[\d+\]\s*/g, ' ')
     .replace(/  +/g, ' ')
-    .replace(/ +([.,;:!?])/g, '$1') // remove space before punctuation left after citation removal
+    .replace(/ +([.,;:!?])/g, '$1') 
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }

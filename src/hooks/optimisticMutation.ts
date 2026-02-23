@@ -3,10 +3,10 @@ import { toast } from 'sonner';
 
 const DEFAULT_ERROR_MESSAGE = 'Failed to update setting';
 
-/**
- * Returns onMutate, onError, and optionally onSettled for a single-query optimistic update.
- * Use for mutations that update one cache key (e.g. user-settings).
- */
+
+
+
+
 export function optimisticUpdateSingle<TData, TVariables>(config: {
   queryKey: QueryKey;
   merge: (previous: TData | undefined, variables: TVariables) => TData;
@@ -45,10 +45,10 @@ export function optimisticUpdateSingle<TData, TVariables>(config: {
   });
 }
 
-/**
- * Returns onMutate and onError for a multi-query optimistic update.
- * Use when several cache keys must be updated together (e.g. conversations list + single conversation).
- */
+
+
+
+
 export function optimisticUpdateMulti<TVariables>(config: {
   updates: Array<{
     getQueryKey: (variables: TVariables) => QueryKey;

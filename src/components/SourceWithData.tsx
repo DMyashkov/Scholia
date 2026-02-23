@@ -1,7 +1,7 @@
-/**
- * Component wrapper to load source data using hooks
- * This allows us to use hooks for each source without violating hook rules
- */
+
+
+
+
 
 import { useSourceWithData } from '@/hooks/useSourceWithData';
 import type { Source as DBSource } from '@/lib/db/types';

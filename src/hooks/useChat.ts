@@ -94,7 +94,7 @@ export const useChat = () => {
   }, []);
 
   const selectConversation = useCallback((id: string) => {
-    // Clear intervals from previous conversation
+    
     crawlIntervals.current.forEach(interval => clearInterval(interval));
     crawlIntervals.current.clear();
     
@@ -115,7 +115,7 @@ export const useChat = () => {
   const deleteConversation = useCallback((id: string) => {
     setConversations(prev => prev.filter(c => c.id !== id));
     if (activeConversationId === id) {
-      // Clear intervals
+      
       crawlIntervals.current.forEach(interval => clearInterval(interval));
       crawlIntervals.current.clear();
       setActiveConversationId(null);
@@ -138,7 +138,7 @@ export const useChat = () => {
     let conversationId = activeConversationId;
     
     if (!conversationId) {
-      // Create a new conversation first
+      
       conversationId = generateId();
       const newConversation: Conversation = {
         id: conversationId,
@@ -160,14 +160,14 @@ export const useChat = () => {
       );
     }
     
-    // Start crawl simulation
+    
     startCrawlSimulation(source.id, conversationId);
     
     return conversationId;
   }, [activeConversationId, startCrawlSimulation]);
 
   const removeSourceFromConversation = useCallback((sourceId: string) => {
-    // Clear interval
+    
     const interval = crawlIntervals.current.get(sourceId);
     if (interval) {
       clearInterval(interval);
@@ -188,7 +188,7 @@ export const useChat = () => {
   const recrawlSource = useCallback((sourceId: string) => {
     if (!activeConversationId) return;
     
-    // Clear existing interval
+    
     const existingInterval = crawlIntervals.current.get(sourceId);
     if (existingInterval) {
       clearInterval(existingInterval);
@@ -263,14 +263,14 @@ export const useChat = () => {
     const readySources = conversationSources.filter(s => s.status === 'ready');
     const crawlingSources = conversationSources.filter(s => s.status === 'crawling');
 
-    // Generate response based on sources
+    
     const fullResponse = generateSourcedResponse(
       content,
       readySources.length > 0,
       crawlingSources.length > 0
     );
 
-    // Generate quotes if we have ready sources
+    
     const quotes = readySources.length > 0
       ? generateQuotesForMessage(
           content,
@@ -284,7 +284,7 @@ export const useChat = () => {
 
     const sourcesUsed = [...new Set(quotes.map(q => q.sourceId))];
 
-    // Simulate streaming
+    
     const words = fullResponse.split(' ');
     for (let i = 0; i < words.length; i++) {
       await new Promise(resolve => setTimeout(resolve, 30 + Math.random() * 20));

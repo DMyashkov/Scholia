@@ -45,5 +45,3 @@ export const messagesApi = {
     if (error) throw error;
   },
 };
-
-

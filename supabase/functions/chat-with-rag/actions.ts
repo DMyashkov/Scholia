@@ -1,6 +1,6 @@
-/**
- * Insert single assistant messages for RAG responses (no-pages, clarify, expand_corpus, hard-stop).
- */
+
+
+
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { SuggestedPage } from './expand.ts';
 

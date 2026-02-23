@@ -30,12 +30,12 @@ export const SourcePreviewDrawer = ({
 }: SourcePreviewDrawerProps) => {
   const [copied, setCopied] = useState(false);
 
-  // Compute values even when quote is null to avoid conditional hooks
+  
   const currentIndex = quote ? allQuotes.findIndex(q => q.id === quote.id) : -1;
   const hasPrevious = currentIndex > 0;
   const hasNext = currentIndex < allQuotes.length - 1;
 
-  // Use canonical pageUrl from backend when available (avoids domain+path bugs e.g. wrong domain)
+  
   const baseUrl = quote?.pageUrl ?? (quote ? `https://${quote.domain}${quote.pagePath}` : '');
   const baseNoHash = baseUrl ? baseUrl.split('#')[0] : '';
   // Scroll to Text Fragment: highlight and scroll to the quoted snippet on the source page (supported in Chrome, Edge, Safari 16.4+)
@@ -65,7 +65,7 @@ export const SourcePreviewDrawer = ({
     window.open(openPageUrl, '_blank', 'noopener,noreferrer');
   };
 
-  // Always render Sheet for smooth animations
+  
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       {quote && (
@@ -73,7 +73,7 @@ export const SourcePreviewDrawer = ({
         side="right" 
         className="w-full sm:max-w-lg bg-card border-l border-border p-0 flex flex-col gap-0 h-[100dvh] max-h-[100dvh] overflow-hidden"
       >
-        {/* Header with prominent page info */}
+        {}
         <SheetHeader className="p-6 pb-4 border-b border-border/50 shrink-0">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary/10 text-primary shrink-0">
@@ -93,7 +93,7 @@ export const SourcePreviewDrawer = ({
             </div>
           </div>
 
-          {/* Navigation between quotes */}
+          {}
           {allQuotes.length > 1 && (
             <div className="flex items-center justify-between mt-4 pt-4 border-t border-border/30">
               <span className="text-xs text-muted-foreground">
@@ -123,10 +123,10 @@ export const SourcePreviewDrawer = ({
           )}
         </SheetHeader>
 
-        {/* Scrollable content area - fills remaining space */}
+        {}
         <ScrollArea className="flex-1 min-h-0">
           <div className="px-6 pb-6 pt-4 space-y-5">
-            {/* Snippet with surrounding context from the source */}
+            {}
             <div className="space-y-2">
               <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 In context
@@ -148,7 +148,7 @@ export const SourcePreviewDrawer = ({
               </div>
             </div>
 
-            {/* Link to open source page (with Scroll to Text Fragment so the snippet is highlighted) */}
+            {}
             <div className="pt-2">
               <a
                 href={openPageUrl}
@@ -167,7 +167,7 @@ export const SourcePreviewDrawer = ({
           </div>
         </ScrollArea>
 
-        {/* Actions footer - fixed at bottom */}
+        {}
         <div className="p-4 border-t border-border/50 bg-card shrink-0 flex gap-2">
           <Button
             variant="outline"

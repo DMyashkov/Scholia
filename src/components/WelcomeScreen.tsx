@@ -9,7 +9,7 @@ export const WelcomeScreen = ({ onAddSource, hasSources }: WelcomeScreenProps) =
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8">
       <div className="max-w-md w-full space-y-8 animate-fade-in text-center">
-        {/* Logo and title */}
+        {}
         <div className="space-y-4">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/20 mb-4">
             <span className="text-3xl font-serif text-gradient">S</span>
@@ -22,7 +22,7 @@ export const WelcomeScreen = ({ onAddSource, hasSources }: WelcomeScreenProps) =
           </p>
         </div>
 
-        {/* CTA - only when no sources yet */}
+        {}
         {!hasSources && (
           <button
             onClick={onAddSource}

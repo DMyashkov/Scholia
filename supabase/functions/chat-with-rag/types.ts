@@ -23,7 +23,7 @@ export interface QuoteOut {
   contextAfter?: string;
 }
 
-// Unfold v2: Plan phase
+
 export type SlotType = 'scalar' | 'list' | 'mapping';
 
 export interface PlanSlot {
@@ -31,9 +31,9 @@ export interface PlanSlot {
   type: SlotType;
   description?: string;
   dependsOn?: string;
-  /** For list: number of items user asked for (e.g. "top 5" → 5), or 0 if no concrete number. For mapping: set 0; backend computes from list target × per-key count. */
+  
   target_item_count?: number;
-  /** For mapping: items per key (e.g. "top 2 achievements per product" → 2). Used with dependency list's target_item_count to compute slot target. */
+  
   items_per_key?: number;
 }
 
@@ -42,13 +42,13 @@ export interface PlanSubquery {
   query: string;
 }
 
-/** Normal subquery: explicit search phrase for one retrieval. */
+
 export interface NormalSubquery {
   slot: string;
   query: string;
 }
 
-/** Map subquery: backend expands to one query per key from the mapping slot's dependency list. */
+
 export interface MapSubquery {
   slot: string;
   query: '__map__';
@@ -64,13 +64,13 @@ export interface PlanResult {
   subqueries: PlanSubquery[];
 }
 
-// Unfold v2: Extract + Decide (loop)
+
 export interface ExtractClaim {
   slot: string;
   value: string | number | unknown;
   key?: string;
   confidence?: number;
-  /** Evidence chunk ids supporting this claim */
+  
   chunkIds: string[];
 }
 
@@ -79,17 +79,17 @@ export interface ExtractResult {
   next_action: 'retrieve' | 'expand_corpus' | 'clarify' | 'answer';
   why?: string;
   final_answer?: string;
-  /** When next_action is retrieve, optional follow-up subqueries for the next iteration (normal or __map__ for mapping slots). */
+  
   subqueries?: ExtractSubquery[];
-  /** When next_action is clarify, optional list of questions for the user */
+  
   questions?: string[];
-  /** e.g. "Could not parse claim for slot X" when parse fails or slot missing */
+  
   extractionGaps?: string[];
-  /** When next_action is answer: verbatim passage per chunk id (model-cited snippet, like pre–Unfold v2). */
+  
   cited_snippets?: Record<string, string>;
-  /** When next_action is expand_corpus: 1–10 to pick which of the precomputed candidate pages to suggest (optional). */
+  
   suggested_page_index?: number;
-  /** Only meaningful when backend sent "broad" for this slot this step. Slot names for which the model believes no more retrieval is needed (broad query was sufficient). */
+  
   broad_query_completed_slot_fully?: string[];
 }
 
@@ -106,7 +106,7 @@ export type ChunkRow = {
 export type PageRow = { id: string; source_id: string; title: string | null; path: string; url: string };
 export type SourceRow = { id: string; domain: string };
 
-// RAG context (index.ts split)
+
 export type SlotDb = {
   id: string;
   name: string;
@@ -114,7 +114,7 @@ export type SlotDb = {
   description?: string | null;
   depends_on_slot_id?: string | null;
   target_item_count: number;
-  /** Mapping slots only: values per key. Target = dep list current_item_count * items_per_key. */
+  
   items_per_key?: number | null;
   current_item_count: number;
   attempt_count: number;
@@ -129,7 +129,7 @@ export interface RagContextReady {
   ownerId: string;
   userMessage: string;
   dynamicMode: boolean;
-  /** How many candidate suggested pages to show the model (5 or 10, from user_settings). */
+  
   suggestedPageCandidates: number;
   sourceIds: string[];
   pages: PageRow[];

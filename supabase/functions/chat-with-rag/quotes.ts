@@ -2,10 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ChunkRow, PageRow, SourceRow, QuoteOut } from './types.ts';
 import { PAGE_CONTEXT_CHARS } from './config.ts';
 
-/**
- * Use full chunk content as the stored quote snippet (no length limit).
- * Extract sees the full chunk; UI can use context_before/after to show a focused region if needed.
- */
+
+
+
+
 export function snippetFromChunk(c: ChunkRow): string {
   return (c.content ?? '').trim();
 }
@@ -48,10 +48,10 @@ export async function createQuoteFromChunk(
 
 const QUOTE_PLACEHOLDER_REGEX = /\[\[quote:([^\]]+)\]\]/g;
 
-/**
- * Parse [[quote:uuid]] from final_answer, dedupe by first appearance, return content with [1],[2],... and ordered quote ids.
- * Only includes quote ids that are in validQuoteIds.
- */
+
+
+
+
 export function replaceCitationPlaceholders(
   finalAnswer: string,
   validQuoteIds: Set<string>,
@@ -72,7 +72,7 @@ export function replaceCitationPlaceholders(
     const placeholder = `[[quote:${quoteIdsOrdered[n]}]]`;
     content = content.split(placeholder).join(`[${n + 1}]`);
   }
-  // Remove any remaining [[quote:...]] that weren't valid
+  
   content = content.replace(QUOTE_PLACEHOLDER_REGEX, '');
   return { content, quoteIdsOrdered };
 }
@@ -94,10 +94,10 @@ export async function attachQuotesToMessage(
   }
 }
 
-/**
- * Update a quote row with context_before and context_after derived from full page content,
- * so the quote displays as a statement with surrounding context.
- */
+
+
+
+
 export async function updateQuoteContextFromPage(
   supabase: SupabaseClient,
   quoteId: string,
@@ -118,13 +118,13 @@ export function chunkShape(c: ChunkRow): string {
   return `page_id: ${c.page_id}\n[${c.source_domain}${c.page_path}] ${c.page_title}\n${c.content}`;
 }
 
-/** Ellipsis pattern: ... or .... or … (U+2026) - model sometimes inserts these in cited_snippets and breaks context lookup */
+
 const ELLIPSIS_RE = /\s*\.{2,}\s*|\s*…\s*/g;
 
 function findSnippetInText(text: string, snippet: string): { start: number; matchLen: number } | null {
   const idx = text.indexOf(snippet);
   if (idx >= 0) return { start: idx, matchLen: snippet.length };
-  // If snippet contains ellipsis, find using the first segment so context_after starts in the right place
+  
   if (/\s*\.{2,}\s*|\s*…\s*/.test(snippet)) {
     const segments = snippet.split(ELLIPSIS_RE).map((s) => s.trim()).filter((s) => s.length >= 20);
     for (const seg of segments) {

@@ -11,12 +11,12 @@ export interface SlotCompletenessMeta {
   finished_querying: boolean;
 }
 
-/**
- * Compute per-slot completeness score (0–1) for UI.
- * - Scalar: 1 if ≥1 slot_item, else 0.
- * - List/mapping with meta: target_item_count === 0 ? (finished_querying ? 1 : 0) : min(1, current_item_count / target_item_count).
- * - List/mapping without meta (fallback): list 1 if ≥1 item else 0; mapping count/expected.
- */
+
+
+
+
+
+
 export function slotCompleteness(
   slot: SlotForCompleteness,
   slotItemCountBySlotId: Map<string, number>,
@@ -47,10 +47,10 @@ export function slotCompleteness(
   return 0;
 }
 
-/**
- * Overall completeness: weighted average of slot scores.
- * Mapping slots get weight 2, others weight 1.
- */
+
+
+
+
 export function overallCompleteness(
   slots: SlotForCompleteness[],
   slotItemCountBySlotId: Map<string, number>,

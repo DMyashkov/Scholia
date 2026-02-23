@@ -29,7 +29,7 @@ import { deriveTitleFromUrl } from '@/lib/utils';
 import { generateTitle } from '@/data/mockResponses';
 import { generateQuotesForMessage, generateSourcedResponse } from '@/data/mockSourceContent';
 
-// Convert database types to UI types
+
 const dbConversationToUI = (db: DBConversation & { dynamic_mode?: boolean }, messages: DBMessage[], sources: Source[]): Conversation => ({
   id: db.id,
   title: db.title,
@@ -89,8 +89,8 @@ const dbMessageToUI = (db: DBMessage): Message => {
   };
 };
 
-// Helper component to load sources with data
-// We'll use this in the component tree instead
+
+
 
 const getFunctionsUrl = () => {
   const url = import.meta.env.SUPABASE_URL || '';
@@ -137,31 +137,31 @@ export const useChatDatabase = () => {
 
   // Load sources with full data (pages, crawl jobs)
   // Note: We can't use hooks in a map, so we'll create a component that uses the hook
-  // For now, create sources with minimal data - the UI components will load full data
-  // Default to 'crawling' status since a crawl job should be created when source is added
+  
+  
   const activeConversationSources: Source[] = conversationSourcesData.map(cs => {
     const db = cs.source;
     return {
       id: db.id,
       initial_url: db.initial_url,
       domain: db.domain,
-      status: 'crawling' as const, // Default to crawling - SidebarCrawlPanel will update based on actual crawl job
+      status: 'crawling' as const, 
       crawlDepth: db.crawl_depth,
       suggestionMode: (db as { suggestion_mode?: string }).suggestion_mode === 'dive' ? 'dive' : 'surface',
       sameDomainOnly: db.same_domain_only,
-      pagesIndexed: 0, // Will be updated by realtime
-      totalPages: 0, // Will be updated by realtime
+      pagesIndexed: 0, 
+      totalPages: 0, 
       lastUpdated: new Date(db.updated_at),
-      discoveredPages: [], // Will be loaded by usePages hook in components
+      discoveredPages: [], 
     };
   });
 
-  // Convert to UI format
+  
   const conversations: Conversation[] = dbConversations.map(dbConv => {
     const convMessages = dbMessages.filter(m => m.conversation_id === dbConv.id);
     
-    // Get sources for this specific conversation
-    // Only populate sources for active conversation (others will be empty)
+    
+    
     const convSources = dbConv.id === activeConversationId
       ? activeConversationSources
       : [];
@@ -192,11 +192,11 @@ export const useChatDatabase = () => {
         setActiveConversationId(null);
       }
       
-      // Delete the conversation
+      
       await deleteConversationMutation.mutateAsync(id);
     } catch (error) {
       console.error('Error deleting conversation:', error);
-      throw error; // Re-throw so UI can handle it
+      throw error; 
     }
   }, [activeConversationId, deleteConversationMutation]);
 
@@ -208,7 +208,7 @@ export const useChatDatabase = () => {
     let finalConvId = targetConvId;
     
     if (!finalConvId) {
-      // Create conversation first with title from first source
+      
       const title = deriveTitleFromUrl(source.initial_url) || 'New Research';
       const newConv = await createConversationMutation.mutateAsync(title);
       finalConvId = newConv.id;
@@ -227,7 +227,7 @@ export const useChatDatabase = () => {
       },
     });
 
-    // Map db source to UI Source for the caller (e.g. to select and open drawer).
+    
     const suggestionMode: Source['suggestionMode'] = (dbSource as { suggestion_mode?: string }).suggestion_mode === 'dive' ? 'dive' : 'surface';
     return {
       id: dbSource.id,
@@ -269,7 +269,7 @@ export const useChatDatabase = () => {
         Array.isArray(q.queryKey) &&
         (q.queryKey[0] === COUNT_OF_DISCOVERED_LINKS_BY_SOURCE || q.queryKey[0] === ENCODED_COUNT_OF_DISCOVERED_LINKS_BY_SOURCE),
     });
-    // Force immediate refetch of crawl jobs so UI updates right away
+    
     await queryClient.refetchQueries({ queryKey: [LATEST_MAIN_CRAWL_JOB_BY_SOURCES] });
     await queryClient.refetchQueries({ queryKey: [CURRENT_CRAWL_JOB_BY_SOURCE, sourceId] });
     console.log('[recrawl] useChatDatabase: refetch complete');
@@ -307,7 +307,7 @@ export const useChatDatabase = () => {
     }
     const data = await res.json();
 
-    // Page already exists – backfill ran server-side; invalidate so graph shows reconnected edges
+    
     if (data?.page) {
       console.log('[addPageToSource] page already exists', data.page.id?.slice(0, 8));
       queryClient.invalidateQueries({ queryKey: [LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE, conversationId, sourceId] });
@@ -334,13 +334,13 @@ export const useChatDatabase = () => {
       return data;
     }
 
-    // Job queued – poll until completed or failed (worker processes; Realtime delivers progress)
+    
     const jobId = data?.jobId;
     if (!jobId) {
       throw new Error('Invalid response: missing page or jobId');
     }
     const pollMs = 800;
-    const maxAttempts = 180; // ~2.5 min
+    const maxAttempts = 180; 
     let finalJob: Awaited<ReturnType<typeof crawlJobsApi.get>> | null = null;
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, pollMs));
@@ -381,7 +381,7 @@ export const useChatDatabase = () => {
     const functionsUrl = getFunctionsUrl();
     if (!functionsUrl) throw new Error('Functions URL not configured');
 
-    // Clear suggested_page immediately so the card disappears (persists on reload)
+    
     await updateMessageMutation.mutateAsync({
       id: messageId,
       conversationId,
@@ -467,19 +467,15 @@ export const useChatDatabase = () => {
           }
         }
         if (buffer.trim()) {
-          try {
-            const event = JSON.parse(buffer) as Record<string, unknown>;
-            if (event.done === true) {
-              setLiveThoughtProcess(null);
-              queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-              return;
-            }
-            if (event.error) {
-              setLiveThoughtProcess(null);
-              throw new Error(String(event.error));
-            }
-          } catch {
-            /* ignore */
+          const event = JSON.parse(buffer) as Record<string, unknown>;
+          if (event.done === true) {
+            setLiveThoughtProcess(null);
+            queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+            return;
+          }
+          if (event.error) {
+            setLiveThoughtProcess(null);
+            throw new Error(String(event.error));
           }
         }
         setLiveThoughtProcess(null);
@@ -499,7 +495,7 @@ export const useChatDatabase = () => {
     let conversationId = activeConversationId;
     let conversationSources: Source[] = [];
 
-    // Create conversation if needed
+    
     if (!conversationId) {
       const title = generateTitle(content);
       const newConv = await createConversationMutation.mutateAsync(title);
@@ -510,7 +506,7 @@ export const useChatDatabase = () => {
       conversationSources = currentSources;
     }
 
-    // Create user message (edge function uses its id as rootMessageId for Evidence-First RAG)
+    
     const userMsg = await createMessageMutation.mutateAsync({
       conversation_id: conversationId,
       role: 'user',
@@ -569,64 +565,37 @@ export const useChatDatabase = () => {
                 buffer = lines.pop() ?? '';
                 for (const line of lines) {
                   if (!line.trim()) continue;
-                  try {
-                    const event = JSON.parse(line) as Record<string, unknown>;
-                    if (event.thoughtProcess != null && typeof event.thoughtProcess === 'object') {
-                      setLiveThoughtProcess(event.thoughtProcess as ThoughtProcess);
-                    } else if (event.plan != null && typeof event.plan === 'object') {
-                      const plan = event.plan as { slots?: ThoughtProcess['slots']; subqueries?: unknown[] };
-                      if (Array.isArray(plan.slots)) {
-                        setLiveThoughtProcess({ slots: plan.slots, steps: [] });
-                      }
+                  const event = JSON.parse(line) as Record<string, unknown>;
+                  if (event.thoughtProcess != null && typeof event.thoughtProcess === 'object') {
+                    setLiveThoughtProcess(event.thoughtProcess as ThoughtProcess);
+                  } else if (event.plan != null && typeof event.plan === 'object') {
+                    const plan = event.plan as { slots?: ThoughtProcess['slots']; subqueries?: unknown[] };
+                    if (Array.isArray(plan.slots)) {
+                      setLiveThoughtProcess({ slots: plan.slots, steps: [] });
                     }
-                    if (event.step != null && event.label && event.totalSteps != null) {
-                      const current = Number(event.step);
-                      const total = Number(event.totalSteps);
-                      const label = String(event.label);
-                      const idx = steps.findIndex(s => s.current === current);
-                      if (idx >= 0) {
-                        steps[idx] = { current, total, label };
-                      } else {
-                        steps.push({ current, total, label });
-                        steps.sort((a, b) => a.current - b.current);
-                      }
-                      setRagStepProgress([...steps]);
-                    }
-                    if (event.done === true && event.message) {
-                      const ev = event as { suggestedTitle?: string };
-                      setLiveThoughtProcess(null);
-                      queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-                      if (ev.suggestedTitle) {
-                        console.log('[chat] RAG returned suggestedTitle:', JSON.stringify(ev.suggestedTitle), '| invalidating conversations to refresh sidebar');
-                        queryClient.invalidateQueries({ queryKey: ['conversations'] });
-                      } else {
-                        console.log('[chat] RAG done event received with no suggestedTitle (first-message title update skipped or not first message)');
-                      }
-                      setIsLoading(false);
-                      return;
-                    }
-                    if (event.error) {
-                      setLiveThoughtProcess(null);
-                      ragFailed = true;
-                      ragError = String(event.error);
-                      break;
-                    }
-                  } catch {
-                    // ignore parse errors for malformed lines
                   }
-                }
-              }
-              if (buffer.trim()) {
-                try {
-                  const event = JSON.parse(buffer) as Record<string, unknown> & { suggestedTitle?: string };
+                  if (event.step != null && event.label && event.totalSteps != null) {
+                    const current = Number(event.step);
+                    const total = Number(event.totalSteps);
+                    const label = String(event.label);
+                    const idx = steps.findIndex(s => s.current === current);
+                    if (idx >= 0) {
+                      steps[idx] = { current, total, label };
+                    } else {
+                      steps.push({ current, total, label });
+                      steps.sort((a, b) => a.current - b.current);
+                    }
+                    setRagStepProgress([...steps]);
+                  }
                   if (event.done === true && event.message) {
+                    const ev = event as { suggestedTitle?: string };
                     setLiveThoughtProcess(null);
                     queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-                    if (event.suggestedTitle) {
-                      console.log('[chat] RAG returned suggestedTitle (buffer):', JSON.stringify(event.suggestedTitle), '| invalidating conversations to refresh sidebar');
+                    if (ev.suggestedTitle) {
+                      console.log('[chat] RAG returned suggestedTitle:', JSON.stringify(ev.suggestedTitle), '| invalidating conversations to refresh sidebar');
                       queryClient.invalidateQueries({ queryKey: ['conversations'] });
                     } else {
-                      console.log('[chat] RAG done event (buffer) with no suggestedTitle');
+                      console.log('[chat] RAG done event received with no suggestedTitle (first-message title update skipped or not first message)');
                     }
                     setIsLoading(false);
                     return;
@@ -635,19 +604,38 @@ export const useChatDatabase = () => {
                     setLiveThoughtProcess(null);
                     ragFailed = true;
                     ragError = String(event.error);
+                    break;
                   }
-                } catch {
-                  /* ignore */
+                }
+              }
+              if (buffer.trim()) {
+                const event = JSON.parse(buffer) as Record<string, unknown> & { suggestedTitle?: string };
+                if (event.done === true && event.message) {
+                  setLiveThoughtProcess(null);
+                  queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+                  if (event.suggestedTitle) {
+                    console.log('[chat] RAG returned suggestedTitle (buffer):', JSON.stringify(event.suggestedTitle), '| invalidating conversations to refresh sidebar');
+                    queryClient.invalidateQueries({ queryKey: ['conversations'] });
+                  } else {
+                    console.log('[chat] RAG done event (buffer) with no suggestedTitle');
+                  }
+                  setIsLoading(false);
+                  return;
+                }
+                if (event.error) {
+                  setLiveThoughtProcess(null);
+                  ragFailed = true;
+                  ragError = String(event.error);
                 }
               }
             } finally {
-              // No cleanup needed
+              void 0;
             }
           } else {
             queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
           }
           if (ragFailed && ragError) {
-            // Fall through to fallback
+            void 0;
           } else {
             setIsLoading(false);
             return;
@@ -660,7 +648,7 @@ export const useChatDatabase = () => {
       }
     }
 
-    // Fallback: mock response (or clear error when RAG was tried but failed)
+    
     const fullResponse = ragFailed && hasSources
       ? (ragError
           ? `The assistant couldn't answer: **${ragError}** — Check that the crawl finished, chunks are indexed, and the Edge Function has the \`OPENAI_API_KEY\` secret set.`

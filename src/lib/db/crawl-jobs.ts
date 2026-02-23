@@ -13,7 +13,7 @@ export const crawlJobsApi = {
     return data as CrawlJob[];
   },
 
-  /** List jobs for sources in a conversation (source_ids imply conversation via sources) */
+  
   async listBySourceAndConversation(sourceIds: string[], _conversationId: string) {
     if (sourceIds.length === 0) return [];
     const { data, error } = await supabase
@@ -26,7 +26,7 @@ export const crawlJobsApi = {
     return (data as CrawlJob[]) ?? [];
   },
 
-  /** Latest main crawl job per source (explicit_crawl_urls is null) - for ready/error status, ignores add-page jobs */
+  
   async listLatestMainBySources(sourceIds: string[], _conversationId: string) {
     if (sourceIds.length === 0) return [];
     const { data, error } = await supabase
@@ -38,7 +38,7 @@ export const crawlJobsApi = {
 
     if (error) throw error;
     const jobs = (data as CrawlJob[]) ?? [];
-    // One per source (first/created_at desc = latest per source since we ordered by created_at)
+    
     const bySource = new Map<string, CrawlJob>();
     for (const j of jobs) {
       if (!bySource.has(j.source_id)) bySource.set(j.source_id, j);
@@ -57,7 +57,7 @@ export const crawlJobsApi = {
     return data as CrawlJob;
   },
 
-  /** Latest main crawl job (explicit_crawl_urls is null) - used for source ready/error status */
+  
   async getLatestMainBySource(sourceId: string, _conversationId: string) {
     const { data, error } = await supabase
       .from('crawl_jobs')
@@ -72,7 +72,7 @@ export const crawlJobsApi = {
     return data as CrawlJob | null;
   },
 
-  /** Latest crawl job for a source with explicit_crawl_urls (add-page flow) */
+  
   async getLatestWithExplicitUrlsBySource(_conversationId: string, sourceId: string) {
     const { data, error } = await supabase
       .from('crawl_jobs')
@@ -118,5 +118,3 @@ export const crawlJobsApi = {
     return data as CrawlJob;
   },
 };
-
-

@@ -41,7 +41,7 @@ export const CrawlStats = ({
 
   return (
     <div className="space-y-3">
-      {/* Stats grid */}
+      {}
       <TooltipProvider delayDuration={300}>
         <div className={cn('grid gap-2', isDynamic ? 'grid-cols-3' : 'grid-cols-2')}>
           <Tooltip>
@@ -91,7 +91,7 @@ export const CrawlStats = ({
         </div>
       </TooltipProvider>
 
-      {/* Three-phase progress bar: crawl | indexing chunks | encoding discovered */}
+      {}
       {(isCrawling || isIndexing || isResponding) && targetPages > 0 && (
         <EncodingProgressBar
           crawlDone={pagesIndexed}

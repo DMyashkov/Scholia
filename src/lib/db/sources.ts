@@ -54,7 +54,7 @@ export const sourcesApi = {
     if (error) throw error;
   },
 
-  /** Find conversations that have a source with this URL (excluding optional conversation) */
+  
   async findConversationsWithUrl(url: string, excludeConversationId?: string) {
     let query = supabase
       .from('sources')
@@ -72,5 +72,3 @@ export const sourcesApi = {
     }));
   },
 };
-
-

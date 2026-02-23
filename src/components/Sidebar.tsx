@@ -54,14 +54,14 @@ export const Sidebar = ({
 
   return (
     <>
-      {/* Sidebar content - uses opacity/visibility for smooth transitions */}
+      {}
       <aside
         className={cn(
           'h-full bg-card flex flex-col overflow-hidden transition-opacity duration-200',
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
         )}
       >
-        {/* Header - match SourcesBar height (h-16) for visual alignment */}
+        {}
         <div className="flex items-center justify-between h-16 px-4 border-b border-border shrink-0">
           <Button
             variant="ghost"
@@ -81,7 +81,7 @@ export const Sidebar = ({
           </Button>
         </div>
 
-        {/* Conversations list */}
+        {}
         <ScrollArea className="flex-1 min-h-0 px-2 py-4 scrollbar-thin">
           {groupedConversations.today.length > 0 && (
             <div className="mb-4">
@@ -141,10 +141,10 @@ export const Sidebar = ({
           )}
         </ScrollArea>
 
-        {/* Crawl Panel - shows when there are sources */}
+        {}
         <SidebarCrawlPanel sources={currentSources} conversationId={activeConversationId} addingPageSourceId={addingPageSourceId} />
 
-        {/* Footer with User Menu */}
+        {}
         <UserMenu />
       </aside>
     </>
@@ -181,7 +181,7 @@ const ConversationItem = ({
       setShowDeleteDialog(false);
     } catch (error) {
       console.error('Failed to delete conversation:', error);
-      // Keep dialog open on error so user can try again
+      
     } finally {
       setIsDeleting(false);
     }
@@ -200,7 +200,7 @@ const ConversationItem = ({
       >
         <MessageSquare className="h-4 w-4 shrink-0" />
         <span className="flex-1 truncate text-sm">{conversation.title}</span>
-        {/* Source favicons - stacked with overflow */}
+        {}
         {conversation.sources && conversation.sources.length > 0 && (
           <div className="flex items-center -space-x-1.5 shrink-0">
             {conversation.sources.slice(0, 3).map((source, i) => (

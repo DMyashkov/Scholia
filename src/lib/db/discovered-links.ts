@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 
-/** Only query encoded_discovered for sources with crawl_depth = 'dynamic'. */
+
 async function getDynamicSourceIds(conversationId: string): Promise<string[]> {
   const { data: sources } = await supabase
     .from('sources')
@@ -67,7 +67,7 @@ export const discoveredLinksApi = {
     return map;
   },
 
-  /** Count encoded_discovered with embeddings - these can be suggested by RAG. Only for dynamic sources. */
+  
   async countsEncodedByConversation(conversationId: string): Promise<Record<string, number>> {
     const dynamicSourceIds = await getDynamicSourceIds(conversationId);
     if (dynamicSourceIds.length === 0) return {};

@@ -1,12 +1,12 @@
-/**
- * Temporary test component to verify database setup
- * 
- * Usage:
- * 1. Import this in App.tsx or Index.tsx temporarily
- * 2. Add <DatabaseTest /> to your component tree
- * 3. Check browser console for test results
- * 4. Remove when done testing
- */
+
+
+
+
+
+
+
+
+
 
 import { useState } from 'react';
 import { useConversations, useCreateConversation } from '@/hooks/useConversations';
@@ -42,12 +42,12 @@ export function DatabaseTest() {
     addResult('🧪 Starting database tests...');
 
     try {
-      // Test 1: Create conversation
+      
       addResult('Test 1: Creating conversation...');
       const newConv = await createConversation.mutateAsync('Test conversation');
       addResult(`✅ Conversation created: ${newConv.id}`);
 
-      // Test 2: Create message
+      
       addResult('Test 2: Creating message...');
       const newMsg = await createMessage.mutateAsync({
         conversation_id: newConv.id,
@@ -57,7 +57,7 @@ export function DatabaseTest() {
       });
       addResult(`✅ Message created: ${newMsg.id}`);
 
-      // Test 3: Add source
+      
       addResult('Test 3: Adding source...');
       const newSource = await addSource.mutateAsync({
         conversationId: newConv.id,
@@ -72,9 +72,9 @@ export function DatabaseTest() {
       });
       addResult(`✅ Source created and added: ${newSource.id}`);
 
-      // Test 4: Check crawl job was created
+      
       addResult('Test 4: Checking crawl job...');
-      // Wait a bit for crawl job to be created
+      
       await new Promise(resolve => setTimeout(resolve, 500));
       addResult('✅ Crawl job should be created automatically');
 

@@ -28,11 +28,11 @@ import {
   ENCODED_COUNT_OF_DISCOVERED_LINKS_BY_SOURCE,
 } from '@/lib/queryKeys';
 import { useQuery } from '@tanstack/react-query';
-// MAX_PAGES defined inline
+
 
 interface SourceDrawerProps {
   source: Source | null;
-  /** All source IDs in the conversation - used for cache sharing with other crawl-job queries */
+  
   allSourceIds?: string[];
   conversationId: string | null;
   open: boolean;
@@ -194,7 +194,7 @@ export const SourceDrawer = ({
     enabled: !!graphConversationId && !!source?.id && source?.crawlDepth === 'dynamic',
   });
 
-  // Filter pages for the selected source only (no inference fallback)
+  
   const sourcePages = useMemo(() => {
     if (!source) return [];
     return allPages.filter(p => p.source_id === source.id && p.status === 'indexed');
@@ -202,8 +202,8 @@ export const SourceDrawer = ({
 
   const sourcePageIds = useMemo(() => sourcePages.map(p => p.id), [sourcePages]);
 
-  // When this source's seed URL already exists as a page in another source (we skipped insert),
-  // include that page in the graph so edges from it to this source's pages are shown.
+  
+  
   const normalizeUrlForSeedMatch = (url: string) => {
     try {
       const u = new URL(url.startsWith('http') ? url : `https://${url}`);
@@ -287,7 +287,7 @@ export const SourceDrawer = ({
     return () => clearTimeout(t);
   }, [sourcePages.length, refetchGraphEdges]);
 
-  // Freeze totalPages for add-page flow (avoids 2/3 when new page arrives before status update)
+  
   const prevAddingRef = useRef<string | null>(null);
   const addPageInitialCountRef = useRef<number>(0);
   if (addingPageSourceId && source?.id && addingPageSourceId === source.id) {
@@ -299,8 +299,8 @@ export const SourceDrawer = ({
     prevAddingRef.current = null;
   }
 
-  // Stabilize graph pages: merge incoming sourcePages into a ref so we never drop a page
-  // we've already shown (avoids links disappearing when refetch temporarily returns fewer pages).
+  
+  
   const stablePagesRef = useRef<Map<string, { id: string; title: string | null; path: string; status: string; url: string | null; source_id: string }>>(new Map());
   const prevSourceIdRef = useRef<string | null>(null);
   const prevCrawlStatusRef = useRef<string | null>(null);
@@ -329,7 +329,7 @@ export const SourceDrawer = ({
   });
   const stablePagesForGraph = useMemo(
     () => Array.from(stablePagesRef.current.values()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- ref synced elsewhere when sourcePages changes; we re-read here
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sourcePages]
   );
 
@@ -338,7 +338,7 @@ export const SourceDrawer = ({
     if (crawlJob) {
       const job = crawlJob as CrawlJob;
       const fromJob = job.indexed_count ?? sourcePages.length;
-      // Job can report 0 before first update; never show fewer nodes than pages we have
+      
       return Math.max(fromJob, sourcePages.length);
     }
     return sourcePages.length;
@@ -365,8 +365,8 @@ export const SourceDrawer = ({
     return source.crawlDepth === 'singular' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
   }, [source, sourcePages.length, addingPageSourceId, addPageJob?.status]);
 
-  // Convert pages to DiscoveredPage format for ForceGraph (use stabilized list so links don't flicker).
-  // Include seed page from another source when this source has no page for its seed URL (skipped-insert case).
+  
+  
   const displayPages = useMemo(() => {
     const base = stablePagesForGraph.map((p) => ({
       id: p.id,
@@ -476,7 +476,7 @@ export const SourceDrawer = ({
                 )}
               </div>
 
-              {/* Settings summary */}
+              {}
               <div className="space-y-2">
                 <h4 className="text-sm font-medium text-foreground">Settings</h4>
                 <div className="text-xs text-muted-foreground space-y-1 bg-background/50 rounded-lg p-3 border border-border/50">
@@ -513,7 +513,7 @@ export const SourceDrawer = ({
                 </div>
               </div>
 
-              {/* Actions */}
+              {}
               <div className="flex gap-2">
                 <Button
                   variant="outline"
@@ -543,7 +543,7 @@ export const SourceDrawer = ({
               </div>
             </div>
 
-            {/* Discovered pages - scrollable section that fills remaining height */}
+            {}
             <div className="flex-1 min-h-0 flex flex-col px-6 pb-6">
               <h4 className="text-sm font-medium text-foreground mb-2 shrink-0">
                 Scraped Pages ({displayPages.length})

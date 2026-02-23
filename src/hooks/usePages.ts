@@ -20,7 +20,7 @@ export const usePages = (sourceId: string | null) => {
 };
 
 export type UseConversationPagesOptions = {
-  /** When set, refetch on this interval (ms). Use while crawling so graph updates without relying on realtime. Can be a function for dynamic intervals (e.g. pause when tab hidden). */
+  
   refetchInterval?: number | false | (() => number | false);
 };
 
@@ -51,7 +51,7 @@ export const usePageEdges = (sourceId: string | null) => {
 };
 
 export type UseConversationPageEdgesOptions = {
-  /** When set, refetch on this interval (ms). Use while crawling so graph updates without relying on realtime. Can be a function for dynamic intervals (e.g. pause when tab hidden). */
+  
   refetchInterval?: number | false | (() => number | false);
 };
 
@@ -70,10 +70,10 @@ export const useConversationPageEdges = (
   });
 };
 
-/**
- * Lightweight edges for the graph only: from_page_id and to_page_id both in pageIds.
- * Avoids fetching 20k+ edges and filtering client-side; payload is typically &lt;200 rows.
- */
+
+
+
+
 export const useConversationGraphEdges = (conversationId: string | null, pageIds: string[]) => {
   const pageIdsKey = useMemo(() => [...pageIds].sort().join(','), [pageIds]);
   return useQuery({
@@ -85,5 +85,3 @@ export const useConversationGraphEdges = (conversationId: string | null, pageIds
     enabled: !!conversationId && pageIds.length > 0,
   });
 };
-
-

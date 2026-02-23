@@ -13,14 +13,10 @@ function clamp(v: number): number {
 
 function getInitialWidth(): number {
   if (typeof window === 'undefined') return DEFAULT;
-  try {
-    const s = localStorage.getItem(STORAGE_KEY);
-    if (s != null) {
-      const n = parseInt(s, 10);
-      if (!Number.isNaN(n)) return clamp(n);
-    }
-  } catch {
-    /* ignore */
+  const s = localStorage.getItem(STORAGE_KEY);
+  if (s != null) {
+    const n = parseInt(s, 10);
+    if (!Number.isNaN(n)) return clamp(n);
   }
   return DEFAULT;
 }
@@ -30,7 +26,7 @@ export function useSidebarWidth() {
   const [sidebarWidth, setSidebarWidth] = useState(getInitialWidth);
   const [loaded, setLoaded] = useState(false);
 
-  // Load on mount or when user changes (DB overrides localStorage for logged-in users)
+  
   useEffect(() => {
     if (user) {
       userSettingsApi
@@ -39,17 +35,12 @@ export function useSidebarWidth() {
           if (s?.sidebar_width != null) {
             const w = clamp(s.sidebar_width);
             setSidebarWidth(w);
-            try {
-              localStorage.setItem(STORAGE_KEY, String(w));
-            } catch {
-              /* ignore */
-            }
+            localStorage.setItem(STORAGE_KEY, String(w));
           }
         })
         .catch(() => {})
         .finally(() => setLoaded(true));
     } else {
-      // Anonymous: already initialized from localStorage in useState
       setLoaded(true);
     }
   }, [user]);
@@ -57,11 +48,7 @@ export function useSidebarWidth() {
   const saveWidth = useCallback(
     (width: number) => {
       const w = clamp(width);
-      try {
-        localStorage.setItem(STORAGE_KEY, String(w));
-      } catch {
-        /* ignore */
-      }
+      localStorage.setItem(STORAGE_KEY, String(w));
       if (user) {
         userSettingsApi.upsertSidebarWidth(user.id, w).catch(() => {});
       }

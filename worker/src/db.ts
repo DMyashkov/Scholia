@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Load from project root .env (parent of worker/)
+
 config({ path: path.resolve(__dirname, '..', '..', '.env') });
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
@@ -14,7 +14,7 @@ if (!supabaseUrl || !supabaseServiceKey) {
   throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables');
 }
 
-// Use service role key to bypass RLS
+
 export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
     autoRefreshToken: false,
@@ -22,6 +22,6 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   },
 });
 
-// Log connection on load (helps debug "worker never claims jobs" - verify URL matches frontend)
+
 const urlDisplay = supabaseUrl ? supabaseUrl.replace(/^https?:\/\//, '').slice(0, 50) : 'NOT SET';
 console.log(`[worker] Supabase URL: ${urlDisplay}... (must match frontend—check root .env)`);

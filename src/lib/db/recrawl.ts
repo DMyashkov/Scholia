@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase';
 import type { CrawlJobInsert } from './types';
 import { crawlJobsApi } from './crawl-jobs';
 
-const RECRAWL_DEBUG = true; // Set to false to disable recrawl logs
+const RECRAWL_DEBUG = true; 
 
 function recrawlLog(...args: unknown[]) {
   if (RECRAWL_DEBUG) {
@@ -10,15 +10,15 @@ function recrawlLog(...args: unknown[]) {
   }
 }
 
-/**
- * Recrawl a source: clear graph data and create a new crawl job.
- * - Static: delete pages/edges/chunks/discovered, create job (crawls from seed)
- * - Dynamic: collect all page URLs before delete, pass as explicit_crawl_urls so worker re-crawls seed + all added pages
- */
+
+
+
+
+
 export async function recrawlSource(conversationId: string, sourceId: string): Promise<void> {
   recrawlLog('START', { conversationId: conversationId.slice(0, 8), sourceId: sourceId.slice(0, 8) });
 
-  // 0. Fetch source and page URLs before deleting (for dynamic full recrawl)
+  
   const { data: source } = await supabase
     .from('sources')
     .select('id, crawl_depth, url')
@@ -37,7 +37,7 @@ export async function recrawlSource(conversationId: string, sourceId: string): P
     recrawlLog('dynamic source, seedUrls count:', seedUrls?.length ?? 0);
   }
 
-  // 1. Cancel any queued/running crawl jobs for this source
+  
   const { data: jobs } = await supabase
     .from('crawl_jobs')
     .select('id, status')
@@ -52,7 +52,7 @@ export async function recrawlSource(conversationId: string, sourceId: string): P
       .eq('id', job.id);
   }
 
-  // 2. Get page IDs for this source (for chunk deletion - chunks ref pages)
+  
   const { data: pages } = await supabase
     .from('pages')
     .select('id')
@@ -60,16 +60,16 @@ export async function recrawlSource(conversationId: string, sourceId: string): P
 
   const pageIds = (pages ?? []).map((p) => p.id);
 
-  // 3. Delete chunks for these pages (chunks have FK to pages)
+  
   recrawlLog('pageIds to delete:', pageIds.length);
   if (pageIds.length > 0) {
     const { error: chunksErr } = await supabase.from('chunks').delete().in('page_id', pageIds);
     if (chunksErr) recrawlLog('chunks delete error:', chunksErr);
   }
 
-  // 4. encoded_discovered cascades when page_edges are deleted in step 5
+  
 
-  // 5. Delete page_edges (via from_page_id - edges reference pages; encoded_discovered cascades)
+  
   if (pageIds.length > 0) {
     const { error: edgesErr } = await supabase
       .from('page_edges')
@@ -78,14 +78,14 @@ export async function recrawlSource(conversationId: string, sourceId: string): P
     if (edgesErr) recrawlLog('page_edges delete error:', edgesErr);
   }
 
-  // 6. Delete pages
+  
   const { error: pagesErr } = await supabase
     .from('pages')
     .delete()
     .eq('source_id', sourceId);
   if (pagesErr) recrawlLog('pages delete error:', pagesErr);
 
-  // 7. Create new crawl job (with explicit_crawl_urls for dynamic full recrawl) - explicit 0 for all progress fields
+  
   const newJobPayload: CrawlJobInsert = {
     source_id: sourceId,
     status: 'queued',

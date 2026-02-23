@@ -18,24 +18,24 @@ import { supabase } from '@/lib/supabase';
 import { useQueryClient } from '@tanstack/react-query';
 import type { CrawlJob, Page, PageEdge } from '@/lib/db/types';
 
-/**
- * Hook to subscribe to realtime updates for crawl progress
- * Updates React Query cache when data changes
- *
- * Graph-edges refetch is small (one per conversation), so we use a short debounce
- * so edges appear soon after nodes (previously 1.2s+800ms caused 1–2s delay).
- */
+
+
+
+
+
+
+
 const EDGES_DEBOUNCE_MS = 200;
 const EDGES_TRAILING_MS = 150;
 const DISCOVERED_LINKS_DEBOUNCE_MS = 500;
 const PAGES_DEBOUNCE_MS = 300;
 
-/** True if queryKey is an array with key[0] === prefix and (optionally) key[1] === second. */
+
 function queryKeyMatches(key: unknown, prefix: string, second?: unknown): boolean {
   return Array.isArray(key) && key[0] === prefix && (second === undefined || key[1] === second);
 }
 
-/** Query predicate: invalidate if key matches any (prefix, second) pair. */
+
 function predicateForKeys(conversationId: string, pairs: [string, unknown?][]): (query: { queryKey: unknown }) => boolean {
   return (query) => {
     const key = query.queryKey;
@@ -43,7 +43,7 @@ function predicateForKeys(conversationId: string, pairs: [string, unknown?][]): 
   };
 }
 
-/** Run fn after ms; each call resets the timer. Call the returned function from the event handler. */
+
 function debouncedInvoke(
   timerRef: { current: ReturnType<typeof setTimeout> | null },
   ms: number,
@@ -72,13 +72,13 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
       return;
     }
 
-    // Clean up existing channels
+    
     channelsRef.current.forEach(channel => {
       supabase.removeChannel(channel);
     });
     channelsRef.current = [];
 
-    // Subscribe to crawl_jobs updates for all sources (needs source_id filter; use in.(...) only here)
+    
     if (sourceIds.length > 0) {
       const crawlJobsChannel = supabase
         .channel(`crawl-jobs:${conversationId}`)
@@ -117,7 +117,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
       });
     };
 
-    // Subscribe to pages INSERTs for sources in this conversation.
+    
     const pagesChannel =
       sourceIds.length > 0
         ? supabase
@@ -147,7 +147,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
         : null;
     if (pagesChannel) channelsRef.current.push(pagesChannel);
 
-    // Subscribe to page_edges INSERTs – invalidate only graph-edges query (small payload), not full 20k edges
+    
     const edgesChannel = supabase
       .channel(`page-edges:${conversationId}`)
       .on<PageEdge>(
@@ -189,8 +189,8 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
 
     channelsRef.current.push(edgesChannel);
 
-    // Subscribe to encoded_discovered INSERTs (new links) and UPDATEs (embedding set during encoding)
-    // No filter: source_id dropped; RLS restricts to our rows
+    
+    
     const dlChannel =
       sourceIds.length > 0
         ? supabase
@@ -222,7 +222,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
                   queryClient.invalidateQueries({ queryKey: [ENCODED_COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION, conversationId] });
                   queryClient.invalidateQueries({ predicate: (q) => queryKeyMatches(q.queryKey, COUNT_OF_DISCOVERED_LINKS_BY_SOURCE) });
                   queryClient.invalidateQueries({ predicate: (q) => queryKeyMatches(q.queryKey, ENCODED_COUNT_OF_DISCOVERED_LINKS_BY_SOURCE) });
-                  // encoding_discovered_done lives on crawl_jobs; invalidate so progress bar gets latest (crawl_jobs realtime may not fire for worker updates)
+                  
                   queryClient.invalidateQueries({
                     predicate: (q) =>
                       Array.isArray(q.queryKey) && q.queryKey[0] === LATEST_MAIN_CRAWL_JOB_BY_SOURCES,
@@ -252,7 +252,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
       });
       channelsRef.current = [];
     };
-    // sourceIdsKey is useMemo from sourceIds - stable representation for deps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, sourceIdsKey, queryClient]);
+    
+    
+  }, [conversationId, sourceIdsKey, sourceIds, queryClient]);
 }

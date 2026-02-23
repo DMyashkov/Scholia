@@ -77,6 +77,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     return;
   }
 
+  try {
   const c = ctx as RagContextReady;
   const {
     conversationId: convId,
@@ -130,7 +131,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       name: s.name,
       type: s.type,
       description: s.description ?? null,
-      required: s.required !== false,
       depends_on_slot_id: null as string | null,
       target_item_count: s.type === 'list' ? (s.target_item_count ?? 0) : 0,
       items_per_key: s.type === 'mapping' && s.items_per_key != null ? s.items_per_key : null,
@@ -146,7 +146,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         if (depId) await supabase.from('slots').update({ depends_on_slot_id: depId }).eq('id', row.id);
       }
     }
-    slots = (await supabase.from('slots').select('id, name, type, description, required, depends_on_slot_id, target_item_count, items_per_key, current_item_count, attempt_count, finished_querying, last_queries').eq('root_message_id', rootMessageId)).data as SlotDb[] ?? [];
+    slots = (await supabase.from('slots').select('id, name, type, description, depends_on_slot_id, target_item_count, items_per_key, current_item_count, attempt_count, finished_querying, last_queries').eq('root_message_id', rootMessageId)).data as SlotDb[] ?? [];
     slotIdByName = new Map(slots.map((s) => [s.name, s.id]));
     for (const q of planResult.subqueries) {
       const sid = slotIdByName.get(q.slot);
@@ -284,7 +284,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     iteration++;
     slotItemCountBySlotId = await getSlotItemCountBySlotId();
 
-    // Set finished_querying so "all required finished" can be a single check (scalar: filled; list/mapping: at target)
+    // Set finished_querying so "all slots finished" can be a single check (scalar: filled; list/mapping: at target)
     for (const slot of slots) {
       const count = slotItemCountBySlotId.get(slot.id) ?? 0;
       if (slot.type === 'scalar') {
@@ -416,7 +416,10 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       .filter((sq) => sq.query && !seen.has(`${sq.slotId}::${sq.query}`))
       .slice(0, Math.min(MAX_SUBQUERIES_PER_ITER, MAX_TOTAL_SUBQUERIES - totalSubqueriesRun))
       .map((sq) => sq.query);
-    if (subqueriesToRun.length === 0) break;
+    if (subqueriesToRun.length === 0) {
+      log('break-no-subqueries', { iteration, subqueriesWithSlotCount: subqueriesWithSlot.length });
+      break;
+    }
 
     totalSubqueriesRun += subqueriesToRun.length;
 
@@ -558,6 +561,13 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         if (currentCount === prevCount) slot.finished_querying = true;
       }
     }
+    // Scalars: mark finished if we ran subqueries this step and still have no value (stagnation)
+    for (const slot of slots) {
+      if (slot.type !== 'scalar') continue;
+      const count = slotItemCountBySlotId.get(slot.id) ?? 0;
+      if (count >= 1) continue;
+      if (thisStepQueriesBySlotId.has(slot.id)) slot.finished_querying = true;
+    }
     for (const slot of slots) {
       const payload: { finished_querying: boolean; current_item_count?: number; attempt_count?: number; last_queries?: string[] } = { finished_querying: slot.finished_querying };
       if (slot.type === 'list' || slot.type === 'mapping') {
@@ -579,11 +589,10 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const slotsForCompleteness: SlotForCompleteness[] = slots.map((s) => ({
       id: s.id,
       type: s.type as SlotForCompleteness['type'],
-      required: s.required,
       depends_on_slot_id: s.depends_on_slot_id ?? null,
     }));
     const completeness = overallCompleteness(slotsForCompleteness, slotItemCountBySlotId, slotMetaBySlotId);
-    const allFinished = slots.filter((s) => s.required).every((s) => s.finished_querying);
+    const allFinished = slots.every((s) => s.finished_querying);
     const effectiveNextAction = (extractResult.next_action === 'retrieve' && allFinished) ? 'answer' : extractResult.next_action;
 
     await supabase
@@ -596,7 +605,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       fillStatusBySlot = {};
       for (const slot of slots) {
         const score = slotCompleteness(
-          { id: slot.id, type: slot.type as SlotForCompleteness['type'], required: slot.required, depends_on_slot_id: slot.depends_on_slot_id ?? null },
+          { id: slot.id, type: slot.type as SlotForCompleteness['type'], depends_on_slot_id: slot.depends_on_slot_id ?? null },
           slotItemCountBySlotId,
           slotMetaBySlotId,
         );
@@ -825,6 +834,15 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     }
   }
 
+  if (!done && finalAnswer == null && iteration > 0) {
+    log('no-answer-after-loop', { iteration, reason: 'broke with no subqueries or no final answer' });
+    const fallbackResult = await produceFinalAnswer();
+    finalAnswer = fallbackResult.finalAnswer || "I couldn't complete retrieval for that question. Try rephrasing or adding more sources.";
+    validQuoteIdsForSave = fallbackResult.validQuoteIds;
+    lastExtractResult = { ...lastExtractResult, cited_snippets: fallbackResult.cited_snippets };
+    done = true;
+  }
+
   if (!done && iteration >= MAX_ITERATIONS) {
     thoughtProcess.hardStopReason = `Max iterations (${MAX_ITERATIONS})`;
     log('hard-stop', { reason: thoughtProcess.hardStopReason });
@@ -881,5 +899,10 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       },
       ...(suggestedTitle ? { suggestedTitle } : {}),
     });
+  }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log('error', { error: msg, stack: err instanceof Error ? err.stack : undefined });
+    await emit({ error: msg });
   }
 }

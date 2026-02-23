@@ -40,7 +40,7 @@ Scalar: one value, no key. List: one claim per item. Mapping: key = one of the d
 - Prefer "retrieve" or "answer"; use "expand_corpus" only when evidence genuinely lacks the facts (not merely spread across chunks). 
 Use "clarify" only when the question is ambiguous, not when evidence is missing.
 
-- Answer: Set next_action to "answer" when required slots are finished/complete or retrieval has stagnated with partial evidence. 
+- Answer: Set next_action to "answer" only when every slot that matters for the user’s question has been filled (non-empty / at target) and a useful answer can be given, or retrieval has clearly stagnated and no further useful evidence is likely. 
 Backend runs a separate final-answer step; you do not write answer text.
 
 - Subqueries: omit for (a) slots that have finished querying (listed below), (b) scalar slots that already have a value in current slot state, 
@@ -109,7 +109,7 @@ expand_corpus: set suggested_page_index (1–${topSuggestedPages.length}) or omi
   const finishedBlock =
     finishedQueryingSlotNames.length > 0
       ? `
- ${finishedQueryingSlotNames.join(', ')}. Set next_action to "answer" when all required are finished or complete.`
+ ${finishedQueryingSlotNames.join(', ')}. Do not suggest new subqueries for these slots this step.`
       : '';
 
   const userContent = `Question: ${userMessage}

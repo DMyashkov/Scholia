@@ -117,16 +117,29 @@ export async function loadRagContext(
   if (appendToMessageId) {
     const { data: slotRows } = await supabase
       .from('slots')
-      .select('id, name, type, description, required, depends_on_slot_id, target_item_count, items_per_key, current_item_count, attempt_count, finished_querying, last_queries')
+      .select('id, name, type, description, depends_on_slot_id, target_item_count, items_per_key, current_item_count, attempt_count, finished_querying, last_queries')
       .eq('root_message_id', rootMessageId);
+    const slotIds = (slotRows ?? []).map((r) => (r as { id: string }).id);
+    if (slotIds.length > 0) {
+      await supabase.from('slot_items').delete().in('slot_id', slotIds);
+      await supabase
+        .from('slots')
+        .update({
+          current_item_count: 0,
+          attempt_count: 0,
+          finished_querying: false,
+          last_queries: [],
+        })
+        .in('id', slotIds);
+    }
     slots = (slotRows ?? []).map((r) => ({
       ...r,
       target_item_count: (r as { target_item_count?: number }).target_item_count ?? 0,
       items_per_key: (r as { items_per_key?: number | null }).items_per_key ?? undefined,
-      current_item_count: (r as { current_item_count?: number }).current_item_count ?? 0,
-      attempt_count: (r as { attempt_count?: number }).attempt_count ?? 0,
-      finished_querying: (r as { finished_querying?: boolean }).finished_querying ?? false,
-      last_queries: Array.isArray((r as { last_queries?: string[] }).last_queries) ? (r as { last_queries: string[] }).last_queries : [],
+      current_item_count: 0,
+      attempt_count: 0,
+      finished_querying: false,
+      last_queries: [],
     })) as SlotDb[];
     slotIdByName = new Map(slots.map((s) => [s.name, s.id]));
     const { data: firstStep } = await supabase
@@ -152,7 +165,6 @@ export async function loadRagContext(
           name: s.name,
           type: s.type as PlanSlot['type'],
           description: s.description ?? undefined,
-          required: s.required,
           dependsOn: s.depends_on_slot_id ? slots.find((x) => x.id === s.depends_on_slot_id)?.name : undefined,
         })),
         subqueries: queryTexts.length > 0

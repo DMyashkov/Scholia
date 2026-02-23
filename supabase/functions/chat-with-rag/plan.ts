@@ -5,7 +5,7 @@ const PLAN_SYSTEM = `You plan semantic search and evidence gathering for a quest
 
 Output JSON only with this shape:
 - why: short reason for this action
-- slots: array of slot objects. Fields: name, type, description?, required?, dependsOn?, target_item_count? (list), items_per_key? (mapping only).
+- slots: array of slot objects. Fields: name, type, description?, dependsOn?, target_item_count? (list), items_per_key? (mapping only).
   - type is one of: "scalar" (one value), "list" (set of items), "mapping" (key->value per list item; use dependsOn: slot name of the list)
 
   - dependsOn: slot whose extracted values are required to build this slot’s query. 
@@ -60,7 +60,6 @@ export async function callPlan(apiKey: string, userMessage: string): Promise<Pla
       name: String(s.name ?? ''),
       type: ['scalar', 'list', 'mapping'].includes(String(s.type)) ? (s.type as SlotType) : 'scalar',
       description: typeof s.description === 'string' ? s.description : undefined,
-      required: s.required !== false,
       dependsOn: typeof s.dependsOn === 'string' ? s.dependsOn : undefined,
       target_item_count: typeof s.target_item_count === 'number' && Number.isInteger(s.target_item_count) && s.target_item_count >= 0 ? s.target_item_count : undefined,
       items_per_key: typeof s.items_per_key === 'number' && Number.isInteger(s.items_per_key) && s.items_per_key >= 1 ? s.items_per_key : undefined,
@@ -76,14 +75,14 @@ export async function callPlan(apiKey: string, userMessage: string): Promise<Pla
     }))
     .filter((q) => q.query.length > 0 && slotNamesWithNoDeps.has(q.slot));
 
-  return { action, why, slots: slots.length > 0 ? slots : [{ name: 'answer', type: 'scalar', required: true }], subqueries };
+  return { action, why, slots: slots.length > 0 ? slots : [{ name: 'answer', type: 'scalar' }], subqueries };
 }
 
 function fallbackPlan(userMessage: string): PlanResult {
   return {
     action: 'retrieve',
     why: 'Fallback after parse error',
-    slots: [{ name: 'answer', type: 'scalar', description: 'Information needed to answer the question', required: true }],
+    slots: [{ name: 'answer', type: 'scalar', description: 'Information needed to answer the question' }],
     subqueries: [{ slot: 'answer', query: userMessage.trim().slice(0, 200) }],
   };
 }

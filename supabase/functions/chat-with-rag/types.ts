@@ -30,7 +30,6 @@ export interface PlanSlot {
   name: string;
   type: SlotType;
   description?: string;
-  required?: boolean;
   dependsOn?: string;
   /** For list: number of items user asked for (e.g. "top 5" → 5), or 0 if no concrete number. For mapping: set 0; backend computes from list target × per-key count. */
   target_item_count?: number;
@@ -113,7 +112,6 @@ export type SlotDb = {
   name: string;
   type: string;
   description?: string | null;
-  required: boolean;
   depends_on_slot_id?: string | null;
   target_item_count: number;
   /** Mapping slots only: values per key. Target = dep list current_item_count * items_per_key. */

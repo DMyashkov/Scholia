@@ -3,7 +3,6 @@ import type { SlotType } from './types.ts';
 export interface SlotForCompleteness {
   id: string;
   type: SlotType;
-  required: boolean;
   depends_on_slot_id: string | null;
 }
 
@@ -35,7 +34,7 @@ export function slotCompleteness(
   const meta = slotMetaBySlotId?.get(slot.id);
   if (slot.type === 'list' || slot.type === 'mapping') {
     if (meta != null) {
-      if (meta.target_item_count === 0) return meta.finished_querying ? 1 : 0;
+      if (meta.target_item_count === 0) return count >= 1 ? 1 : 0;
       return Math.min(1, count / meta.target_item_count);
     }
     if (slot.type === 'list') return count >= 1 ? 1 : 0;
@@ -49,7 +48,7 @@ export function slotCompleteness(
 }
 
 /**
- * Overall completeness: weighted average of required slot scores.
+ * Overall completeness: weighted average of slot scores.
  * Mapping slots get weight 2, others weight 1.
  */
 export function overallCompleteness(
@@ -57,11 +56,10 @@ export function overallCompleteness(
   slotItemCountBySlotId: Map<string, number>,
   slotMetaBySlotId?: Map<string, SlotCompletenessMeta>,
 ): number {
-  const required = slots.filter((s) => s.required);
-  if (required.length === 0) return 1;
+  if (slots.length === 0) return 1;
   let sum = 0;
   let weightSum = 0;
-  for (const slot of required) {
+  for (const slot of slots) {
     const w = slot.type === 'mapping' ? 2 : 1;
     sum += slotCompleteness(slot, slotItemCountBySlotId, slotMetaBySlotId) * w;
     weightSum += w;

@@ -61,6 +61,32 @@ async function crawlSourceWithConversationId(
   const discovered = new Set<string>();
   const queue: string[] = [...seedUrls];
   seedUrls.forEach((u) => discovered.add(u));
+  /** Only count newly inserted pages toward maxPages so depth n always adds n new pages. */
+  let newPagesCount = 0;
+
+  /** URLs that already exist as pages in this conversation (any source). We skip these so depth n adds n new pages. */
+  const existingInConversation = new Set<string>();
+  /** Normalized URL -> page id for existing conversation pages; used to create edges from existing nodes when we skip insert. */
+  const existingPageIdByUrl = new Map<string, string>();
+  const { data: convSources } = await supabase.from('sources').select('id').eq('conversation_id', conversationId);
+  const convSourceIds = (convSources ?? []).map((s: { id: string }) => s.id);
+  if (convSourceIds.length > 0) {
+    const { data: existingPages } = await supabase.from('pages').select('id, url').in('source_id', convSourceIds);
+    (existingPages ?? []).forEach((p: { id: string; url: string }) => {
+      const norm = normalizeUrlForCrawl(p.url);
+      existingInConversation.add(norm);
+      existingPageIdByUrl.set(norm, p.id);
+    });
+  }
+  const seedNorm = seedUrls[0] ? normalizeUrlForCrawl(seedUrls[0]) : '';
+  const seedInSet = seedNorm && existingInConversation.has(seedNorm);
+  const seedPageId = seedNorm ? existingPageIdByUrl.get(seedNorm) ?? null : null;
+  console.log('[crawl] existing URLs in conversation (will skip)', existingInConversation.size, {
+    seedUrlNorm: seedNorm.slice(-70),
+    seedInSet,
+    seedPageId: seedPageId?.slice(0, 8) ?? null,
+    sampleExisting: Array.from(existingInConversation).slice(0, 3).map((u) => u.slice(-50)),
+  });
 
   let sourceTitleUpdated = false;
 
@@ -83,9 +109,23 @@ async function crawlSourceWithConversationId(
   }
 
   const sourceShort = new URL(firstSeedUrl).pathname?.replace(/^\/wiki\//, '') || firstSeedUrl.slice(0, 40);
-  console.log('crawl: started', sourceShort, 'max', maxPages);
+  const crawlDepth = (source as { crawl_depth?: string }).crawl_depth ?? 'shallow';
+  const isDynamic = crawlDepth === 'dynamic';
+  console.log('[crawl] PHASE=CRAWL started', {
+    sourceShort,
+    maxPages,
+    crawlDepth,
+    isDynamic,
+    willInsertEncodedDiscovered: isDynamic,
+    note: 'Shallow/static: only page_edges inserted during crawl; encoded_discovered is DYNAMIC-only',
+  });
 
-  while (queue.length > 0 && visited.size < maxPages) {
+  while (queue.length > 0 && newPagesCount < maxPages) {
+    const { data: sourceCheck } = await supabase.from('sources').select('id').eq('id', source.id).single();
+    if (!sourceCheck) {
+      throw new Error(`Source ${source.id.slice(0, 8)} was deleted during crawl; stopping.`);
+    }
+
     const url = queue.shift()!;
 
     const urlObj = new URL(url);
@@ -97,6 +137,7 @@ async function crawlSourceWithConversationId(
       urlObj.pathname = urlObj.pathname.slice(0, -1);
     }
     const normalizedUrl = urlObj.toString();
+    const urlNormForLookup = normalizeUrlForCrawl(normalizedUrl);
 
     if (robotsParser && !robotsParser.isAllowed(normalizedUrl, 'ScholiaCrawler')) {
       continue;
@@ -104,16 +145,25 @@ async function crawlSourceWithConversationId(
 
     try {
       if (!conversationId) throw new Error(`conversationId is null before calling crawlPage!`);
-      const result = await crawlPage(normalizedUrl, source, conversationId);
+      const result = await crawlPage(normalizedUrl, source, conversationId, existingInConversation);
       if (!result) {
         visited.add(normalizedUrl);
         continue;
       }
 
-      const { page, html } = result;
+      const { page, html, inserted } = result;
       visited.add(normalizedUrl);
+      if (inserted && page) {
+        newPagesCount++;
+        const norm = normalizeUrlForCrawl(normalizedUrl);
+        existingInConversation.add(norm);
+        existingPageIdByUrl.set(norm, page.id);
+      }
 
-      if (!sourceTitleUpdated && page.title) {
+      /** When we skipped insert (page null), use existing page in conversation so we can create edges from it to new links. */
+      const fromPageId: string | null = page?.id ?? existingPageIdByUrl.get(urlNormForLookup) ?? null;
+
+      if (page && !sourceTitleUpdated && page.title) {
         const label = page.title.trim().substring(0, 100);
         if (label) {
           try {
@@ -134,25 +184,36 @@ async function crawlSourceWithConversationId(
       const isDynamic = source.crawl_depth === 'dynamic';
       const isSurface = (source as { suggestion_mode?: string }).suggestion_mode !== 'dive';
       const links = extractLinks(html, normalizedUrl, source);
-      /** In-page context snippet is only built for surface mode; dive uses target-page lead at embed time. */
       const linksWithContext = isDynamic && isSurface ? extractLinksWithContext(html, normalizedUrl, source) : [];
 
       const edgesToInsert: Array<{ from_page_id: string; to_url: string; owner_id: string }> = [];
       const linksToProcess = isDynamic ? links.slice(0, MAX_LINKS_PER_PAGE_DYNAMIC) : links;
 
       for (const link of linksToProcess) {
-        edgesToInsert.push({
-          from_page_id: page.id,
-          to_url: link,
-          owner_id: source.owner_id,
-        });
-
         if (!discovered.has(link) && !visited.has(link)) {
           discovered.add(link);
           queue.push(link);
         }
+        if (fromPageId) {
+          edgesToInsert.push({
+            from_page_id: fromPageId,
+            to_url: link,
+            owner_id: source.owner_id,
+          });
+        }
       }
 
+      const urlTail = normalizedUrl.replace(/^https?:\/\//, '').slice(-55);
+      console.log('[crawl] [D] dequeue', {
+        visitedCount: visited.size,
+        newPagesCount,
+        urlTail,
+        inserted,
+        pageId: page?.id?.slice(0, 8) ?? null,
+        fromPageId: fromPageId?.slice(0, 8) ?? null,
+        inExistingSet: existingInConversation.has(urlNormForLookup),
+        edgesFromThisPage: edgesToInsert.length,
+      });
 
       if (edgesToInsert.length > 0) {
         const batchSize = 50;
@@ -162,15 +223,44 @@ async function crawlSourceWithConversationId(
             .from('page_edges')
             .upsert(chunk, { onConflict: 'from_page_id,to_url', ignoreDuplicates: true });
           if (edgeErr) {
-            console.error('crawl: edge insert failed', edgeErr.message);
+            console.error('[crawl] page_edges upsert failed', { error: edgeErr.message, batchSize: chunk.length });
           }
           if (i + batchSize < edgesToInsert.length) {
             await new Promise((resolve) => setTimeout(resolve, 10));
           }
         }
+        const fromId = edgesToInsert[0]?.from_page_id?.slice(0, 8) ?? '?';
+        console.log('[crawl] PHASE=CRAWL page_edges upserted', {
+          pageNum: visited.size,
+          pageId: fromId,
+          edgesThisPage: edgesToInsert.length,
+          batches: Math.ceil(edgesToInsert.length / batchSize),
+        });
       }
 
-      if (isDynamic && edgesToInsert.length > 0) {
+      if (page) {
+        // Backfill to_page_id for ALL edges in this conversation that point to this URL,
+        // so edges from other sources' pages (e.g. existing Donald Trump node) get to_page_id set
+        // and appear in the graph (listGraphEdgesByConversation requires to_page_id non-null).
+        const { data: convPageIds } = await supabase.from('pages').select('id').in('source_id', convSourceIds);
+        const fromPageIds = (convPageIds ?? []).map((p: { id: string }) => p.id);
+        if (fromPageIds.length > 0) {
+          const { data: updatedEdges, error: backfillErr } = await supabase
+            .from('page_edges')
+            .update({ to_page_id: page.id })
+            .eq('to_url', normalizedUrl)
+            .in('from_page_id', fromPageIds)
+            .is('to_page_id', null)
+            .select('id');
+          if (backfillErr) {
+            console.warn('[crawl] page_edges to_page_id backfill failed', { error: backfillErr.message, url: normalizedUrl.slice(0, 50) });
+          } else if (updatedEdges?.length) {
+            console.log('[crawl] PHASE=CRAWL to_page_id backfilled', { count: updatedEdges.length, pageId: page.id.slice(0, 8) });
+          }
+        }
+      }
+
+      if (page && isDynamic && edgesToInsert.length > 0) {
         const urlsToEncode = edgesToInsert.slice(0, 500).map((e) => e.to_url);
         const { data: edgeRows } = await supabase
           .from('page_edges')
@@ -204,17 +294,28 @@ async function crawlSourceWithConversationId(
               ignoreDuplicates: true,
             });
             if (encError) {
-              console.warn('crawl: encoded_discovered insert failed', encError.message);
+              console.warn('[crawl] encoded_discovered insert failed', encError.message);
+            } else {
+              console.log('[crawl] PHASE=CRAWL encoded_discovered inserted (dynamic only)', {
+                pageId: page.id.slice(0, 8),
+                rows: encodedToInsert.length,
+              });
             }
           }
         }
+      } else if (page && edgesToInsert.length > 0 && !isDynamic) {
+        console.log('[crawl] PHASE=CRAWL encoded_discovered SKIP (not dynamic)', {
+          pageId: page.id.slice(0, 8),
+          edgesThisPage: edgesToInsert.length,
+          note: 'Only dynamic sources get encoded_discovered during crawl',
+        });
       }
 
       await supabase
         .from('crawl_jobs')
         .update({
           discovered_count: discovered.size,
-          indexed_count: visited.size,
+          indexed_count: newPagesCount,
           last_activity_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -228,7 +329,16 @@ async function crawlSourceWithConversationId(
     }
   }
 
-  console.log('crawl: indexing', discovered.size, 'discovered,', visited.size, 'pages');
+  console.log('[crawl] PHASE=CRAWL done', {
+    visitedPages: visited.size,
+    discoveredUrls: discovered.size,
+    maxPages,
+    crawlDepth: (source as { crawl_depth?: string }).crawl_depth,
+  });
+  console.log('[crawl] PHASE=INDEXING starting (crawl all pages done; now chunk+embed pages only; encoding_discovered only if dynamic and has rows)', {
+    sourceId: source.id.slice(0, 8),
+    jobId: job.id.slice(0, 8),
+  });
   const indexingUpdate: Record<string, unknown> = { status: 'indexing', updated_at: new Date().toISOString() };
   if (source.crawl_depth === 'dynamic') {
     const { data: pages } = await supabase.from('pages').select('id').eq('source_id', source.id);
@@ -252,24 +362,34 @@ async function crawlSourceWithConversationId(
   await updateCrawlJob(job.id, indexingUpdate);
 
   try {
+    console.log('[crawl] PHASE=INDEXING calling indexSourceForRag', {
+      sourceId: source.id.slice(0, 8),
+      jobId: job.id.slice(0, 8),
+      conversationId: conversationId?.slice(0, 8),
+      note: 'Indexer will: 1) fetch this source pages 2) chunk+embed 3) then embedDiscoveredLinks(conversation) - for shallow that finds 0 encoded_discovered',
+    });
     await indexSourceForRag(source.id, job.id, conversationId);
+    console.log('[crawl] PHASE=INDEXING indexSourceForRag returned');
   } catch (err) {
-    console.warn('crawl: RAG indexing failed', err);
+    console.warn('[crawl] RAG indexing failed', err);
   }
+
+  const { data: sourcePagesAfter } = await supabase.from('pages').select('id').eq('source_id', source.id);
+  const totalPagesForSource = sourcePagesAfter?.length ?? newPagesCount;
 
   await supabase
     .from('crawl_jobs')
     .update({
-      total_pages: visited.size,
+      total_pages: totalPagesForSource,
       discovered_count: discovered.size,
-      indexed_count: visited.size,
+      indexed_count: newPagesCount,
       status: 'completed',
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq('id', job.id);
 
-  console.log('crawl: done', sourceShort, visited.size, 'pages', queue.length === 0 ? '(queue empty)' : '(hit max)');
+  console.log('crawl: done', sourceShort, 'newPages=', newPagesCount, 'visited=', visited.size, 'totalSourcePages=', totalPagesForSource, queue.length === 0 ? '(queue empty)' : '(hit max)');
 
   const { data: insertedPages, error: verifyError } = await supabase
     .from('pages')
@@ -278,7 +398,7 @@ async function crawlSourceWithConversationId(
     .limit(5);
   if (verifyError) {
     console.error('crawl: verify failed', verifyError);
-  } else if (visited.size > 0 && (!insertedPages || insertedPages.length === 0)) {
+  } else if (newPagesCount > 0 && (!insertedPages || insertedPages.length === 0)) {
     console.error('crawl: no pages in DB after crawl');
   }
 }

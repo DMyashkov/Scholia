@@ -33,15 +33,19 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
   // Store graph data with stable references
   const graphDataRef = useRef<{ nodes: GraphNode[]; links: GraphLink[] }>({ nodes: [], links: [] });
   const prevPagesIndexedRef = useRef(0);
+  const prevPageIdsKeyRef = useRef('');
 
   // Create/update graph data when pages, pagesIndexed, or edges change
   const graphData = useMemo(() => {
+    const pageIdsKey = pages.map((p) => p.id).sort().join(',');
+    const pageSetChanged = pageIdsKey !== prevPageIdsKeyRef.current;
     const currentEdgesLength = edges?.length || 0;
     const prevEdgesLength = graphDataRef.current.links.length;
     const edgesChanged = currentEdgesLength !== prevEdgesLength;
     const edgesJustArrived = (edges?.length ?? 0) > 0 && prevEdgesLength === 0;
 
     const shouldRegenerate =
+      pageSetChanged ||
       pages.length !== graphDataRef.current.nodes.length ||
       pagesIndexed > prevPagesIndexedRef.current ||
       pagesIndexed === 0 ||
@@ -50,6 +54,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
 
     if (shouldRegenerate) {
       prevPagesIndexedRef.current = pagesIndexed;
+      prevPageIdsKeyRef.current = pageIdsKey;
       const data = createGraphData(pages, pagesIndexed, dimensions, domain, edges);
       
       // Preserve positions of existing nodes for smooth transitions

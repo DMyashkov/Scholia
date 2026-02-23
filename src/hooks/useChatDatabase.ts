@@ -8,6 +8,7 @@ import { crawlJobsApi } from '@/lib/db';
 import {
   LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE,
   PAGE_EDGES_FOR_CONVERSATION,
+  PAGE_GRAPH_EDGES_FOR_CONVERSATION,
   PAGES_FOR_CONVERSATION,
   SOURCES_FOR_CONVERSATION,
   CURRENT_CRAWL_JOB_BY_SOURCE,
@@ -304,20 +305,29 @@ export const useChatDatabase = () => {
     }
     const data = await res.json();
 
-    // Page already exists – done
+    // Page already exists – backfill ran server-side; invalidate so graph shows reconnected edges
     if (data?.page) {
       console.log('[addPageToSource] page already exists', data.page.id?.slice(0, 8));
       queryClient.invalidateQueries({ queryKey: [LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE, conversationId, sourceId] });
       queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
       queryClient.invalidateQueries({ queryKey: [PAGES_FOR_CONVERSATION, conversationId] });
       queryClient.invalidateQueries({ queryKey: [PAGE_EDGES_FOR_CONVERSATION, conversationId] });
+      queryClient.invalidateQueries({
+        predicate: (q) =>
+          Array.isArray(q.queryKey) &&
+          q.queryKey[0] === PAGE_GRAPH_EDGES_FOR_CONVERSATION &&
+          q.queryKey[1] === conversationId,
+      });
       queryClient.invalidateQueries({ queryKey: [COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION, conversationId] });
       queryClient.invalidateQueries({ queryKey: [ENCODED_COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION, conversationId] });
       await Promise.all([
         queryClient.refetchQueries({ queryKey: [PAGES_FOR_CONVERSATION, conversationId] }),
-        queryClient.refetchQueries({ queryKey: [PAGE_EDGES_FOR_CONVERSATION, conversationId] }),
-        queryClient.refetchQueries({ queryKey: [COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION, conversationId] }),
-        queryClient.refetchQueries({ queryKey: [ENCODED_COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION, conversationId] }),
+        queryClient.refetchQueries({
+          predicate: (q) =>
+            Array.isArray(q.queryKey) &&
+            q.queryKey[0] === PAGE_GRAPH_EDGES_FOR_CONVERSATION &&
+            q.queryKey[1] === conversationId,
+        }),
       ]);
       return data;
     }

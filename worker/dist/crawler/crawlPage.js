@@ -41,9 +41,14 @@ export async function crawlPage(url, source, conversationId) {
             .single();
         if (error) {
             const detailsStr = typeof error.details === 'string' ? error.details : JSON.stringify(error.details || '');
-            const isConvFk = error.code === '23503' && (detailsStr.includes('conversations') || (error.message || '').includes('conversations'));
+            const msg = error.message || '';
+            const isConvFk = error.code === '23503' && (detailsStr.includes('conversations') || msg.includes('conversations'));
+            const isSourceFk = error.code === '23503' && (detailsStr.includes('source') || msg.includes('source_id') || msg.includes('sources'));
             if (isConvFk) {
                 throw new Error(`Conversation ${conversationId} was deleted. Cannot index pages.`);
+            }
+            if (isSourceFk) {
+                throw new Error(`Source ${source.id.slice(0, 8)} was deleted during crawl. Stopping.`);
             }
             const { data: existing } = await supabase
                 .from('pages')
@@ -52,12 +57,12 @@ export async function crawlPage(url, source, conversationId) {
                 .eq('url', url)
                 .single();
             if (existing) {
-                return { page: existing, html };
+                return { page: existing, html, inserted: false };
             }
             console.error('crawl: page insert failed', url.slice(0, LOG_URL_MAX_LENGTH), error.message);
             return null;
         }
-        return { page: page, html };
+        return { page: page, html, inserted: true };
     }
     catch (error) {
         const msg = error instanceof Error ? error.message : String(error);

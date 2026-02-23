@@ -22,5 +22,12 @@ export declare const CONTEXT_SNIPPET_LENGTH = 200;
 export declare const MAX_LINKS_PER_PAGE_DYNAMIC = 200;
 /** Section headings to skip when extracting links (references, citations, etc.). Used by any site with this structure. */
 export declare const SKIP_SECTION_HEADINGS: readonly ["references", "citations", "external links", "further reading", "bibliography", "notes", "sources"];
+/**
+ * CSS selectors for elements inside which we do not collect links (e.g. "redirect here", disambiguation boxes).
+ * Generic: [role="note"]. Common: .hatnote (MediaWiki "X redirects here / For other uses, see...").
+ */
+export declare const LINK_SKIP_CONTAINER_SELECTORS = "[role=\"note\"], .hatnote";
+/** URL path segment that indicates a disambiguation page; we skip such links so they are not crawled first. */
+export declare const DISAMBIGUATION_PATH_MARKER = "(disambiguation)";
 export declare function isSkipSectionHeading(text: string): boolean;
 //# sourceMappingURL=constants.d.ts.map

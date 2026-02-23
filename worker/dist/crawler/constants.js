@@ -55,6 +55,13 @@ export const SKIP_SECTION_HEADINGS = [
     'notes',
     'sources',
 ];
+/**
+ * CSS selectors for elements inside which we do not collect links (e.g. "redirect here", disambiguation boxes).
+ * Generic: [role="note"]. Common: .hatnote (MediaWiki "X redirects here / For other uses, see...").
+ */
+export const LINK_SKIP_CONTAINER_SELECTORS = '[role="note"], .hatnote';
+/** URL path segment that indicates a disambiguation page; we skip such links so they are not crawled first. */
+export const DISAMBIGUATION_PATH_MARKER = '(disambiguation)';
 export function isSkipSectionHeading(text) {
     const t = text.trim().toLowerCase();
     return SKIP_SECTION_HEADINGS.some((h) => t === h || t.startsWith(h + ' ') || t.startsWith(h + '('));

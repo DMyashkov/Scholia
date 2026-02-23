@@ -75,6 +75,17 @@ Deno.serve(async (req) => {
 
     if (existing) {
       console.log('[add-page] page already exists', existing.id);
+      // Backfill to_page_id on edges pointing to this URL so the graph shows the page connected (not disconnected).
+      const { data: sourcePages } = await supabase.from('pages').select('id').eq('source_id', sourceId);
+      const fromPageIds = (sourcePages ?? []).map((p: { id: string }) => p.id);
+      if (fromPageIds.length > 0) {
+        await supabase
+          .from('page_edges')
+          .update({ to_page_id: existing.id })
+          .eq('to_url', normalizedUrl)
+          .in('from_page_id', fromPageIds)
+          .is('to_page_id', null);
+      }
       return new Response(
         JSON.stringify({ page: existing, message: 'Page already in graph' }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

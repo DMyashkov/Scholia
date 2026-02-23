@@ -46,7 +46,7 @@ export async function processAddPageJob(job: {
 
   try {
     await updateCrawlJob(jobId, { status: 'indexing' });
-    // Check if page already exists
+    // Check if page already exists (same source + url) – don't create duplicate; keep graph connected.
     const { data: existing } = await supabase
       .from('pages')
       .select('id')
@@ -55,7 +55,38 @@ export async function processAddPageJob(job: {
       .maybeSingle();
 
     if (existing) {
-      console.log('[add-page] page already exists', existing.id);
+      console.log('[add-page] page already exists', existing.id, '- backfilling edges and completing');
+      const { data: source } = await supabase.from('sources').select('owner_id').eq('id', sourceId).single();
+      const ownerId = (source as { owner_id?: string } | null)?.owner_id;
+      if (ownerId) {
+        const { data: seedPages } = await supabase
+          .from('pages')
+          .select('id')
+          .eq('source_id', sourceId)
+          .neq('id', existing.id)
+          .limit(SEED_EDGES_LIMIT);
+        if (seedPages?.length) {
+          const edges = seedPages.map((p: { id: string }) => ({
+            from_page_id: p.id,
+            to_url: normalizedUrl,
+            owner_id: ownerId,
+          }));
+          await supabase.from('page_edges').upsert(edges, {
+            onConflict: 'from_page_id,to_url',
+            ignoreDuplicates: true,
+          });
+        }
+        const { data: sourcePages } = await supabase.from('pages').select('id').eq('source_id', sourceId);
+        const fromPageIds = (sourcePages ?? []).map((p: { id: string }) => p.id);
+        if (fromPageIds.length > 0) {
+          await supabase
+            .from('page_edges')
+            .update({ to_page_id: existing.id })
+            .eq('to_url', normalizedUrl)
+            .in('from_page_id', fromPageIds)
+            .is('to_page_id', null);
+        }
+      }
       await updateCrawlJob(jobId, { status: 'completed' });
       return;
     }
@@ -115,6 +146,49 @@ export async function processAddPageJob(job: {
       .single();
 
     if (insertErr) {
+      if (insertErr.code === '23505') {
+        const { data: existingAfterConflict } = await supabase
+          .from('pages')
+          .select('id')
+          .eq('source_id', sourceId)
+          .eq('url', normalizedUrl)
+          .maybeSingle();
+        if (existingAfterConflict) {
+          console.log('[add-page] insert conflict (page already exists)', existingAfterConflict.id, '- backfilling edges and completing');
+          const { data: source2 } = await supabase.from('sources').select('owner_id').eq('id', sourceId).single();
+          const ownerId2 = (source2 as { owner_id?: string } | null)?.owner_id;
+          if (ownerId2) {
+            const { data: seedPages2 } = await supabase
+              .from('pages')
+              .select('id')
+              .eq('source_id', sourceId)
+              .neq('id', existingAfterConflict.id)
+              .limit(SEED_EDGES_LIMIT);
+            if (seedPages2?.length) {
+              await supabase.from('page_edges').upsert(
+                seedPages2.map((p: { id: string }) => ({
+                  from_page_id: p.id,
+                  to_url: normalizedUrl,
+                  owner_id: ownerId2,
+                })),
+                { onConflict: 'from_page_id,to_url', ignoreDuplicates: true }
+              );
+            }
+            const { data: sourcePages2 } = await supabase.from('pages').select('id').eq('source_id', sourceId);
+            const fromPageIds2 = (sourcePages2 ?? []).map((p: { id: string }) => p.id);
+            if (fromPageIds2.length > 0) {
+              await supabase
+                .from('page_edges')
+                .update({ to_page_id: existingAfterConflict.id })
+                .eq('to_url', normalizedUrl)
+                .in('from_page_id', fromPageIds2)
+                .is('to_page_id', null);
+            }
+          }
+          await updateCrawlJob(jobId, { status: 'completed' });
+          return;
+        }
+      }
       await updateCrawlJob(jobId, { status: 'failed', error_message: insertErr.message });
       throw new Error(insertErr.message);
     }
@@ -137,6 +211,18 @@ export async function processAddPageJob(job: {
         onConflict: 'from_page_id,to_url',
         ignoreDuplicates: true,
       });
+    }
+
+    // Set to_page_id on all edges pointing to this URL (from this source) so the graph has concrete page targets
+    const { data: sourcePages } = await supabase.from('pages').select('id').eq('source_id', sourceId);
+    const fromPageIds = (sourcePages ?? []).map((p: { id: string }) => p.id);
+    if (fromPageIds.length > 0) {
+      await supabase
+        .from('page_edges')
+        .update({ to_page_id: newPage.id })
+        .eq('to_url', normalizedUrl)
+        .in('from_page_id', fromPageIds)
+        .is('to_page_id', null);
     }
 
     // Insert page_edges for new page's outbound links, then encoded_discovered

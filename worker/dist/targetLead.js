@@ -4,8 +4,9 @@
  */
 import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
-const TARGET_LEAD_MAX_CHARS = 200;
-const FETCH_DELAY_MS = 400; // Delay between fetches to avoid hammering servers
+import { CONTEXT_SNIPPET_LENGTH, CRAWLER_USER_AGENT, MAIN_CONTENT_SELECTOR } from './crawler/constants';
+/** Delay between fetches to avoid hammering servers. */
+const FETCH_DELAY_MS = 400;
 /** Strip leading junk (CSS, coordinates, boilerplate) from page text */
 export function stripLeadFluff(text) {
     let s = text.trim();
@@ -35,17 +36,16 @@ export function stripLeadFluff(text) {
 export async function fetchTargetPageLead(url) {
     try {
         const res = await fetch(url, {
-            headers: { 'User-Agent': 'ScholiaCrawler/1.0' },
+            headers: { 'User-Agent': CRAWLER_USER_AGENT },
             redirect: 'follow',
         });
         if (!res.ok)
             return '';
         const html = await res.text();
         const $ = cheerio.load(html);
-        const mainContent = $('main, article, .content, #content, #bodyContent, .mw-parser-output').first().text().trim() ||
-            $('body').text().trim();
+        const mainContent = $(MAIN_CONTENT_SELECTOR).first().text().trim() || $('body').text().trim();
         const cleaned = stripLeadFluff(mainContent);
-        return cleaned.substring(0, TARGET_LEAD_MAX_CHARS).trim() || cleaned.substring(0, TARGET_LEAD_MAX_CHARS);
+        return cleaned.substring(0, CONTEXT_SNIPPET_LENGTH).trim() || cleaned.substring(0, CONTEXT_SNIPPET_LENGTH);
     }
     catch {
         return '';

@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { CONTEXT_SNIPPET_LENGTH, MAIN_CONTENT_SELECTOR, isSkipSectionHeading, isWikiStyleDomain, MEDIAWIKI_NS_PREFIXES } from './constants';
+import { CONTEXT_SNIPPET_LENGTH, DISAMBIGUATION_PATH_MARKER, LINK_SKIP_CONTAINER_SELECTORS, MAIN_CONTENT_SELECTOR, isSkipSectionHeading, isWikiStyleDomain, MEDIAWIKI_NS_PREFIXES, } from './constants';
 function normalizeCurrentUrl(pageUrl) {
     const u = new URL(pageUrl);
     u.hash = '';
@@ -28,6 +28,14 @@ function normalizeLinkUrl(href, baseUrl) {
 function shouldSkipLinkUrl(linkUrl, normalizedCurrentUrl, source) {
     if (linkUrl.toString() === normalizedCurrentUrl)
         return true;
+    try {
+        const pathDecoded = decodeURIComponent(linkUrl.pathname);
+        if (pathDecoded.toLowerCase().includes(DISAMBIGUATION_PATH_MARKER.toLowerCase()))
+            return true;
+    }
+    catch {
+        /* ignore */
+    }
     if (isWikiStyleDomain(linkUrl.hostname)) {
         const pathParts = linkUrl.pathname.split('/').filter((p) => p);
         if (pathParts.length >= 2 && pathParts[0] === 'wiki') {
@@ -65,8 +73,13 @@ function markSkipSectionsAndGetLinkElements($, contentSelector) {
             $el.nextUntil('h2, h3').addBack().addClass('crawl-skip-section');
         }
     });
-    return contentSelector.find('a[href]').not(function () {
+    return contentSelector
+        .find('a[href]')
+        .not(function () {
         return $(this).closest('.crawl-skip-section').length > 0;
+    })
+        .not(function () {
+        return $(this).closest(LINK_SKIP_CONTAINER_SELECTORS).length > 0;
     });
 }
 export function extractLinksWithContext(html, pageUrl, source) {
@@ -138,7 +151,10 @@ export function extractLinks(html, pageUrl, source) {
         const contentSelector = getContentSelector($);
         let linkElements = markSkipSectionsAndGetLinkElements($, contentSelector);
         if (linkElements.length === 0) {
-            linkElements = contentSelector.find('a[href]').length > 0 ? contentSelector.find('a[href]') : $('a[href]');
+            const allInContent = contentSelector.find('a[href]').length > 0 ? contentSelector.find('a[href]') : $('a[href]');
+            linkElements = allInContent.not(function () {
+                return $(this).closest('.crawl-skip-section,' + LINK_SKIP_CONTAINER_SELECTORS).length > 0;
+            });
         }
         const links = [];
         linkElements.each((_, element) => {

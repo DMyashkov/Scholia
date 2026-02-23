@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import {
   LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE,
-  PAGE_EDGES_FOR_CONVERSATION,
+  PAGE_GRAPH_EDGES_FOR_CONVERSATION,
   PAGES_FOR_CONVERSATION,
   SOURCES_FOR_CONVERSATION,
   CURRENT_CRAWL_JOB_BY_SOURCE,
@@ -22,11 +22,11 @@ import type { CrawlJob, Page, PageEdge } from '@/lib/db/types';
  * Hook to subscribe to realtime updates for crawl progress
  * Updates React Query cache when data changes
  *
- * Edge events can flood (2000+ during crawl) -> ERR_INSUFFICIENT_RESOURCES.
- * Debounce: one sync per 1.2s during burst, one final 800ms after last event.
+ * Graph-edges refetch is small (one per conversation), so we use a short debounce
+ * so edges appear soon after nodes (previously 1.2s+800ms caused 1–2s delay).
  */
-const EDGES_DEBOUNCE_MS = 1200;
-const EDGES_TRAILING_MS = 800;
+const EDGES_DEBOUNCE_MS = 200;
+const EDGES_TRAILING_MS = 150;
 const DISCOVERED_LINKS_DEBOUNCE_MS = 500;
 const PAGES_DEBOUNCE_MS = 300;
 
@@ -113,7 +113,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
 
     const syncAfterSubscribe = () => {
       queryClient.invalidateQueries({
-        predicate: predicateForKeys(conversationId, [[PAGES_FOR_CONVERSATION], [PAGE_EDGES_FOR_CONVERSATION]]),
+        predicate: predicateForKeys(conversationId, [[PAGES_FOR_CONVERSATION]]),
       });
     };
 
@@ -147,7 +147,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
         : null;
     if (pagesChannel) channelsRef.current.push(pagesChannel);
 
-    // Subscribe to page_edges INSERTs (no filter - conversation_id removed; we invalidate and refetch)
+    // Subscribe to page_edges INSERTs – invalidate only graph-edges query (small payload), not full 20k edges
     const edgesChannel = supabase
       .channel(`page-edges:${conversationId}`)
       .on<PageEdge>(
@@ -158,17 +158,19 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
           table: 'page_edges',
         },
         () => {
-          const edgesPredicate = (query: { queryKey: unknown }) =>
-            queryKeyMatches(query.queryKey, PAGE_EDGES_FOR_CONVERSATION, conversationId);
+          const graphEdgesPredicate = (query: { queryKey: unknown }) =>
+            Array.isArray(query.queryKey) &&
+            query.queryKey[0] === PAGE_GRAPH_EDGES_FOR_CONVERSATION &&
+            query.queryKey[1] === conversationId;
           const doSync = () => {
             const t = Date.now();
             if (import.meta.env.DEV) {
               const since = edgesLastSyncRef.current ? t - edgesLastSyncRef.current : 0;
-              console.log('[realtime] edges sync', since ? `${since}ms since last` : 'initial');
+              console.log('[realtime] graph-edges sync', since ? `${since}ms since last` : 'initial');
             }
             edgesLastSyncRef.current = t;
-            queryClient.invalidateQueries({ predicate: edgesPredicate });
-            queryClient.refetchQueries({ predicate: edgesPredicate });
+            queryClient.invalidateQueries({ predicate: graphEdgesPredicate });
+            queryClient.refetchQueries({ predicate: graphEdgesPredicate });
           };
           const now = Date.now();
           if (edgesLastSyncRef.current === 0 || now - edgesLastSyncRef.current >= EDGES_DEBOUNCE_MS) {

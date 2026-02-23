@@ -3,7 +3,7 @@ import { Source } from '@/types/source';
 import { ForceGraph } from './graph';
 import { cn } from '@/lib/utils';
 import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
-import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
+import { useConversationPages, useConversationGraphEdges } from '@/hooks/usePages';
 import { useConversationSources } from '@/hooks/useConversationSources';
 import { useAddPageJob } from '@/hooks/useAddPageJob';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
@@ -60,7 +60,70 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   } else {
     prevAddingRef.current = null;
   }
-  const { data: edges = [], isLoading: edgesLoading, error: edgesError } = useConversationPageEdges(conversationId);
+  const normalizeUrlForSeedMatch = (url: string) => {
+    try {
+      const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+      u.hash = '';
+      u.search = '';
+      if (u.pathname.endsWith('/') && u.pathname !== '/') u.pathname = u.pathname.slice(0, -1);
+      return u.toString();
+    } catch {
+      return url;
+    }
+  };
+
+  const activeSourceForSeed = activeSourceId ? sources.find((s) => s.id === activeSourceId) : null;
+  const sourcePagesForActive = useMemo(
+    () => (activeSourceId ? pages.filter((p) => p.source_id === activeSourceId) : []),
+    [pages, activeSourceId]
+  );
+  const seedPageFromConversation = useMemo(() => {
+    if (!activeSourceForSeed?.initial_url || pages.length === 0) return null;
+    const norm = normalizeUrlForSeedMatch(activeSourceForSeed.initial_url);
+    let found = pages.find((p) => p.url && normalizeUrlForSeedMatch(p.url) === norm);
+    if (!found && norm) {
+      try {
+        const seedPath = new URL(norm).pathname;
+        found = pages.find((p) => {
+          if (!p.url) return false;
+          try {
+            return new URL(normalizeUrlForSeedMatch(p.url)).pathname === seedPath;
+          } catch {
+            return false;
+          }
+        }) ?? undefined;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!found || sourcePagesForActive.some((p) => p.id === found!.id)) return null;
+    return found;
+  }, [activeSourceForSeed?.initial_url, activeSourceForSeed?.id, pages, sourcePagesForActive]);
+
+  const graphPageIds = useMemo(() => {
+    const baseIds = (activeSourceId ? sourcePagesForActive : pages).map((p) => p.id);
+    if (seedPageFromConversation && !baseIds.includes(seedPageFromConversation.id)) {
+      return [...baseIds, seedPageFromConversation.id];
+    }
+    return baseIds;
+  }, [activeSourceId, sourcePagesForActive, pages, seedPageFromConversation]);
+  const { data: graphEdges = [], isLoading: edgesLoading, error: edgesError, refetch: refetchGraphEdges } = useConversationGraphEdges(
+    conversationId ?? null,
+    graphPageIds
+  );
+  const prevPagesLengthRef = useRef(0);
+  useEffect(() => {
+    if (pages.length <= prevPagesLengthRef.current) {
+      prevPagesLengthRef.current = pages.length;
+      return;
+    }
+    prevPagesLengthRef.current = pages.length;
+    const t = setTimeout(() => {
+      refetchGraphEdges();
+    }, 450);
+    return () => clearTimeout(t);
+  }, [pages.length, refetchGraphEdges]);
+
   const { data: discoveredCountsMap = {} } = useQuery({
     queryKey: [COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION, conversationId],
     queryFn: () => (conversationId ? discoveredLinksApi.countsByConversation(conversationId) : {}),
@@ -217,8 +280,9 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     : displaySources;
 
   // Get pages for current view - use pages directly from database (already filtered by conversation and status='indexed')
-  // Filter by active source if one is selected, then convert to DiscoveredPage format
-  let displayPages = (activeSourceId 
+  // Filter by active source if one is selected, then convert to DiscoveredPage format.
+  // When a source tab is selected, include the seed page from another source if this source has no page for it (skipped-insert case).
+  let displayPages = (activeSourceId
     ? pages.filter(p => p.source_id === activeSourceId)
     : pages
   ).map(p => ({
@@ -228,10 +292,22 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     status: (p.status || 'indexed') as 'indexed' | 'crawling' | 'pending' | 'error',
     url: p.url, // Include url for edge matching
   }));
-  
-  // Sort pages: starting page (source URL) first, then by created_at
+  if (activeSourceId && seedPageFromConversation && !displayPages.some((p) => p.id === seedPageFromConversation.id)) {
+    displayPages = [
+      ...displayPages,
+      {
+        id: seedPageFromConversation.id,
+        title: seedPageFromConversation.title || 'Untitled',
+        path: seedPageFromConversation.path,
+        status: 'indexed' as const,
+        url: seedPageFromConversation.url ?? undefined,
+      },
+    ];
+  }
+
+  // Sort pages: when a source tab is selected put that source's page first; otherwise first source's URL first
   if (displaySources.length > 0) {
-    const startingSource = displaySources[0];
+    const startingSource = activeSource ?? displaySources[0];
     const startingUrl = startingSource.initial_url;
     // Normalize URLs for comparison
     const normalizeForSort = (url: string) => {
@@ -263,7 +339,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   
   // If crawling but no pages yet, show the starting page immediately as a placeholder
   if (isCrawling && displayPages.length === 0 && displaySources.length > 0) {
-    const startingSource = displaySources[0];
+    const startingSource = activeSource ?? displaySources[0];
     const sourceUrl = startingSource.initial_url;
     try {
       const urlObj = new URL(sourceUrl);
@@ -398,7 +474,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           pages={displayPages}
           pagesIndexed={displayPagesIndexed}
           domain={activeDomain}
-          edges={edges || []} // Ensure edges is always an array, never undefined
+          edges={graphEdges}
         />
       </div>
       

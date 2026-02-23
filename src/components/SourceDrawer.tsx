@@ -17,8 +17,8 @@ import { cn } from '@/lib/utils';
 import { ForceGraph } from './graph';
 import { CrawlStats } from './CrawlStats';
 import { getEncodingStatusLabel, getEncodingPhase } from './EncodingProgressBar';
-import { useMemo, useRef } from 'react';
-import { useConversationPages, useConversationPageEdges } from '@/hooks/usePages';
+import { useEffect, useMemo, useRef } from 'react';
+import { useConversationPages, useConversationGraphEdges } from '@/hooks/usePages';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import type { CrawlJob } from '@/lib/db/types';
 import { useAddPageJob } from '@/hooks/useAddPageJob';
@@ -175,7 +175,6 @@ export const SourceDrawer = ({
   const graphConversationId = conversationId;
 
   const { data: allPages = [], isLoading: pagesLoading } = useConversationPages(graphConversationId);
-  const { data: allEdges = [], isLoading: edgesLoading } = useConversationPageEdges(graphConversationId);
   const { data: discoveredCount = 0 } = useQuery({
     queryKey: [COUNT_OF_DISCOVERED_LINKS_BY_SOURCE, graphConversationId, source?.id],
     queryFn: async () => {
@@ -195,11 +194,98 @@ export const SourceDrawer = ({
     enabled: !!graphConversationId && !!source?.id && source?.crawlDepth === 'dynamic',
   });
 
-  // Filter pages and edges for the selected source only (no inference fallback)
+  // Filter pages for the selected source only (no inference fallback)
   const sourcePages = useMemo(() => {
     if (!source) return [];
     return allPages.filter(p => p.source_id === source.id && p.status === 'indexed');
   }, [allPages, source]);
+
+  const sourcePageIds = useMemo(() => sourcePages.map(p => p.id), [sourcePages]);
+
+  // When this source's seed URL already exists as a page in another source (we skipped insert),
+  // include that page in the graph so edges from it to this source's pages are shown.
+  const normalizeUrlForSeedMatch = (url: string) => {
+    try {
+      const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+      u.hash = '';
+      u.search = '';
+      if (u.pathname.endsWith('/') && u.pathname !== '/') u.pathname = u.pathname.slice(0, -1);
+      return u.toString();
+    } catch {
+      return url;
+    }
+  };
+  const seedPageFromConversation = useMemo(() => {
+    if (!source?.initial_url || allPages.length === 0) return null;
+    const norm = normalizeUrlForSeedMatch(source.initial_url);
+    let found = allPages.find((p) => p.url && normalizeUrlForSeedMatch(p.url) === norm);
+    if (!found && norm) {
+      try {
+        const seedPath = new URL(norm).pathname;
+        found = allPages.find((p) => {
+          if (!p.url) return false;
+          try {
+            return new URL(normalizeUrlForSeedMatch(p.url)).pathname === seedPath;
+          } catch {
+            return false;
+          }
+        }) ?? null;
+      } catch {
+        /* ignore */
+      }
+    }
+    const alreadyInSource = found && sourcePages.some((p) => p.id === found!.id);
+    if (import.meta.env.DEV && source) {
+      const sampleUrls = allPages.slice(0, 5).map((p) => ({ id: p.id?.slice(0, 8), url: p.url?.slice(-50), norm: p.url ? normalizeUrlForSeedMatch(p.url)?.slice(-50) : null }));
+      console.log('[graph] seed resolution', {
+        sourceId: source.id?.slice(0, 8),
+        initial_url: source.initial_url?.slice(-60),
+        seedNorm: norm?.slice(-60),
+        allPagesCount: allPages.length,
+        sourcePagesCount: sourcePages.length,
+        found: found ? { id: found.id?.slice(0, 8), url: found.url?.slice(-50) } : null,
+        alreadyInSource: !!alreadyInSource,
+        matchBy: found && normalizeUrlForSeedMatch(found.url!) !== norm ? 'pathname' : 'exact',
+        sampleUrls,
+      });
+    }
+    if (!found || alreadyInSource) return null;
+    return found;
+  }, [source?.initial_url, source?.id, allPages, sourcePages]);
+
+  const graphPageIds = useMemo(
+    () =>
+      seedPageFromConversation && !sourcePageIds.includes(seedPageFromConversation.id)
+        ? [...sourcePageIds, seedPageFromConversation.id]
+        : sourcePageIds,
+    [sourcePageIds, seedPageFromConversation]
+  );
+  const { data: graphEdges = [], isLoading: edgesLoading, refetch: refetchGraphEdges } = useConversationGraphEdges(graphConversationId, graphPageIds);
+  const prevGraphLogRef = useRef<string | null>(null);
+  if (import.meta.env.DEV && source && graphPageIds.length > 0) {
+    const key = `${source.id}-${graphPageIds.length}-${graphPageIds.join(',')}`;
+    if (prevGraphLogRef.current !== key) {
+      prevGraphLogRef.current = key;
+      console.log('[graph] graphPageIds', {
+        sourceId: source.id?.slice(0, 8),
+        count: graphPageIds.length,
+        includesSeed: !!seedPageFromConversation && graphPageIds.includes(seedPageFromConversation.id),
+        seedId: seedPageFromConversation?.id?.slice(0, 8) ?? null,
+        ids: graphPageIds.map((id) => id.slice(0, 8)),
+        graphEdgesCount: graphEdges.length,
+      });
+    }
+  }
+  const prevSourcePagesLengthRef = useRef(0);
+  useEffect(() => {
+    if (sourcePages.length <= prevSourcePagesLengthRef.current) {
+      prevSourcePagesLengthRef.current = sourcePages.length;
+      return;
+    }
+    prevSourcePagesLengthRef.current = sourcePages.length;
+    const t = setTimeout(() => refetchGraphEdges(), 450);
+    return () => clearTimeout(t);
+  }, [sourcePages.length, refetchGraphEdges]);
 
   // Freeze totalPages for add-page flow (avoids 2/3 when new page arrives before status update)
   const prevAddingRef = useRef<string | null>(null);
@@ -213,10 +299,39 @@ export const SourceDrawer = ({
     prevAddingRef.current = null;
   }
 
-  const sourceEdges = useMemo(() => {
-    if (!source) return [];
-    return allEdges.filter(e => e.source_id === source.id);
-  }, [allEdges, source]);
+  // Stabilize graph pages: merge incoming sourcePages into a ref so we never drop a page
+  // we've already shown (avoids links disappearing when refetch temporarily returns fewer pages).
+  const stablePagesRef = useRef<Map<string, { id: string; title: string | null; path: string; status: string; url: string | null; source_id: string }>>(new Map());
+  const prevSourceIdRef = useRef<string | null>(null);
+  const prevCrawlStatusRef = useRef<string | null>(null);
+  if (source?.id !== prevSourceIdRef.current) {
+    prevSourceIdRef.current = source?.id ?? null;
+    prevCrawlStatusRef.current = null;
+    stablePagesRef.current.clear();
+  }
+  const jobStatus = (crawlJob as { status?: string } | undefined)?.status ?? null;
+  if (jobStatus === 'completed' && (prevCrawlStatusRef.current === 'running' || prevCrawlStatusRef.current === 'indexing')) {
+    stablePagesRef.current.clear();
+  }
+  prevCrawlStatusRef.current = jobStatus;
+
+  sourcePages.forEach((p) => {
+    const existing = stablePagesRef.current.get(p.id);
+    const url = p.url != null && String(p.url).trim() !== '' ? p.url : (existing?.url ?? null);
+    stablePagesRef.current.set(p.id, {
+      id: p.id,
+      title: p.title ?? existing?.title ?? null,
+      path: p.path,
+      status: p.status ?? 'indexed',
+      url,
+      source_id: p.source_id,
+    });
+  });
+  const stablePagesForGraph = useMemo(
+    () => Array.from(stablePagesRef.current.values()),
+    [sourcePages]
+  );
+
 
   const pagesIndexed = useMemo(() => {
     if (crawlJob) {
@@ -249,16 +364,30 @@ export const SourceDrawer = ({
     return source.crawlDepth === 'singular' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
   }, [source, sourcePages.length, addingPageSourceId, addPageJob?.status]);
 
-  // Convert pages to DiscoveredPage format for ForceGraph
+  // Convert pages to DiscoveredPage format for ForceGraph (use stabilized list so links don't flicker).
+  // Include seed page from another source when this source has no page for its seed URL (skipped-insert case).
   const displayPages = useMemo(() => {
-    return sourcePages.map(p => ({
+    const base = stablePagesForGraph.map((p) => ({
       id: p.id,
       title: p.title || 'Untitled',
       path: p.path,
       status: (p.status || 'indexed') as 'indexed' | 'crawling' | 'pending' | 'error',
-      url: p.url,
+      url: p.url ?? undefined,
     }));
-  }, [sourcePages]);
+    if (
+      seedPageFromConversation &&
+      !base.some((p) => p.id === seedPageFromConversation.id)
+    ) {
+      base.push({
+        id: seedPageFromConversation.id,
+        title: seedPageFromConversation.title || 'Untitled',
+        path: seedPageFromConversation.path,
+        status: 'indexed',
+        url: seedPageFromConversation.url ?? undefined,
+      });
+    }
+    return base;
+  }, [stablePagesForGraph, seedPageFromConversation]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -320,7 +449,7 @@ export const SourceDrawer = ({
                       pages={displayPages}
                       pagesIndexed={pagesIndexed}
                       domain={source.domain}
-                      edges={sourceEdges}
+                      edges={graphEdges}
                       className="h-[200px]"
                     />
                     {source.crawlDepth === 'dynamic' && (
@@ -416,7 +545,7 @@ export const SourceDrawer = ({
             {/* Discovered pages - scrollable section that fills remaining height */}
             <div className="flex-1 min-h-0 flex flex-col px-6 pb-6">
               <h4 className="text-sm font-medium text-foreground mb-2 shrink-0">
-                Discovered Pages ({displayPages.length})
+                Scraped Pages ({displayPages.length})
               </h4>
               <div className="flex-1 min-h-0 rounded-lg border border-border/50 bg-background/30 overflow-hidden">
                 <ScrollArea className="h-full">

@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
 import RobotsParser from 'robots-parser';
 import { supabase } from './db';
-import { indexConversationForRag } from './indexer';
+import { indexSourceForRag } from './indexer';
 const MAX_PAGES = {
     shallow: 5,
     medium: 15,
@@ -420,7 +420,7 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
     }
     await supabase.from('crawl_jobs').update(indexingUpdate).eq('id', job.id);
     try {
-        await indexConversationForRag(conversationId, job.id);
+        await indexSourceForRag(source.id, job.id, conversationId);
     }
     catch (_indexErr) {
         console.warn('[crawl] RAG indexing failed:', _indexErr);

@@ -20,6 +20,13 @@ export async function updateJobStatus(jobId, status, errorMessage = null, starte
         .update(updates)
         .eq('id', jobId);
 }
+/** Generic crawl_jobs update (add-page and crawlSource use this). Always sets updated_at. */
+export async function updateCrawlJob(jobId, updates) {
+    await supabase
+        .from('crawl_jobs')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', jobId);
+}
 /** Single-worker job claim: reset stale running jobs (e.g. after restart), then take the next queued job. */
 export async function claimJob() {
     const staleThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();

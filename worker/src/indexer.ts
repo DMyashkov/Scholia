@@ -96,7 +96,7 @@ async function indexChunkSpecsForRag(
       .eq('id', crawlJobId);
   }
 
-  console.log('[indexer] Indexing', totalChunks, 'chunks from', pageCount, 'pages', logLabel ?? '');
+  console.log('[indexer] PHASE=CHUNKS Indexing', totalChunks, 'chunks from', pageCount, 'pages', logLabel ?? '');
   const inserted = await embedAndInsertChunks(chunkSpecs, apiKey, {
     onProgress: crawlJobId
       ? async (done) => {
@@ -113,8 +113,16 @@ async function indexChunkSpecsForRag(
 
   let discoveredEmbedded = 0;
   if (conversationId) {
+    console.log('[indexer] PHASE=ENCODING_DISCOVERED calling embedDiscoveredLinks', {
+      conversationId: conversationId.slice(0, 8),
+      note: 'For shallow: typically 0 encoded_discovered rows (only dynamic inserts them during crawl)',
+    });
     discoveredEmbedded = await embedDiscoveredLinks(conversationId, apiKey, crawlJobId);
+    console.log('[indexer] PHASE=ENCODING_DISCOVERED embedDiscoveredLinks returned', { discoveredEmbedded });
+  } else {
+    console.log('[indexer] PHASE=ENCODING_DISCOVERED skip (no conversationId)');
   }
+  console.log('[indexer] indexChunkSpecsForRag DONE', { chunksCreated: inserted + discoveredEmbedded, inserted, discoveredEmbedded });
   return { chunksCreated: inserted + discoveredEmbedded };
 }
 
@@ -162,6 +170,11 @@ export async function indexSourceForRag(
   crawlJobId?: string,
   conversationId?: string
 ): Promise<{ chunksCreated: number }> {
+  console.log('[indexer] indexSourceForRag ENTRY', {
+    sourceId: sourceId.slice(0, 8),
+    crawlJobId: crawlJobId?.slice(0, 8),
+    conversationId: conversationId?.slice(0, 8),
+  });
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     console.warn('⚠️ OPENAI_API_KEY not set; skipping RAG indexing');
@@ -177,9 +190,14 @@ export async function indexSourceForRag(
     console.error('[indexer] Failed to fetch pages:', pagesError.message);
     return { chunksCreated: 0 };
   }
-  if (!pages?.length) return { chunksCreated: 0 };
+  if (!pages?.length) {
+    console.log('[indexer] indexSourceForRag EARLY_RETURN no pages', { sourceId: sourceId.slice(0, 8) });
+    return { chunksCreated: 0 };
+  }
 
+  console.log('[indexer] indexSourceForRag fetched pages', { pageCount: pages.length, sourceId: sourceId.slice(0, 8) });
   const chunkSpecs = await buildChunkSpecsFromPages(pages);
+  console.log('[indexer] indexSourceForRag built chunkSpecs', { chunkCount: chunkSpecs.length, pageCount: pages.length });
   return indexChunkSpecsForRag(chunkSpecs, apiKey, {
     crawlJobId,
     conversationId,
@@ -437,6 +455,7 @@ async function getIndexedPageUrls(conversationId: string): Promise<Set<string>> 
 }
 
 async function embedDiscoveredLinks(conversationId: string, apiKey: string, crawlJobId?: string): Promise<number> {
+  console.log('[indexer] embedDiscoveredLinks ENTRY', { conversationId: conversationId.slice(0, 8) });
   const indexedUrls = await getIndexedPageUrls(conversationId);
   const { data: sources } = await supabase
     .from('sources')
@@ -444,26 +463,55 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
     .eq('conversation_id', conversationId);
   const sourceIds = (sources ?? []).map((s) => s.id);
   const sourceModeMap = new Map((sources ?? []).map((s) => [s.id, (s as { suggestion_mode?: string }).suggestion_mode]));
-  if (sourceIds.length === 0) return 0;
+  if (sourceIds.length === 0) {
+    console.log('[indexer] embedDiscoveredLinks EARLY_RETURN', { reason: 'sourceIds.length=0' });
+    return 0;
+  }
   const { data: pages } = await supabase
     .from('pages')
     .select('id')
     .in('source_id', sourceIds);
   const pageIds = (pages ?? []).map((p) => p.id);
-  if (pageIds.length === 0) return 0;
+  if (pageIds.length === 0) {
+    console.log('[indexer] embedDiscoveredLinks EARLY_RETURN', { reason: 'pageIds.length=0' });
+    return 0;
+  }
   const { data: edgeRows } = await supabase
     .from('page_edges')
     .select('id, to_url, from_page_id')
     .in('from_page_id', pageIds);
   const edgeIds = (edgeRows ?? []).map((r) => r.id);
-  if (edgeIds.length === 0) return 0;
+  if (edgeIds.length === 0) {
+    console.log('[indexer] embedDiscoveredLinks EARLY_RETURN', {
+      reason: 'no page_edges for conversation pages',
+      pageIdsCount: pageIds.length,
+      note: 'Shallow crawl inserts page_edges but no encoded_discovered; so next query returns 0 rows anyway',
+    });
+    return 0;
+  }
   const { data: links, error: fetchError } = await supabase
     .from('encoded_discovered')
     .select('id, snippet, page_edge_id, owner_id')
     .in('page_edge_id', edgeIds)
     .is('embedding', null);
 
-  if (fetchError || !links?.length) return 0;
+  console.log('[indexer] embedDiscoveredLinks counts', {
+    pageIdsCount: pageIds.length,
+    edgeIdsCount: edgeIds.length,
+    encoded_discovered_null_embedding_count: links?.length ?? 0,
+    fetchError: fetchError?.message ?? null,
+  });
+
+  if (fetchError || !links?.length) {
+    if (!links?.length && !fetchError) {
+      console.log('[indexer] embedDiscoveredLinks EARLY_RETURN', {
+        reason: 'no encoded_discovered rows with null embedding for these edges',
+        edgeIdsCount: edgeIds.length,
+        note: 'Expected for shallow/static: we only insert encoded_discovered for dynamic sources during crawl',
+      });
+    }
+    return 0;
+  }
 
   const edgeIdToUrl = new Map((edgeRows ?? []).map((r) => [r.id, r.to_url]));
   const fromPageIds = [...new Set((edgeRows ?? []).map((r) => (r as { from_page_id?: string }).from_page_id).filter(Boolean))];
@@ -567,27 +615,52 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
 
 async function embedBatch(apiKey: string, texts: string[]): Promise<number[][]> {
   const out: number[][] = [];
+  const maxRetries = 3;
   for (let i = 0; i < texts.length; i += EMBED_BATCH_SIZE) {
     const batch = texts.slice(i, i + EMBED_BATCH_SIZE);
-    const res = await fetch(OPENAI_EMBEDDINGS_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: OPENAI_EMBEDDING_MODEL,
-        input: batch,
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`OpenAI embeddings: ${res.status} ${err}`);
+    let lastErr: Error | null = null;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const res = await fetch(OPENAI_EMBEDDINGS_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: OPENAI_EMBEDDING_MODEL,
+            input: batch,
+          }),
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          lastErr = new Error(`OpenAI embeddings: ${res.status} ${errText}`);
+          if ((res.status === 500 || res.status === 502 || res.status === 429) && attempt < maxRetries - 1) {
+            const delayMs = Math.min(1000 * Math.pow(2, attempt), 8000);
+            console.warn('[indexer] OpenAI embeddings retry', { status: res.status, attempt: attempt + 1, delayMs });
+            await new Promise((r) => setTimeout(r, delayMs));
+            continue;
+          }
+          throw lastErr;
+        }
+        const data = (await res.json()) as { data: { embedding: number[] }[] };
+        for (const item of data.data) {
+          out.push(item.embedding);
+        }
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error(String(e));
+        if (attempt < maxRetries - 1) {
+          const delayMs = Math.min(1000 * Math.pow(2, attempt), 8000);
+          console.warn('[indexer] OpenAI embeddings retry after error', { message: lastErr.message.slice(0, 80), attempt: attempt + 1, delayMs });
+          await new Promise((r) => setTimeout(r, delayMs));
+        } else {
+          throw lastErr;
+        }
+      }
     }
-    const data = (await res.json()) as { data: { embedding: number[] }[] };
-    for (const item of data.data) {
-      out.push(item.embedding);
-    }
+    if (lastErr) throw lastErr;
   }
   return out;
 }

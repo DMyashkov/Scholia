@@ -8,14 +8,8 @@
 // ─── Crawl jobs ─────────────────────────────────────────────────────────────
 /** Key [sourceId]. Current job (in-progress or latest main) for one source. useCrawlJob. */
 export const CURRENT_CRAWL_JOB_BY_SOURCE = 'current-crawl-job-by-source';
-
-/** Key [sourceId]. Full list of jobs for one source. useCrawlJobs (list). */
 export const LIST_OF_CRAWL_JOBS_BY_SOURCE = 'list-of-crawl-jobs-by-source';
-
-/** Key [sourceIdsKey]. Latest “main” crawl job per source (explicit_crawl_urls is null; excludes add-page jobs). */
 export const LATEST_MAIN_CRAWL_JOB_BY_SOURCES = 'latest-main-crawl-job-by-sources';
-
-/** Prefixes invalidated on crawl_jobs or encoded_discovered change (realtime). */
 export const CRAWL_JOB_INVALIDATION_PREFIXES = [
   CURRENT_CRAWL_JOB_BY_SOURCE,
   LIST_OF_CRAWL_JOBS_BY_SOURCE,
@@ -34,6 +28,9 @@ export const PAGES_FOR_CONVERSATION = 'pages-for-conversation';
 
 /** Page edges (graph links) for the conversation. useConversationPageEdges. */
 export const PAGE_EDGES_FOR_CONVERSATION = 'page-edges-for-conversation';
+
+/** Edges with both endpoints in visible pages only (small payload for graph). Key [conversationId, pageIdsKey]. useConversationGraphEdges. */
+export const PAGE_GRAPH_EDGES_FOR_CONVERSATION = 'page-graph-edges-for-conversation';
 
 // ─── By source ──────────────────────────────────────────────────────────────
 /** Key [sourceId]. All pages for one source. usePages. */

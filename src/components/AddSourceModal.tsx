@@ -60,7 +60,7 @@ export const AddSourceModal = ({ open, onOpenChange, onAddSource, promptMessage 
         sameDomainOnly,
         suggestionMode: depth === 'dynamic' ? suggestionMode : undefined,
       });
-      await (typeof result?.then === 'function' ? result : Promise.resolve(result));
+      await Promise.resolve(result);
       setUrl('');
       setDepth('shallow');
       setSuggestionMode('surface');

@@ -9,6 +9,7 @@ import {
 interface KnowledgeTrailSource {
   id: string;
   domain: string;
+  source_label?: string | null;
 }
 
 interface KnowledgeTrailProps {

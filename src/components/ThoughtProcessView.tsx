@@ -244,7 +244,6 @@ function PhaseContent({
                   outcome === 'Suggested a page' &&
                     'border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300',
                   (answeringFromEvidence || outcome === 'Searched again' || outcome === 'Asked for clarification') &&
-                    !(outcome === 'Suggested a page') &&
                     'border-border/60 bg-muted/40 text-foreground'
                 )}
               >

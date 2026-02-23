@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Plus, MessageSquare, Trash2, PanelLeftClose } from 'lucide-react';
 import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import { Conversation } from '@/types/chat';
@@ -238,8 +238,10 @@ const ConversationItem = ({
 
       <AlertDialog open={showDeleteDialog} onOpenChange={(open) => !isDeleting && setShowDeleteDialog(open)}>
         <AlertDialogContent
-          onInteractOutside={() => !isDeleting && setShowDeleteDialog(false)}
-          onEscapeKeyDown={() => !isDeleting && setShowDeleteDialog(false)}
+          {...({
+            onInteractOutside: () => !isDeleting && setShowDeleteDialog(false),
+            onEscapeKeyDown: () => !isDeleting && setShowDeleteDialog(false),
+          } as React.ComponentProps<typeof AlertDialogContent>)}
         >
           <AlertDialogHeader>
             <AlertDialogTitle>Delete conversation?</AlertDialogTitle>

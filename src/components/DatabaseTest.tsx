@@ -44,7 +44,7 @@ export function DatabaseTest() {
     try {
       // Test 1: Create conversation
       addResult('Test 1: Creating conversation...');
-      const newConv = await createConversation.mutateAsync();
+      const newConv = await createConversation.mutateAsync('Test conversation');
       addResult(`✅ Conversation created: ${newConv.id}`);
 
       // Test 2: Create message
@@ -53,6 +53,7 @@ export function DatabaseTest() {
         conversation_id: newConv.id,
         role: 'user',
         content: 'Test message from database test component',
+        was_multi_step: false,
       });
       addResult(`✅ Message created: ${newMsg.id}`);
 
@@ -61,9 +62,11 @@ export function DatabaseTest() {
       const newSource = await addSource.mutateAsync({
         conversationId: newConv.id,
         sourceData: {
+          conversation_id: newConv.id,
           initial_url: 'https://example.com',
           domain: 'example.com',
           crawl_depth: 'shallow',
+          suggestion_mode: 'surface',
           same_domain_only: true,
         },
       });

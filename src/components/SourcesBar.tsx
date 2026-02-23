@@ -127,11 +127,11 @@ const SourceChip = ({
             {/* Dynamic source indicator - lightning bolt + Surface/Dive icon */}
             {source.crawlDepth === 'dynamic' && (
               <>
-                <Zap className="h-3 w-3 text-amber-500 dark:text-amber-400 shrink-0" title="Dynamic" />
+                <span title="Dynamic"><Zap className="h-3 w-3 text-amber-500 dark:text-amber-400 shrink-0" /></span>
                 {source.suggestionMode === 'dive' ? (
-                  <Anchor className="h-3 w-3 text-amber-500 dark:text-amber-400 shrink-0" title="Dive" />
+                  <span title="Dive"><Anchor className="h-3 w-3 text-amber-500 dark:text-amber-400 shrink-0" /></span>
                 ) : (
-                  <Waves className="h-3 w-3 text-amber-500 dark:text-amber-400 shrink-0" title="Surface" />
+                  <span title="Surface"><Waves className="h-3 w-3 text-amber-500 dark:text-amber-400 shrink-0" /></span>
                 )}
               </>
             )}

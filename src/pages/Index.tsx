@@ -7,7 +7,7 @@ import { useChatDatabase } from '@/hooks/useChatDatabase';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useSidebarWidth } from '@/hooks/useSidebarWidth';
 import { Loader2 } from 'lucide-react';
-import { Source, CrawlDepth } from '@/types/source';
+import { Source, CrawlDepth, SuggestionMode } from '@/types/source';
 import { cn } from '@/lib/utils';
 import { normalizeSourceUrl } from '@/lib/urlUtils';
 
@@ -19,6 +19,8 @@ const extractDomain = (url: string): string => {
     return url;
   }
 };
+
+const toSuggestionMode = (v: 'surface' | 'dive'): SuggestionMode => v;
 
 const Index = () => {
   const { user, loading } = useAuthContext();
@@ -115,7 +117,7 @@ const Index = () => {
   const handleAddSource = useCallback(async (
     url: string,
     depth: CrawlDepth,
-    options: { sameDomainOnly: boolean; suggestionMode?: 'surface' | 'dive' }
+    options: { sameDomainOnly: boolean; suggestionMode?: SuggestionMode }
   ): Promise<Source | null> => {
     if (!user) {
       setGuestModeModalOpen(true);
@@ -130,14 +132,13 @@ const Index = () => {
       domain,
       status: 'crawling',
       crawlDepth: depth,
-      suggestionMode: depth === 'dynamic' ? (options.suggestionMode ?? 'surface') : 'surface',
+      suggestionMode: toSuggestionMode(depth === 'dynamic' ? (options.suggestionMode ?? 'surface') : 'surface'),
       sameDomainOnly: options.sameDomainOnly,
       pagesIndexed: 0,
       totalPages: 0,
       lastUpdated: new Date(),
       discoveredPages: [],
     };
-
     return addSourceToConversation(newSource);
   }, [user, addSourceToConversation]);
 

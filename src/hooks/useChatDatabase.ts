@@ -218,6 +218,7 @@ export const useChatDatabase = () => {
     const dbSource = await addSourceMutation.mutateAsync({
       conversationId: finalConvId,
       sourceData: {
+        conversation_id: finalConvId,
         initial_url: source.initial_url,
         domain: source.domain,
         crawl_depth: source.crawlDepth,
@@ -227,13 +228,14 @@ export const useChatDatabase = () => {
     });
 
     // Map db source to UI Source for the caller (e.g. to select and open drawer).
+    const suggestionMode: Source['suggestionMode'] = (dbSource as { suggestion_mode?: string }).suggestion_mode === 'dive' ? 'dive' : 'surface';
     return {
       id: dbSource.id,
       initial_url: dbSource.initial_url,
       domain: dbSource.domain,
       status: 'crawling' as const,
       crawlDepth: dbSource.crawl_depth,
-      suggestionMode: (dbSource as { suggestion_mode?: string }).suggestion_mode === 'dive' ? 'dive' : 'surface',
+      suggestionMode,
       sameDomainOnly: dbSource.same_domain_only,
       pagesIndexed: 0,
       totalPages: 0,
@@ -488,7 +490,7 @@ export const useChatDatabase = () => {
     }
   }, [queryClient, addPageToSource, updateMessageMutation]);
 
-  const sendMessage = useCallback(async (content: string) => {
+  const sendMessage = useCallback(async (content: string, _options?: { unfoldMode?: 'unfold' | 'direct' }) => {
     if (!content.trim() || isLoading) {
       console.log('[sendMessage] early return', { hasContent: !!content?.trim(), isLoading });
       return;

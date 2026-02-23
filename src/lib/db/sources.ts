@@ -66,7 +66,7 @@ export const sourcesApi = {
     const { data, error } = await query;
     if (error) throw error;
     type Row = { conversation_id: string; conversation: { id: string; title: string | null; created_at: string } | null };
-    return ((data || []) as Row[]).map((item) => ({
+    return ((data || []) as unknown as Row[]).map((item) => ({
       conversationId: item.conversation_id,
       conversation: item.conversation,
     }));

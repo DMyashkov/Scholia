@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react';
-import { Source, CrawlDepth } from '@/types/source';
+import { Source, CrawlDepth, SuggestionMode } from '@/types/source';
 import { generateMockPages } from '@/data/mockSourceContent';
 
 const generateId = () => Math.random().toString(36).substring(2, 15);
@@ -70,7 +70,7 @@ export const useChatSources = ({ sources, onSourcesChange }: UseChatSourcesOptio
   const addSource = useCallback((
     url: string,
     depth: CrawlDepth,
-    options: { sameDomainOnly: boolean }
+    options: { sameDomainOnly: boolean; suggestionMode?: SuggestionMode }
   ) => {
     const domain = extractDomain(url);
     const totalPages = getTotalPagesForDepth(depth);
@@ -93,6 +93,7 @@ export const useChatSources = ({ sources, onSourcesChange }: UseChatSourcesOptio
       domain,
       status: 'crawling',
       crawlDepth: depth,
+      suggestionMode: options.suggestionMode ?? 'surface',
       sameDomainOnly: options.sameDomainOnly,
       pagesIndexed: 0,
       totalPages,

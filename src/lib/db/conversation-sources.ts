@@ -37,6 +37,8 @@ export const conversationSourcesApi = {
         started_at: null,
         completed_at: null,
         last_activity_at: null,
+        encoding_chunks_done: 0,
+        encoding_discovered_done: 0,
       });
     }
     return { id: sourceId, conversation_id: conversationId, source_id: sourceId } as { id: string; conversation_id: string; source_id: string };

@@ -75,7 +75,7 @@ export const conversationsApi = {
     if (existing.owner_id !== user.id) {
       console.error('Permission denied:', { 
         conversationOwnerId: existing.owner_id, 
-        currentUserId 
+        currentUserId: user.id 
       });
       throw new Error('You do not have permission to delete this conversation.');
     }

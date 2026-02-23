@@ -108,7 +108,7 @@ export const SourceDrawer = ({
     () => (allSourceIds?.length ? allSourceIds : source?.id ? [source.id] : []),
     [allSourceIds, source?.id]
   );
-  const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds.join(',')]);
+  const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds]);
   const { data: allCrawlJobs = [] } = useQuery({
     queryKey: [LATEST_MAIN_CRAWL_JOB_BY_SOURCES, sourceIdsKey],
     queryFn: async () => {
@@ -251,7 +251,7 @@ export const SourceDrawer = ({
     }
     if (!found || alreadyInSource) return null;
     return found;
-  }, [source?.initial_url, source?.id, allPages, sourcePages]);
+  }, [source, allPages, sourcePages]);
 
   const graphPageIds = useMemo(
     () =>
@@ -329,6 +329,7 @@ export const SourceDrawer = ({
   });
   const stablePagesForGraph = useMemo(
     () => Array.from(stablePagesRef.current.values()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ref synced elsewhere when sourcePages changes; we re-read here
     [sourcePages]
   );
 

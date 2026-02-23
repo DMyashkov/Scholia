@@ -10,12 +10,12 @@ declare module 'npm:@supabase/supabase-js@2' {
     supabaseUrl: string,
     supabaseKey: string,
     options?: Record<string, unknown>
-  ): any;
+  ): import('@supabase/supabase-js').SupabaseClient;
 }
 
 // Import-map alias from deno.json: "supabase": "npm:@supabase/supabase-js@2"
 declare module 'supabase' {
-  export type SupabaseClient = any;
+  export type SupabaseClient = import('@supabase/supabase-js').SupabaseClient;
   export function createClient(
     supabaseUrl: string,
     supabaseKey: string,

@@ -144,7 +144,7 @@ Output JSON with final_answer and cited_snippets.`;
     ? obj.final_answer.trim()
     : "I couldn't find enough in the sources to answer fully.";
   const chunkIdSet = new Set(evidenceChunks.map((c) => c.id));
-  let cited_snippets: Record<string, string> = {};
+  const cited_snippets: Record<string, string> = {};
   if (obj.cited_snippets != null && typeof obj.cited_snippets === 'object' && !Array.isArray(obj.cited_snippets)) {
     for (const [id, passage] of Object.entries(obj.cited_snippets)) {
       if (chunkIdSet.has(id) && typeof passage === 'string' && passage.trim().length > 0) {

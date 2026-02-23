@@ -149,7 +149,7 @@ export const createGraphData = (
   });
 
   // Use real edges if available
-  let links: GraphLink[] = [];
+  const links: GraphLink[] = [];
   const edgesArray = edges || [];
 
   const dropReasons: { fromMissing: number; toMissing: number; duplicate: number; self: number } = {

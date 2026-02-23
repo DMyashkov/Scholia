@@ -20,7 +20,7 @@ export function stripLeadFluff(text: string): string {
   }
 
   // Remove coordinate blocks (e.g. "35°11′40″N 101°48′28″W / 35.194327°N 101.807771°W / 35.194327; -101.807771")
-  s = s.replace(/^[\d.°′″\s\/;:-]+[NS]\s*[\d.°′″\s\/;:-]+[EW][\s\/;.-]*/gi, '').trim();
+  s = s.replace(/^[\d.°′″\s/;:-]+[NS]\s*[\d.°′″\s/;:-]+[EW][\s/;.-]*/gi, '').trim();
   s = s.replace(/^[\d.-]+\s*;\s*[\d.-]+[\s.]*/g, '').trim();
 
   // Remove "From X, the free encyclopedia" and variants

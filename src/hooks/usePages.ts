@@ -75,7 +75,7 @@ export const useConversationPageEdges = (
  * Avoids fetching 20k+ edges and filtering client-side; payload is typically &lt;200 rows.
  */
 export const useConversationGraphEdges = (conversationId: string | null, pageIds: string[]) => {
-  const pageIdsKey = useMemo(() => [...pageIds].sort().join(','), [pageIds.join(',')]);
+  const pageIdsKey = useMemo(() => [...pageIds].sort().join(','), [pageIds]);
   return useQuery({
     queryKey: [PAGE_GRAPH_EDGES_FOR_CONVERSATION, conversationId, pageIdsKey],
     queryFn: () => {

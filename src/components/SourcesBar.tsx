@@ -202,7 +202,7 @@ export const SourcesBar = ({
   }
   // Load crawl jobs for all sources to determine real status (filter by conversation so switching convs shows correct state)
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
-  const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds.join(',')]);
+  const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds]);
   const { data: crawlJobsData = [] } = useQuery({
     queryKey: [LATEST_MAIN_CRAWL_JOB_BY_SOURCES, sourceIdsKey],
     queryFn: async () => {

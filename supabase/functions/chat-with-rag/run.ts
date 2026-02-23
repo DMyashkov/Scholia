@@ -1,6 +1,7 @@
 /**
  * RAG orchestration: load context, run plan+loop, handle clarify/expand_corpus, finalize answer.
  */
+/* eslint-disable-next-line @typescript-eslint/triple-slash-reference -- Deno ambient types */
 /// <reference path="./deno_types.d.ts" />
 import type { SupabaseClient } from 'supabase';
 import { createClient } from 'supabase';
@@ -187,7 +188,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     statements?: string[];
     nextAction?: string;
   };
-  let thoughtProcess: {
+  const thoughtProcess: {
     slots: { name: string; type: string; description?: string; dependsOn?: string }[];
     planReason?: string;
     steps: ThoughtStep[];

@@ -34,7 +34,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
 
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
-  const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds.join(',')]);
+  const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds]);
   const { data: crawlJobsData = [] } = useQuery({
     queryKey: [LATEST_MAIN_CRAWL_JOB_BY_SOURCES, sourceIdsKey],
     queryFn: async () => {
@@ -98,7 +98,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     }
     if (!found || sourcePagesForActive.some((p) => p.id === found!.id)) return null;
     return found;
-  }, [activeSourceForSeed?.initial_url, activeSourceForSeed?.id, pages, sourcePagesForActive]);
+  }, [activeSourceForSeed?.initial_url, pages, sourcePagesForActive]);
 
   const graphPageIds = useMemo(() => {
     const baseIds = (activeSourceId ? sourcePagesForActive : pages).map((p) => p.id);

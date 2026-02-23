@@ -64,7 +64,7 @@ export const ChatArea = ({
   const [addSourcePromptMessage, setAddSourcePromptMessage] = useState<string | null>(null);
 
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
-  const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds.join(',')]);
+  const sourceIdsKey = useMemo(() => sourceIds.slice().sort().join(','), [sourceIds]);
   const conversationId = conversation?.id ?? null;
   const { data: mainCrawlJobs = [] } = useQuery({
     queryKey: [LATEST_MAIN_CRAWL_JOB_BY_SOURCES, sourceIdsKey],

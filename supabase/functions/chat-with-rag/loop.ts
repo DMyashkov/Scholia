@@ -27,7 +27,7 @@ Output JSON only:
   ],
   "next_action": "retrieve" | "expand_corpus" | "clarify" | "answer",
   "why": "short reason",
-  "subqueries": "optional: when next_action is retrieve, array of { \"slot\": \"slot_name\", \"query\": \"search phrase\" } or for mapping slots { \"slot\": \"slot_name\", \"query\": \"__map__\", \"map_description\": \"optional phrase per key (e.g. achievements)\" }; backend expands __map__ to one query per key from the dependency list",
+  "subqueries": "optional: when next_action is retrieve, array of { "slot": "slot_name", "query": "search phrase" } or for mapping slots { "slot": "slot_name", "query": "__map__", "map_description": "optional phrase per key (e.g. achievements)" }; backend expands __map__ to one query per key from the dependency list",
   "questions": "optional: when next_action is clarify, array of clarifying question strings",
   "suggested_page_index": "optional: when next_action is expand_corpus and a candidate list was provided, integer 1–10 (1 = first); omit for first",
   "broad_query_completed_slot_fully": "optional: array of BROAD slot names (listed below) for which no more retrieval is needed; evidence sufficient."
@@ -46,7 +46,7 @@ Backend runs a separate final-answer step; you do not write answer text.
 - Subqueries: omit for (a) slots that have finished querying (listed below), (b) scalar slots that already have a value in current slot state, 
 (c) list/mapping slots that have reached target (see "Slots to fill" targets; target 0 = no fixed target, continue until broad_query_completed_slot_fully or stagnate). 
 Only suggest subqueries for slots that still need retrieval after your claims.
-For mapping slots you may output a single map directive: { \"slot\": \"slot_name\", \"query\": \"__map__\", \"map_description\": \"optional phrase per key\" }; backend will expand it into one query per key from the dependency list (matrix).
+For mapping slots you may output a single map directive: { "slot": "slot_name", "query": "__map__", "map_description": "optional phrase per key" }; backend will expand it into one query per key from the dependency list (matrix).
 
 - BROAD vs TARGETED: Backend lists BROAD slots this step. Use broad-style only for those; targeted for other list/mapping. 
 For BROAD slots you may set broad_query_completed_slot_fully if no more retrieval needed. Never repeat an identical query; use "last queries and items" to try something different.
@@ -187,7 +187,8 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
   const claims: ExtractClaim[] = claimsRaw
     .filter((c): c is Record<string, unknown> => c != null && typeof c === 'object')
     .map((c) => {
-      const rawIds = Array.isArray((c as any).chunkIds) ? ((c as any).chunkIds as unknown[]) : [];
+      const cRecord = c as Record<string, unknown>;
+      const rawIds = Array.isArray(cRecord.chunkIds) ? (cRecord.chunkIds as unknown[]) : [];
       let chunkIds = rawIds.filter((id): id is string => typeof id === 'string' && chunkIdSet.has(id)) as string[];
       if (chunkIds.length === 0 && rawIds.length > 0) {
         const byIndex = rawIds

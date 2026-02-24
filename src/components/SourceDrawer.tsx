@@ -390,6 +390,20 @@ export const SourceDrawer = ({
     return base;
   }, [stablePagesForGraph, seedPageFromConversation]);
 
+  const connectedPageIds = useMemo(() => {
+    const ids = new Set<string>();
+    graphEdges.forEach((e: any) => {
+      if (e.from_page_id) ids.add(e.from_page_id as string);
+      if ('to_page_id' in e && e.to_page_id) ids.add(e.to_page_id as string);
+    });
+    return ids;
+  }, [graphEdges]);
+  const displayPagesForGraph = useMemo(
+    () => displayPages.filter((p) => connectedPageIds.has(p.id)),
+    [displayPages, connectedPageIds]
+  );
+  const connectedPagesCount = displayPagesForGraph.length;
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent 
@@ -447,8 +461,8 @@ export const SourceDrawer = ({
                 ) : (
                   <div className="relative">
                     <ForceGraph
-                      pages={displayPages}
-                      pagesIndexed={pagesIndexed}
+                      pages={displayPagesForGraph}
+                      pagesIndexed={connectedPagesCount}
                       domain={source.domain}
                       edges={graphEdges}
                       className="h-[200px]"

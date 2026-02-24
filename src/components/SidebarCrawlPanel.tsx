@@ -354,6 +354,19 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   
   
   
+  const connectedPageIds = useMemo(() => {
+    const ids = new Set<string>();
+    graphEdges.forEach((e: any) => {
+      if (e.from_page_id) ids.add(e.from_page_id as string);
+      if ('to_page_id' in e && e.to_page_id) ids.add(e.to_page_id as string);
+    });
+    return ids;
+  }, [graphEdges]);
+  const displayPagesForGraph = useMemo(
+    () => displayPages.filter((p) => connectedPageIds.has(p.id)),
+    [displayPages, connectedPageIds]
+  );
+  const connectedPagesCount = displayPagesForGraph.length;
   const displayPagesIndexed = Math.max(
     displayPages.length,
     displaySources.reduce((sum, s) => {
@@ -432,9 +445,9 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
             />
             <StatItem
               label="Scraped"
-              value={isAddingPageFlow ? progressSources.reduce((s, x) => s + x.pagesIndexed, 0) : totalIndexed}
+              value={isAddingPageFlow ? Math.min(progressSources.reduce((s, x) => s + x.pagesIndexed, 0), connectedPagesCount) : connectedPagesCount}
               highlight={isCrawling && !activeSource}
-              tooltip="Pages scraped and in the graph with searchable content."
+              tooltip="Pages scraped and in the graph with searchable content (shown when edges are loaded)."
             />
             {isDynamic && (
               <StatItem
@@ -450,7 +463,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         {}
         {((isCrawling && !activeSource) || isAddingPageFlow) && (progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1) > 0 ? (
           <EncodingProgressBar
-            crawlDone={isAddingPageFlow ? progressSources.reduce((s, x) => s + x.pagesIndexed, 0) : totalIndexed}
+            crawlDone={isAddingPageFlow ? Math.min(progressSources.reduce((s, x) => s + x.pagesIndexed, 0), connectedPagesCount) : connectedPagesCount}
             crawlTotal={progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1}
             chunksDone={encChunksDone}
             chunksTotal={encChunksTotal}
@@ -467,8 +480,8 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
       {}
       <div className="px-3 pb-3">
         <ForceGraph 
-          pages={displayPages}
-          pagesIndexed={displayPagesIndexed}
+          pages={displayPagesForGraph}
+          pagesIndexed={connectedPagesCount}
           domain={activeDomain}
           edges={graphEdges}
         />

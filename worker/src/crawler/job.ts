@@ -75,7 +75,7 @@ export async function claimJob(): Promise<CrawlJob | null> {
   if (!jobs?.length) {
     _noQueuedLogCounter++;
     if (_noQueuedLogCounter <= 2 || _noQueuedLogCounter % 12 === 0) {
-      console.log('crawl: no jobs queued');
+      // intentionally silent (used only for dev logging before)
     }
     return null;
   }

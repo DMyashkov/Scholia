@@ -5,9 +5,7 @@ import { crawlJobsApi } from './crawl-jobs';
 const RECRAWL_DEBUG = true; 
 
 function recrawlLog(...args: unknown[]) {
-  if (RECRAWL_DEBUG) {
-    console.log('[recrawl]', new Date().toISOString(), ...args);
-  }
+  if (!RECRAWL_DEBUG) return;
 }
 
 

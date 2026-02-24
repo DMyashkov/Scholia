@@ -33,7 +33,6 @@ export function DatabaseTest() {
 
   const addResult = (message: string) => {
     setTestResults(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
-    console.log(message);
   };
 
   const runTests = async () => {

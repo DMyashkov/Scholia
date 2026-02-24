@@ -254,9 +254,7 @@ export const useChatDatabase = () => {
 
   const recrawlSource = useCallback(async (sourceId: string) => {
     if (!activeConversationId) return;
-    console.log('[recrawl] useChatDatabase: calling recrawl API', { activeConversationId: activeConversationId.slice(0, 8), sourceId: sourceId.slice(0, 8) });
     await recrawlSourceApi(activeConversationId, sourceId);
-    console.log('[recrawl] useChatDatabase: API done, invalidating + refetching queries');
     queryClient.invalidateQueries({ queryKey: [SOURCES_FOR_CONVERSATION, activeConversationId] });
     queryClient.invalidateQueries({ queryKey: [PAGES_FOR_CONVERSATION, activeConversationId] });
     queryClient.invalidateQueries({ queryKey: [PAGE_EDGES_FOR_CONVERSATION, activeConversationId] });
@@ -272,7 +270,6 @@ export const useChatDatabase = () => {
     
     await queryClient.refetchQueries({ queryKey: [LATEST_MAIN_CRAWL_JOB_BY_SOURCES] });
     await queryClient.refetchQueries({ queryKey: [CURRENT_CRAWL_JOB_BY_SOURCE, sourceId] });
-    console.log('[recrawl] useChatDatabase: refetch complete');
   }, [activeConversationId, queryClient]);
 
   const updateDynamicMode = useCallback(async (conversationId: string, dynamicMode: boolean) => {
@@ -281,7 +278,6 @@ export const useChatDatabase = () => {
 
   const addPageToSource = useCallback(async (conversationId: string, sourceId: string, url: string) => {
     const functionsUrl = getFunctionsUrl();
-    console.log('[addPageToSource] start', { conversationId, sourceId, url, functionsUrl });
     if (!functionsUrl) {
       console.error('[addPageToSource] Functions URL not configured');
       throw new Error('Functions URL not configured');
@@ -309,7 +305,6 @@ export const useChatDatabase = () => {
 
     
     if (data?.page) {
-      console.log('[addPageToSource] page already exists', data.page.id?.slice(0, 8));
       queryClient.invalidateQueries({ queryKey: [LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE, conversationId, sourceId] });
       queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
       queryClient.invalidateQueries({ queryKey: [PAGES_FOR_CONVERSATION, conversationId] });
@@ -488,7 +483,6 @@ export const useChatDatabase = () => {
 
   const sendMessage = useCallback(async (content: string, _options?: { unfoldMode?: 'unfold' | 'direct' }) => {
     if (!content.trim() || isLoading) {
-      console.log('[sendMessage] early return', { hasContent: !!content?.trim(), isLoading });
       return;
     }
 
@@ -592,10 +586,7 @@ export const useChatDatabase = () => {
                     setLiveThoughtProcess(null);
                     queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
                     if (ev.suggestedTitle) {
-                      console.log('[chat] RAG returned suggestedTitle:', JSON.stringify(ev.suggestedTitle), '| invalidating conversations to refresh sidebar');
                       queryClient.invalidateQueries({ queryKey: ['conversations'] });
-                    } else {
-                      console.log('[chat] RAG done event received with no suggestedTitle (first-message title update skipped or not first message)');
                     }
                     setIsLoading(false);
                     return;
@@ -614,10 +605,7 @@ export const useChatDatabase = () => {
                   setLiveThoughtProcess(null);
                   queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
                   if (event.suggestedTitle) {
-                    console.log('[chat] RAG returned suggestedTitle (buffer):', JSON.stringify(event.suggestedTitle), '| invalidating conversations to refresh sidebar');
                     queryClient.invalidateQueries({ queryKey: ['conversations'] });
-                  } else {
-                    console.log('[chat] RAG done event (buffer) with no suggestedTitle');
                   }
                   setIsLoading(false);
                   return;

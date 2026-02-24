@@ -20,7 +20,7 @@ import { getEncodingStatusLabel, getEncodingPhase } from './EncodingProgressBar'
 import { useEffect, useMemo, useRef } from 'react';
 import { useConversationPages, useConversationGraphEdges } from '@/hooks/usePages';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
-import type { CrawlJob } from '@/lib/db/types';
+import type { CrawlJob, PageEdge } from '@/lib/db/types';
 import { useAddPageJob } from '@/hooks/useAddPageJob';
 import {
   LATEST_MAIN_CRAWL_JOB_BY_SOURCES,
@@ -129,12 +129,8 @@ export const SourceDrawer = ({
     const sorted = [...crawlJobsData].sort((a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
-    const job = sorted[0];
-    if (source?.id && import.meta.env.DEV) {
-      console.log('[recrawl] SourceDrawer crawlJob', source.id.slice(0, 8), 'job=', job?.id?.slice(0, 8), 'status=', job?.status, 'discovered=', (job as CrawlJob)?.discovered_count, 'indexed=', (job as CrawlJob)?.indexed_count);
-    }
-    return job;
-  }, [crawlJobsData, source?.id]);
+    return sorted[0];
+  }, [crawlJobsData, source]);
 
   const realStatus: Source['status'] = useMemo(() => {
     if (!source) return 'crawling';
@@ -179,7 +175,6 @@ export const SourceDrawer = ({
     queryKey: [COUNT_OF_DISCOVERED_LINKS_BY_SOURCE, graphConversationId, source?.id],
     queryFn: async () => {
       const count = graphConversationId && source?.id ? await discoveredLinksApi.countBySource(graphConversationId, source.id) : 0;
-      if (import.meta.env.DEV) console.log('[recrawl] discovered-links-count', count);
       return count;
     },
     enabled: !!graphConversationId && !!source?.id,
@@ -188,7 +183,6 @@ export const SourceDrawer = ({
     queryKey: [ENCODED_COUNT_OF_DISCOVERED_LINKS_BY_SOURCE, graphConversationId, source?.id],
     queryFn: async () => {
       const count = graphConversationId && source?.id ? await discoveredLinksApi.countEncodedBySource(graphConversationId, source.id) : 0;
-      if (import.meta.env.DEV) console.log('[recrawl] discovered-links-encoded-count', count);
       return count;
     },
     enabled: !!graphConversationId && !!source?.id && source?.crawlDepth === 'dynamic',
@@ -235,20 +229,7 @@ export const SourceDrawer = ({
       }
     }
     const alreadyInSource = found && sourcePages.some((p) => p.id === found!.id);
-    if (import.meta.env.DEV && source) {
-      const sampleUrls = allPages.slice(0, 5).map((p) => ({ id: p.id?.slice(0, 8), url: p.url?.slice(-50), norm: p.url ? normalizeUrlForSeedMatch(p.url)?.slice(-50) : null }));
-      console.log('[graph] seed resolution', {
-        sourceId: source.id?.slice(0, 8),
-        initial_url: source.initial_url?.slice(-60),
-        seedNorm: norm?.slice(-60),
-        allPagesCount: allPages.length,
-        sourcePagesCount: sourcePages.length,
-        found: found ? { id: found.id?.slice(0, 8), url: found.url?.slice(-50) } : null,
-        alreadyInSource: !!alreadyInSource,
-        matchBy: found && normalizeUrlForSeedMatch(found.url!) !== norm ? 'pathname' : 'exact',
-        sampleUrls,
-      });
-    }
+    
     if (!found || alreadyInSource) return null;
     return found;
   }, [source, allPages, sourcePages]);
@@ -266,14 +247,6 @@ export const SourceDrawer = ({
     const key = `${source.id}-${graphPageIds.length}-${graphPageIds.join(',')}`;
     if (prevGraphLogRef.current !== key) {
       prevGraphLogRef.current = key;
-      console.log('[graph] graphPageIds', {
-        sourceId: source.id?.slice(0, 8),
-        count: graphPageIds.length,
-        includesSeed: !!seedPageFromConversation && graphPageIds.includes(seedPageFromConversation.id),
-        seedId: seedPageFromConversation?.id?.slice(0, 8) ?? null,
-        ids: graphPageIds.map((id) => id.slice(0, 8)),
-        graphEdgesCount: graphEdges.length,
-      });
     }
   }
   const prevSourcePagesLengthRef = useRef(0);
@@ -392,9 +365,9 @@ export const SourceDrawer = ({
 
   const connectedPageIds = useMemo(() => {
     const ids = new Set<string>();
-    graphEdges.forEach((e: any) => {
-      if (e.from_page_id) ids.add(e.from_page_id as string);
-      if ('to_page_id' in e && e.to_page_id) ids.add(e.to_page_id as string);
+    (graphEdges as PageEdge[]).forEach((e) => {
+      if (e.from_page_id) ids.add(e.from_page_id);
+      if (e.to_page_id) ids.add(e.to_page_id);
     });
     return ids;
   }, [graphEdges]);

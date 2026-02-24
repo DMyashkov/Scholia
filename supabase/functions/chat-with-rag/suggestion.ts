@@ -36,11 +36,11 @@ export async function trySuggestPage(
       match_count: 12,
     });
     if (rpcErr) {
-      console.log('[RAG-SUGGEST] match_discovered_links RPC error:', rpcErr.message, '| queryIndex:', i);
+      console.error('[RAG-SUGGEST] match_discovered_links RPC error:', rpcErr.message, '| queryIndex:', i);
     }
     const list = (matches || []) as { to_url: string; anchor_text: string | null; snippet: string; source_id: string; from_page_id: string | null; distance: number }[];
     if (list.length === 0 && i === 0) {
-      console.log('[RAG-SUGGEST] match_discovered_links returned 0 rows for first query | sourceIds:', allSourceIds.length);
+      console.error('[RAG-SUGGEST] match_discovered_links returned 0 rows for first query');
     }
     for (const m of list) {
       const key = `${m.source_id}:${m.to_url}`;
@@ -63,7 +63,7 @@ export async function trySuggestPage(
 
   const top = list[0];
   if (!top) {
-    console.log('[RAG-SUGGEST] no suggested page: match_discovered_links returned no non-indexed candidates');
+    
     return null;
   }
 
@@ -73,7 +73,7 @@ export async function trySuggestPage(
     fromPageTitle = (fromPage as { title: string | null } | null)?.title ?? undefined;
   }
 
-  console.log('[RAG-SUGGEST] suggested page set:', top.to_url);
+  
   return {
     url: top.to_url,
     title: top.anchor_text?.trim() || deriveTitleFromUrl(top.to_url),

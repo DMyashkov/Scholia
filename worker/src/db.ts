@@ -24,4 +24,4 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
 
 
 const urlDisplay = supabaseUrl ? supabaseUrl.replace(/^https?:\/\//, '').slice(0, 50) : 'NOT SET';
-console.log(`[worker] Supabase URL: ${urlDisplay}... (must match frontend—check root .env)`);
+ 

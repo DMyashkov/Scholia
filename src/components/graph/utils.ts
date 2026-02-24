@@ -210,35 +210,7 @@ export const createGraphData = (
       links.push({ source: fromPageId, target: toPageId });
     });
 
-    if (import.meta.env.DEV && (edgesArray.length > 0 || links.length > 0)) {
-      const totalDropped = dropReasons.fromMissing + dropReasons.toMissing + dropReasons.duplicate + dropReasons.self;
-      const visibleIds = new Set(visiblePages.map((p) => p.id));
-      const edgeFromIds = new Set(edgesArray.map((e) => e.from_page_id).filter(Boolean));
-      const overlap = [...edgeFromIds].filter((id) => visibleIds.has(id)).length;
-      const mainReason =
-        totalDropped > 0
-          ? dropReasons.toMissing >= totalDropped * 0.5
-            ? 'toMissing (edge target URL not in crawled pages – only edges between visible nodes are drawn)'
-            : dropReasons.fromMissing >= totalDropped * 0.5
-              ? 'fromMissing (edge source not in visible pages)'
-              : `dropped: ${JSON.stringify(dropReasons)}`
-          : undefined;
-      const visibleIdList = visiblePages.map((p) => p.id).slice(0, 10);
-      console.log('[graph] createGraphData', {
-        pagesCount: visiblePages.length,
-        edgesInputCount: edgesArray.length,
-        linksCreated: links.length,
-        droppedTotal: totalDropped,
-        mainDropReason: mainReason,
-        dropReasons: totalDropped > 0 ? dropReasons : undefined,
-        dropSamples: dropSamples.length > 0 ? dropSamples : undefined,
-        edgeFromIdsCount: edgeFromIds.size,
-        overlapPageIds: overlap,
-        noOverlap: visiblePages.length > 0 && edgeFromIds.size > 0 && overlap === 0 ? 'BUG: edges from_page_id do not match any visible page (wrong source?)' : undefined,
-        visiblePageIdsSample: visibleIdList.map((id) => id?.slice(0, 8)),
-        edgeFromIdsSample: [...edgeFromIds].slice(0, 5).map((id) => id?.slice(0, 8)),
-      });
-    }
+    
   }
 
   return { nodes, links };

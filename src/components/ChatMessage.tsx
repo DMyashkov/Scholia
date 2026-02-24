@@ -365,10 +365,8 @@ function IndexSuggestionCard({
 
   const handleYes = async () => {
     setAdding(key);
-    console.log('[IndexSuggestion] Yes clicked', { url: sp.url, sourceId: sp.sourceId, question: sp.promptedByQuestion });
     try {
       await onAddAndReask(sp.url, sp.sourceId, sp.promptedByQuestion, messageId, scrapedPageDisplay);
-      console.log('[IndexSuggestion] onAddAndReask completed successfully');
       setAdded(true);
     } catch (err) {
       console.error('[IndexSuggestion] onAddAndReask failed:', err);

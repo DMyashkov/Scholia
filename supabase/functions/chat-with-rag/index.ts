@@ -20,13 +20,7 @@ Deno.serve(async (req) => {
     await writer.write(encoder.encode(JSON.stringify(obj) + '\n'));
   };
 
-  const log = (phase: string, detail?: Record<string, unknown>) => {
-    if (detail != null) {
-      console.log('[RAG]', phase, JSON.stringify(detail));
-    } else {
-      console.log('[RAG]', phase);
-    }
-  };
+  const log = (_phase: string, _detail?: Record<string, unknown>) => {};
 
   (async () => {
     try {

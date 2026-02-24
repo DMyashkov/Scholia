@@ -7,7 +7,7 @@ import { useConversationPages, useConversationGraphEdges } from '@/hooks/usePage
 import { useConversationSources } from '@/hooks/useConversationSources';
 import { useAddPageJob } from '@/hooks/useAddPageJob';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
-import type { CrawlJob } from '@/lib/db/types';
+import type { CrawlJob, PageEdge } from '@/lib/db/types';
 import {
   LATEST_MAIN_CRAWL_JOB_BY_SOURCES,
   COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION,
@@ -356,9 +356,9 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   
   const connectedPageIds = useMemo(() => {
     const ids = new Set<string>();
-    graphEdges.forEach((e: any) => {
-      if (e.from_page_id) ids.add(e.from_page_id as string);
-      if ('to_page_id' in e && e.to_page_id) ids.add(e.to_page_id as string);
+    (graphEdges as PageEdge[]).forEach((e) => {
+      if (e.from_page_id) ids.add(e.from_page_id);
+      if (e.to_page_id) ids.add(e.to_page_id);
     });
     return ids;
   }, [graphEdges]);

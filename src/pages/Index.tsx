@@ -153,9 +153,7 @@ const Index = () => {
 
   const handleAddSuggestedPage = useCallback(async (url: string, sourceId: string, questionToReask?: string, messageId?: string, scrapedPageDisplay?: string) => {
     const normalizedUrl = normalizeSourceUrl(url);
-    console.log('[AddSuggestedPage] called', { url: normalizedUrl, sourceId, questionToReask, messageId, scrapedPageDisplay, activeConversationId });
     if (!activeConversationId) {
-      console.warn('[AddSuggestedPage] no activeConversationId, aborting');
       return;
     }
     setAddingPageSourceId(sourceId);

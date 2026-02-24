@@ -129,15 +129,7 @@ export const pageEdgesApi = {
       throw error;
     }
     const rows = data ?? [];
-    if (import.meta.env?.DEV && pageIds.length > 0) {
-      const fromIds = new Set(rows.map((r: { from_page_id: string }) => r.from_page_id));
-      console.log('[page_edges] listGraphEdgesByConversation', {
-        pageIdsCount: pageIds.length,
-        edgesReturned: rows.length,
-        uniqueFromIds: fromIds.size,
-        fromIdSamples: [...fromIds].slice(0, 5).map((id) => id?.slice(0, 8)),
-      });
-    }
+    
     return rows.map((e: Record<string, unknown>) => ({
       ...e,
       source_id: '',

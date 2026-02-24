@@ -17,7 +17,7 @@ Deno.serve(async (req) => {
   try {
     const body = (await req.json()) as { conversationId?: string; sourceId?: string; url?: string };
     const { conversationId, sourceId, url } = body;
-    console.log('[add-page] request', { conversationId, sourceId, url });
+  
 
     if (!conversationId || !sourceId || !url?.trim()) {
       return new Response(
@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (existing) {
-      console.log('[add-page] page already exists', existing.id);
+      
       
       const { data: sourcePages } = await supabase.from('pages').select('id').eq('source_id', sourceId);
       const fromPageIds = (sourcePages ?? []).map((p: { id: string }) => p.id);
@@ -127,7 +127,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log('[add-page] crawl job queued', job.id);
+  
     return new Response(
       JSON.stringify({
         jobId: job.id,

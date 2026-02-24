@@ -207,17 +207,7 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
       };
     })
     .filter((c) => c.slot && c.chunkIds.length > 0);
-  if (claimsRaw.length > 0 || droppedNoValidChunkIds > 0) {
-    console.log(
-      '[RAG] extract-claims',
-      JSON.stringify({
-        rawCount: claimsRaw.length,
-        afterFilter: claims.length,
-        droppedNoValidChunkIds,
-        sampleChunkIds: evidenceChunks.slice(0, 2).map((q) => q.id),
-      }),
-    );
-  }
+  
 
   let suggested_page_index: number | undefined;
   if (next_action === 'expand_corpus' && typeof obj.suggested_page_index === 'number') {

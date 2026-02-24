@@ -164,10 +164,6 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
             query.queryKey[1] === conversationId;
           const doSync = () => {
             const t = Date.now();
-            if (import.meta.env.DEV) {
-              const since = edgesLastSyncRef.current ? t - edgesLastSyncRef.current : 0;
-              console.log('[realtime] graph-edges sync', since ? `${since}ms since last` : 'initial');
-            }
             edgesLastSyncRef.current = t;
             queryClient.invalidateQueries({ predicate: graphEdgesPredicate });
             queryClient.refetchQueries({ predicate: graphEdgesPredicate });

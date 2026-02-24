@@ -88,10 +88,6 @@ export const crawlJobsApi = {
   },
 
   async create(job: CrawlJobInsert) {
-    console.log('[crawl-job] create insert', {
-      sourceId: job.source_id?.slice(0, 8),
-      status: job.status,
-    });
     const { data, error } = await supabase
       .from('crawl_jobs')
       .insert(job)
@@ -102,7 +98,6 @@ export const crawlJobsApi = {
       console.error('[crawl-job] create failed', { error: error.message, code: error.code });
       throw error;
     }
-    console.log('[crawl-job] create success', { jobId: (data as CrawlJob).id?.slice(0, 8) });
     return data as CrawlJob;
   },
 

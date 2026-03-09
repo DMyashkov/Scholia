@@ -20,7 +20,12 @@ function outcomeLabel(tp: ThoughtProcess): string | null {
   const last = tp.steps?.[tp.steps.length - 1];
   const action = last?.nextAction;
   if (action === 'expand_corpus') return 'Suggested a page';
-  if (action === 'answer') return 'Answered from evidence';
+  if (action === 'answer') {
+    if (tp.completeness != null && tp.completeness === 0) {
+      return 'No evidence found in current pages';
+    }
+    return 'Answered from evidence';
+  }
   if (action === 'retrieve') return 'Searched again';
   if (action === 'clarify') return 'Asked for clarification';
   return null;

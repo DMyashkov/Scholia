@@ -406,7 +406,6 @@ async function getIndexedPageUrls(conversationId: string): Promise<Set<string>> 
 }
 
 async function embedDiscoveredLinks(conversationId: string, apiKey: string, crawlJobId?: string): Promise<number> {
-  console.log('[indexer] embedDiscoveredLinks ENTRY', { conversationId: conversationId.slice(0, 8) });
   const indexedUrls = await getIndexedPageUrls(conversationId);
   const { data: sources } = await supabase
     .from('sources')
@@ -414,53 +413,26 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
     .eq('conversation_id', conversationId);
   const sourceIds = (sources ?? []).map((s) => s.id);
   const sourceModeMap = new Map((sources ?? []).map((s) => [s.id, (s as { suggestion_mode?: string }).suggestion_mode]));
-  if (sourceIds.length === 0) {
-    console.log('[indexer] embedDiscoveredLinks EARLY_RETURN', { reason: 'sourceIds.length=0' });
-    return 0;
-  }
+  if (sourceIds.length === 0) return 0;
   const { data: pages } = await supabase
     .from('pages')
     .select('id')
     .in('source_id', sourceIds);
   const pageIds = (pages ?? []).map((p) => p.id);
-  if (pageIds.length === 0) {
-    console.log('[indexer] embedDiscoveredLinks EARLY_RETURN', { reason: 'pageIds.length=0' });
-    return 0;
-  }
+  if (pageIds.length === 0) return 0;
   const { data: edgeRows } = await supabase
     .from('page_edges')
     .select('id, to_url, from_page_id')
     .in('from_page_id', pageIds);
   const edgeIds = (edgeRows ?? []).map((r) => r.id);
-  if (edgeIds.length === 0) {
-    console.log('[indexer] embedDiscoveredLinks EARLY_RETURN', {
-      reason: 'no page_edges for conversation pages',
-      pageIdsCount: pageIds.length,
-      note: 'Shallow crawl inserts page_edges but no encoded_discovered; so next query returns 0 rows anyway',
-    });
-    return 0;
-  }
+  if (edgeIds.length === 0) return 0;
   const { data: links, error: fetchError } = await supabase
     .from('encoded_discovered')
     .select('id, snippet, page_edge_id, owner_id')
     .in('page_edge_id', edgeIds)
     .is('embedding', null);
 
-  console.log('[indexer] embedDiscoveredLinks counts', {
-    pageIdsCount: pageIds.length,
-    edgeIdsCount: edgeIds.length,
-    encoded_discovered_null_embedding_count: links?.length ?? 0,
-    fetchError: fetchError?.message ?? null,
-  });
-
   if (fetchError || !links?.length) {
-    if (!links?.length && !fetchError) {
-      console.log('[indexer] embedDiscoveredLinks EARLY_RETURN', {
-        reason: 'no encoded_discovered rows with null embedding for these edges',
-        edgeIdsCount: edgeIds.length,
-        note: 'Expected for shallow/static: we only insert encoded_discovered for dynamic sources during crawl',
-      });
-    }
     return 0;
   }
 

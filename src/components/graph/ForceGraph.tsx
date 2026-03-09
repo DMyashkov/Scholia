@@ -429,15 +429,6 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
         </button>
       </div>
       
-      {}
-      {pages.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
-          <div className="text-center px-4">
-            <p className="text-sm">No sources added yet</p>
-            <p className="text-xs mt-1 opacity-70">Add a source to view the graph</p>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

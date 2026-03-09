@@ -48,8 +48,6 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const { data: addPageJob } = useAddPageJob(conversationId ?? null, addingPageSourceId ?? null);
 
   const { data: pages = [], isLoading: pagesLoading, error: pagesError } = useConversationPages(conversationId);
-
-  
   const prevAddingRef = useRef<string | null>(null);
   const addPageInitialCountRef = useRef<number>(0);
   if (addingPageSourceId) {
@@ -141,16 +139,13 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     crawlJobsData.forEach(job => map.set(job.source_id, job));
     return map;
   }, [crawlJobsData]);
-  
-  
   const sourcesWithStatus = useMemo(() => {
     return sources.map(source => {
       const sourcePages = pages.filter(p => p.source_id === source.id);
       const crawlJob = crawlJobMap.get(source.id);
-      
-      
-      
       let status: Source['status'] = 'crawling';
+      // "pagesIndexed" should reflect pages the user can actually see (scraped pages),
+      // not ahead-of-time job counters, to avoid 1/5 vs 0/5 mismatches.
       let pagesIndexed = sourcePages.length;
       let totalPages = sourcePages.length;
       
@@ -164,10 +159,8 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
         } else if (crawlJob.status === 'completed') {
           status = 'ready';
         }
-        
-        
         const jobIndexed = (crawlJob as CrawlJob).indexed_count ?? 0;
-        pagesIndexed = Math.max(jobIndexed, sourcePages.length);
+        pagesIndexed = sourcePages.length;
         
         
         const maxPagesForDepth = source.crawlDepth === 'dynamic' || source.crawlDepth === 'singular' ? 1 : source.crawlDepth === 'shallow' ? 5 : source.crawlDepth === 'medium' ? 15 : 35;
@@ -278,10 +271,6 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const progressSources = isAddingPageFlow && addingPageSourceId
     ? sourcesWithStatus.filter(s => s.id === addingPageSourceId)
     : displaySources;
-
-  
-  
-  
   let displayPages = (activeSourceId
     ? pages.filter(p => p.source_id === activeSourceId)
     : pages
@@ -305,7 +294,6 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     ];
   }
 
-  
   if (displaySources.length > 0) {
     const startingSource = activeSource ?? displaySources[0];
     const startingUrl = startingSource.initial_url;
@@ -333,11 +321,10 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
       const bIsStart = bUrl === normalizedStartingUrl;
       if (aIsStart && !bIsStart) return -1;
       if (!aIsStart && bIsStart) return 1;
-      return 0; // Keep original order for others
+      return 0;
     });
   }
   
-  // If crawling but no pages yet, show the starting page immediately as a placeholder
   if (isCrawling && displayPages.length === 0 && displaySources.length > 0) {
     const startingSource = activeSource ?? displaySources[0];
     const sourceUrl = startingSource.initial_url;
@@ -351,22 +338,18 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
       url: sourceUrl,
     }];
   }
-  
-  
-  
-  const connectedPageIds = useMemo(() => {
-    const ids = new Set<string>();
-    (graphEdges as PageEdge[]).forEach((e) => {
-      if (e.from_page_id) ids.add(e.from_page_id);
-      if (e.to_page_id) ids.add(e.to_page_id);
-    });
-    return ids;
-  }, [graphEdges]);
   const displayPagesForGraph = useMemo(
-    () => displayPages.filter((p) => connectedPageIds.has(p.id)),
-    [displayPages, connectedPageIds]
+    () => displayPages.filter((p) => p.status === 'indexed'),
+    [displayPages]
   );
+
+  const scrapedPagesCount = displayPagesForGraph.length;
   const connectedPagesCount = displayPagesForGraph.length;
+
+  // Only show the entire bottom-left crawl/graph view once pages and edges are fully loaded
+  // and we have at least one real scraped page. This avoids partial UI where header/stats
+  // appear before the graph is ready.
+  const graphSectionReady = !pagesLoading && !edgesLoading && displayPagesForGraph.length > 0;
   const displayPagesIndexed = Math.max(
     displayPages.length,
     displaySources.reduce((sum, s) => {
@@ -382,167 +365,165 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
 
   return (
     <div className={cn('border-t border-border bg-card/50', className)}>
-      {}
-      <div className="p-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-            {activeDisplayName ?? 'All Sources'}
-          </span>
-          {isCrawling && (
-            <span className="text-[10px] text-primary flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              {statusLabel}
-            </span>
-          )}
-        </div>
-        
-        {}
-        {sources.length > 1 && (
-          <div className="flex gap-1 flex-wrap items-center">
-            <button
-              onClick={() => setActiveSourceId(null)}
-              className={cn(
-                'px-2 py-1 text-[10px] rounded-full box-border h-6 shrink-0',
-                !activeSourceId 
-                  ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-inset' 
-                  : 'bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary/70'
+      {graphSectionReady && (
+        <>
+          <div className="p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                {activeDisplayName ?? 'All Sources'}
+              </span>
+              {isCrawling && (
+                <span className="text-[10px] text-primary flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                  {statusLabel}
+                </span>
               )}
-            >
-              All
-            </button>
-            {sources.map(source => {
-              const label = getSourceDisplayLabel(source);
-              const initial = label.charAt(0).toUpperCase() || '?';
-              const useCircleMode = sources.length >= 6;
-              return (
+            </div>
+            
+            {sources.length > 1 && (
+              <div className="flex gap-1 flex-wrap items-center">
                 <button
-                  key={source.id}
-                  onClick={() => setActiveSourceId(source.id)}
-                  title={label}
+                  onClick={() => setActiveSourceId(null)}
                   className={cn(
-                    'px-2 py-1 text-[10px] rounded-full box-border h-6 shrink-0 min-w-0 flex items-center justify-center',
-                    activeSourceId === source.id 
+                    'px-2 py-1 text-[10px] rounded-full box-border h-6 shrink-0',
+                    !activeSourceId 
                       ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-inset' 
-                      : 'bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary/70',
-                    useCircleMode ? 'w-6 px-0' : 'max-w-[180px] truncate'
+                      : 'bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary/70'
                   )}
                 >
-                  {useCircleMode ? initial : label}
+                  All
                 </button>
-              );
-            })}
-          </div>
-        )}
-        
-        {}
-        <TooltipProvider>
-          <div className={cn('grid gap-2', isDynamic ? 'grid-cols-3' : 'grid-cols-2')}>
-            <StatItem
-              label="Discovered"
-              value={totalDiscovered}
-              highlight={isCrawling && !activeSource}
-              tooltip="Links found during crawl; for dynamic sources, grows when you add suggested pages (e.g. 27→34)."
-            />
-            <StatItem
-              label="Scraped"
-              value={isAddingPageFlow ? Math.min(progressSources.reduce((s, x) => s + x.pagesIndexed, 0), connectedPagesCount) : connectedPagesCount}
-              highlight={isCrawling && !activeSource}
-              tooltip="Pages scraped and in the graph with searchable content (shown when edges are loaded)."
-            />
-            {isDynamic && (
-              <StatItem
-                label="Encoded Discovered"
-                value={encDiscoveredTotal > 0 ? Math.max(encDiscoveredDone, totalEncodedDiscovered) : totalEncodedDiscovered}
-                highlight={isAddPageResponding || encodingPhase === 'encoding-discovered' || ((isIndexingFromJob || isAddPageEncoding) && encDiscoveredTotal > 0)}
-                tooltip="Links with embedded context; used for AI suggestions when adding pages."
+                {sources.map(source => {
+                  const label = getSourceDisplayLabel(source);
+                  const initial = label.charAt(0).toUpperCase() || '?';
+                  const useCircleMode = sources.length >= 6;
+                  return (
+                    <button
+                      key={source.id}
+                      onClick={() => setActiveSourceId(source.id)}
+                      title={label}
+                      className={cn(
+                        'px-2 py-1 text-[10px] rounded-full box-border h-6 shrink-0 min-w-0 flex items-center justify-center',
+                        activeSourceId === source.id 
+                          ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-inset' 
+                          : 'bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary/70',
+                        useCircleMode ? 'w-6 px-0' : 'max-w-[180px] truncate'
+                      )}
+                    >
+                      {useCircleMode ? initial : label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <TooltipProvider>
+              <div className={cn('grid gap-2', isDynamic ? 'grid-cols-3' : 'grid-cols-2')}>
+                <StatItem
+                  label="Discovered"
+                  value={totalDiscovered}
+                  highlight={isCrawling && !activeSource}
+                  tooltip="Links found during crawl; for dynamic sources, grows when you add suggested pages (e.g. 27→34)."
+                />
+                <StatItem
+                  label="Scraped"
+                  value={scrapedPagesCount}
+                  highlight={isCrawling && !activeSource}
+                  tooltip="Pages scraped and in the graph with searchable content (shown when edges are loaded)."
+                />
+                {isDynamic && (
+                  <StatItem
+                    label="Encoded Discovered"
+                    value={encDiscoveredTotal > 0 ? Math.max(encDiscoveredDone, totalEncodedDiscovered) : totalEncodedDiscovered}
+                    highlight={isAddPageResponding || encodingPhase === 'encoding-discovered' || ((isIndexingFromJob || isAddPageEncoding) && encDiscoveredTotal > 0)}
+                    tooltip="Links with embedded context; used for AI suggestions when adding pages."
+                  />
+                )}
+              </div>
+            </TooltipProvider>
+
+            {((isCrawling && !activeSource) || isAddingPageFlow) && (progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1) > 0 ? (
+              <EncodingProgressBar
+                crawlDone={scrapedPagesCount}
+                crawlTotal={progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1}
+                chunksDone={encChunksDone}
+                chunksTotal={encChunksTotal}
+                discoveredDone={encDiscoveredTotal > 0 ? encDiscoveredDone : encDiscoveredDone}
+                discoveredTotal={encDiscoveredTotal}
+                phase={encodingPhase}
+                isDynamic={isDynamic}
+                isCrawling={(isCrawling || isAddingPageFlow) && !isIndexingFromJob && !isAddPageEncoding}
+                isResponding={isAddPageResponding}
               />
-            )}
+            ) : null}
           </div>
-        </TooltipProvider>
-        
-        {}
-        {((isCrawling && !activeSource) || isAddingPageFlow) && (progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1) > 0 ? (
-          <EncodingProgressBar
-            crawlDone={isAddingPageFlow ? Math.min(progressSources.reduce((s, x) => s + x.pagesIndexed, 0), connectedPagesCount) : connectedPagesCount}
-            crawlTotal={progressSources.reduce((sum, s) => sum + s.totalPages, 0) || 1}
-            chunksDone={encChunksDone}
-            chunksTotal={encChunksTotal}
-            discoveredDone={encDiscoveredTotal > 0 ? encDiscoveredDone : encDiscoveredDone}
-            discoveredTotal={encDiscoveredTotal}
-            phase={encodingPhase}
-            isDynamic={isDynamic}
-            isCrawling={(isCrawling || isAddingPageFlow) && !isIndexingFromJob && !isAddPageEncoding}
-            isResponding={isAddPageResponding}
-          />
-        ) : null}
-      </div>
-      
-      {}
-      <div className="px-3 pb-3">
-        <ForceGraph 
-          pages={displayPagesForGraph}
-          pagesIndexed={connectedPagesCount}
-          domain={activeDomain}
-          edges={graphEdges}
-        />
-      </div>
-      
-      {}
-      <div className="px-3 pb-3 space-y-1">
-        {sourcesWithStatus.map(source => (
-          <button 
-            key={source.id}
-            onClick={() => setActiveSourceId(activeSourceId === source.id ? null : source.id)}
-            className={cn(
-              "w-full flex items-center gap-2 text-[11px] px-2 py-1.5 rounded text-left box-border h-8",
-              activeSourceId === source.id 
-                ? "bg-primary/10 ring-1 ring-inset ring-primary/30" 
-                : "bg-background/30 hover:bg-background/50"
-            )}
-          >
-            <span 
-              className={cn(
-                'w-1.5 h-1.5 rounded-full shrink-0',
-                source.status === 'ready' && 'bg-green-500',
-                source.status === 'crawling' && 'bg-primary animate-pulse',
-                source.status === 'error' && 'bg-destructive',
-              )}
+
+          <div className="px-3 pb-3">
+            <ForceGraph 
+              pages={displayPagesForGraph}
+              pagesIndexed={connectedPagesCount}
+              domain={activeDomain}
+              edges={graphEdges}
             />
-            <span className={cn(
-              "truncate",
-              activeSourceId === source.id ? "text-foreground" : "text-muted-foreground"
-            )}>
-              {getSourceDisplayLabel(source)}
-            </span>
-            {source.crawlDepth === 'dynamic' && (
-              <span className="shrink-0 inline-flex items-center gap-1.5">
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-primary/15 text-primary border border-primary/20">
-                  <Zap className="h-2.5 w-2.5" />
-                  Dynamic
+          </div>
+
+          <div className="px-3 pb-3 space-y-1">
+            {sourcesWithStatus.map(source => (
+              <button 
+                key={source.id}
+                onClick={() => setActiveSourceId(activeSourceId === source.id ? null : source.id)}
+                className={cn(
+                  "w-full flex items-center gap-2 text-[11px] px-2 py-1.5 rounded text-left box-border h-8",
+                  activeSourceId === source.id 
+                    ? "bg-primary/10 ring-1 ring-inset ring-primary/30" 
+                    : "bg-background/30 hover:bg-background/50"
+                )}
+              >
+                <span 
+                  className={cn(
+                    'w-1.5 h-1.5 rounded-full shrink-0',
+                    source.status === 'ready' && 'bg-green-500',
+                    source.status === 'crawling' && 'bg-primary animate-pulse',
+                    source.status === 'error' && 'bg-destructive',
+                  )}
+                />
+                <span className={cn(
+                  "truncate",
+                  activeSourceId === source.id ? "text-foreground" : "text-muted-foreground"
+                )}>
+                  {getSourceDisplayLabel(source)}
                 </span>
-                {source.suggestionMode === 'dive' ? (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20" title="Dive - checks each linked page">
-                    <Anchor className="h-2.5 w-2.5" />
-                    Dive
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/20" title="Surface - uses link context">
-                    <Waves className="h-2.5 w-2.5" />
-                    Surface
+                {source.crawlDepth === 'dynamic' && (
+                  <span className="shrink-0 inline-flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-primary/15 text-primary border border-primary/20">
+                      <Zap className="h-2.5 w-2.5" />
+                      Dynamic
+                    </span>
+                    {source.suggestionMode === 'dive' ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20" title="Dive - checks each linked page">
+                        <Anchor className="h-2.5 w-2.5" />
+                        Dive
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/20" title="Surface - uses link context">
+                        <Waves className="h-2.5 w-2.5" />
+                        Surface
+                      </span>
+                    )}
                   </span>
                 )}
-              </span>
-            )}
-            <span 
-              className="ml-auto text-[10px] tabular-nums"
-              title={source.status === 'ready' && source.pagesIndexed < source.totalPages 
-                ? 'No more linked pages found at depth ≤2' : undefined}
-            >
-              {source.pagesIndexed}/{source.totalPages}
-            </span>
-          </button>
-        ))}
-      </div>
+                <span 
+                  className="ml-auto text-[10px] tabular-nums"
+                  title={source.status === 'ready' && source.pagesIndexed < source.totalPages 
+                    ? 'No more linked pages found at depth ≤2' : undefined}
+                >
+                  {source.pagesIndexed}/{source.totalPages}
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 };

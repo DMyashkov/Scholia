@@ -112,6 +112,7 @@ async function indexChunkSpecsForRag(
   if (conversationId) {
     discoveredEmbedded = await embedDiscoveredLinks(conversationId, apiKey, crawlJobId);
   }
+
   return { chunksCreated: inserted + discoveredEmbedded };
 }
 

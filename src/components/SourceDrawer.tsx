@@ -102,8 +102,6 @@ export const SourceDrawer = ({
   const [isRecrawling, setIsRecrawling] = useState(false);
   const displayName = source ? getSourceDisplayLabel(source) : '';
   const initial = displayName.charAt(0).toUpperCase() || '';
-
-  // Use allSourceIds for cache sharing with ChatArea/SidebarCrawlPanel; fallback to [source.id]
   const sourceIds = useMemo(
     () => (allSourceIds?.length ? allSourceIds : source?.id ? [source.id] : []),
     [allSourceIds, source?.id]
@@ -308,14 +306,8 @@ export const SourceDrawer = ({
 
 
   const pagesIndexed = useMemo(() => {
-    if (crawlJob) {
-      const job = crawlJob as CrawlJob;
-      const fromJob = job.indexed_count ?? sourcePages.length;
-      
-      return Math.max(fromJob, sourcePages.length);
-    }
     return sourcePages.length;
-  }, [crawlJob, sourcePages.length]);
+  }, [sourcePages.length]);
   
   const pagesDiscovered = useMemo(() => {
     const jobCount = crawlJob ? ((crawlJob as CrawlJob).discovered_count ?? 0) : 0;
@@ -363,18 +355,11 @@ export const SourceDrawer = ({
     return base;
   }, [stablePagesForGraph, seedPageFromConversation]);
 
-  const connectedPageIds = useMemo(() => {
-    const ids = new Set<string>();
-    (graphEdges as PageEdge[]).forEach((e) => {
-      if (e.from_page_id) ids.add(e.from_page_id);
-      if (e.to_page_id) ids.add(e.to_page_id);
-    });
-    return ids;
-  }, [graphEdges]);
   const displayPagesForGraph = useMemo(
-    () => displayPages.filter((p) => connectedPageIds.has(p.id)),
-    [displayPages, connectedPageIds]
+    () => displayPages.filter((p) => p.status === 'indexed'),
+    [displayPages]
   );
+
   const connectedPagesCount = displayPagesForGraph.length;
 
   return (

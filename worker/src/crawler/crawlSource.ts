@@ -81,12 +81,6 @@ async function crawlSourceWithConversationId(
   const seedNorm = seedUrls[0] ? normalizeUrlForCrawl(seedUrls[0]) : '';
   const seedInSet = seedNorm && existingInConversation.has(seedNorm);
   const seedPageId = seedNorm ? existingPageIdByUrl.get(seedNorm) ?? null : null;
-  console.log('[crawl] existing URLs in conversation (will skip)', existingInConversation.size, {
-    seedUrlNorm: seedNorm.slice(-70),
-    seedInSet,
-    seedPageId: seedPageId?.slice(0, 8) ?? null,
-    sampleExisting: Array.from(existingInConversation).slice(0, 3).map((u) => u.slice(-50)),
-  });
 
   let sourceTitleUpdated = false;
 
@@ -111,14 +105,6 @@ async function crawlSourceWithConversationId(
   const sourceShort = new URL(firstSeedUrl).pathname?.replace(/^\/wiki\//, '') || firstSeedUrl.slice(0, 40);
   const crawlDepth = (source as { crawl_depth?: string }).crawl_depth ?? 'shallow';
   const isDynamic = crawlDepth === 'dynamic';
-  console.log('[crawl] PHASE=CRAWL started', {
-    sourceShort,
-    maxPages,
-    crawlDepth,
-    isDynamic,
-    willInsertEncodedDiscovered: isDynamic,
-    note: 'Shallow/static: only page_edges inserted during crawl; encoded_discovered is DYNAMIC-only',
-  });
 
   while (queue.length > 0 && newPagesCount < maxPages) {
     const { data: sourceCheck } = await supabase.from('sources').select('id').eq('id', source.id).single();
@@ -199,18 +185,6 @@ async function crawlSourceWithConversationId(
         }
       }
 
-      const urlTail = normalizedUrl.replace(/^https?:\/\//, '').slice(-55);
-      console.log('[crawl] [D] dequeue', {
-        visitedCount: visited.size,
-        newPagesCount,
-        urlTail,
-        inserted,
-        pageId: page?.id?.slice(0, 8) ?? null,
-        fromPageId: fromPageId?.slice(0, 8) ?? null,
-        inExistingSet: existingInConversation.has(urlNormForLookup),
-        edgesFromThisPage: edgesToInsert.length,
-      });
-
       if (edgesToInsert.length > 0) {
         const batchSize = 50;
         for (let i = 0; i < edgesToInsert.length; i += batchSize) {
@@ -225,13 +199,6 @@ async function crawlSourceWithConversationId(
             await new Promise((resolve) => setTimeout(resolve, 10));
           }
         }
-        const fromId = edgesToInsert[0]?.from_page_id?.slice(0, 8) ?? '?';
-        console.log('[crawl] PHASE=CRAWL page_edges upserted', {
-          pageNum: visited.size,
-          pageId: fromId,
-          edgesThisPage: edgesToInsert.length,
-          batches: Math.ceil(edgesToInsert.length / batchSize),
-        });
       }
 
       if (page) {
@@ -250,8 +217,6 @@ async function crawlSourceWithConversationId(
             .select('id');
           if (backfillErr) {
             console.warn('[crawl] page_edges to_page_id backfill failed', { error: backfillErr.message, url: normalizedUrl.slice(0, 50) });
-          } else if (updatedEdges?.length) {
-            console.log('[crawl] PHASE=CRAWL to_page_id backfilled', { count: updatedEdges.length, pageId: page.id.slice(0, 8) });
           }
         }
       }
@@ -291,20 +256,9 @@ async function crawlSourceWithConversationId(
             });
             if (encError) {
               console.warn('[crawl] encoded_discovered insert failed', encError.message);
-            } else {
-              console.log('[crawl] PHASE=CRAWL encoded_discovered inserted (dynamic only)', {
-                pageId: page.id.slice(0, 8),
-                rows: encodedToInsert.length,
-              });
             }
           }
         }
-      } else if (page && edgesToInsert.length > 0 && !isDynamic) {
-        console.log('[crawl] PHASE=CRAWL encoded_discovered SKIP (not dynamic)', {
-          pageId: page.id.slice(0, 8),
-          edgesThisPage: edgesToInsert.length,
-          note: 'Only dynamic sources get encoded_discovered during crawl',
-        });
       }
 
       await supabase
@@ -325,16 +279,6 @@ async function crawlSourceWithConversationId(
     }
   }
 
-  console.log('[crawl] PHASE=CRAWL done', {
-    visitedPages: visited.size,
-    discoveredUrls: discovered.size,
-    maxPages,
-    crawlDepth: (source as { crawl_depth?: string }).crawl_depth,
-  });
-  console.log('[crawl] PHASE=INDEXING starting (crawl all pages done; now chunk+embed pages only; encoding_discovered only if dynamic and has rows)', {
-    sourceId: source.id.slice(0, 8),
-    jobId: job.id.slice(0, 8),
-  });
   const indexingUpdate: Record<string, unknown> = { status: 'indexing', updated_at: new Date().toISOString() };
   if (source.crawl_depth === 'dynamic') {
     const { data: pages } = await supabase.from('pages').select('id').eq('source_id', source.id);
@@ -358,14 +302,7 @@ async function crawlSourceWithConversationId(
   await updateCrawlJob(job.id, indexingUpdate);
 
   try {
-    console.log('[crawl] PHASE=INDEXING calling indexSourceForRag', {
-      sourceId: source.id.slice(0, 8),
-      jobId: job.id.slice(0, 8),
-      conversationId: conversationId?.slice(0, 8),
-      note: 'Indexer will: 1) fetch this source pages 2) chunk+embed 3) then embedDiscoveredLinks(conversation) - for shallow that finds 0 encoded_discovered',
-    });
     await indexSourceForRag(source.id, job.id, conversationId);
-    console.log('[crawl] PHASE=INDEXING indexSourceForRag returned');
   } catch (err) {
     console.warn('[crawl] RAG indexing failed', err);
   }
@@ -384,8 +321,6 @@ async function crawlSourceWithConversationId(
       updated_at: new Date().toISOString(),
     })
     .eq('id', job.id);
-
-  console.log('crawl: done', sourceShort, 'newPages=', newPagesCount, 'visited=', visited.size, 'totalSourcePages=', totalPagesForSource, queue.length === 0 ? '(queue empty)' : '(hit max)');
 
   const { data: insertedPages, error: verifyError } = await supabase
     .from('pages')

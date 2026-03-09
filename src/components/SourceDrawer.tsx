@@ -360,6 +360,12 @@ export const SourceDrawer = ({
     [displayPages]
   );
 
+  const stableEdgesRef = useRef<PageEdge[]>([]);
+  if (graphEdges.length > 0) {
+    stableEdgesRef.current = graphEdges as PageEdge[];
+  }
+  const edgesForGraph = stableEdgesRef.current;
+
   const connectedPagesCount = displayPagesForGraph.length;
 
   return (
@@ -422,7 +428,7 @@ export const SourceDrawer = ({
                       pages={displayPagesForGraph}
                       pagesIndexed={connectedPagesCount}
                       domain={source.domain}
-                      edges={graphEdges}
+                      edges={edgesForGraph}
                       className="h-[200px]"
                     />
                     {source.crawlDepth === 'dynamic' && (

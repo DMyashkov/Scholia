@@ -343,13 +343,21 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     [displayPages]
   );
 
+  const stableEdgesRef = useRef<PageEdge[]>([]);
+  if (graphEdges.length > 0) {
+    stableEdgesRef.current = graphEdges as PageEdge[];
+  }
+  const edgesForGraph = stableEdgesRef.current;
+
   const scrapedPagesCount = displayPagesForGraph.length;
   const connectedPagesCount = displayPagesForGraph.length;
 
-  // Only show the entire bottom-left crawl/graph view once pages and edges are fully loaded
-  // and we have at least one real scraped page. This avoids partial UI where header/stats
-  // appear before the graph is ready.
-  const graphSectionReady = !pagesLoading && !edgesLoading && displayPagesForGraph.length > 0;
+  const [graphSectionMounted, setGraphSectionMounted] = useState(false);
+  useEffect(() => {
+    if (!graphSectionMounted && !pagesLoading && !edgesLoading && displayPagesForGraph.length > 0) {
+      setGraphSectionMounted(true);
+    }
+  }, [graphSectionMounted, pagesLoading, edgesLoading, displayPagesForGraph.length]);
   const displayPagesIndexed = Math.max(
     displayPages.length,
     displaySources.reduce((sum, s) => {
@@ -365,7 +373,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
 
   return (
     <div className={cn('border-t border-border bg-card/50', className)}>
-      {graphSectionReady && (
+      {graphSectionMounted && (
         <>
           <div className="p-3 space-y-2">
             <div className="flex items-center justify-between">
@@ -463,7 +471,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
               pages={displayPagesForGraph}
               pagesIndexed={connectedPagesCount}
               domain={activeDomain}
-              edges={graphEdges}
+              edges={edgesForGraph}
             />
           </div>
 

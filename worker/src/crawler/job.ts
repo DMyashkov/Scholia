@@ -1,8 +1,6 @@
 import { supabase } from '../db';
 import type { CrawlJob } from '../types';
 
-let _noQueuedLogCounter = 0;
-
 export async function updateJobStatus(
   jobId: string,
   status: CrawlJob['status'],
@@ -73,13 +71,8 @@ export async function claimJob(): Promise<CrawlJob | null> {
   }
 
   if (!jobs?.length) {
-    _noQueuedLogCounter++;
-    if (_noQueuedLogCounter <= 2 || _noQueuedLogCounter % 12 === 0) {
-      // intentionally silent (used only for dev logging before)
-    }
     return null;
   }
-  _noQueuedLogCounter = 0;
 
   const job = jobs[0];
   const now = new Date().toISOString();

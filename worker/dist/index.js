@@ -1,7 +1,7 @@
 import { supabase } from './db';
-import { claimJob, processCrawlJob } from './crawler';
+import { claimJob, processCrawlJob } from './crawler/index.js';
 import { processAddPageJob } from './addPageProcessor';
-const FALLBACK_POLL_MS = parseInt(process.env.CRAWL_FALLBACK_POLL_MS || '60000', 10); // 60s – catch missed Realtime, stuck jobs
+const FALLBACK_POLL_MS = parseInt(process.env.CRAWL_FALLBACK_POLL_MS || '60000', 10);
 const MAX_CONCURRENT_JOBS = parseInt(process.env.MAX_CONCURRENT_JOBS || '3', 10);
 const activeJobs = new Set();
 let wakeResolver = null;
@@ -14,7 +14,6 @@ const wake = () => {
 };
 async function main() {
     console.log('[worker] Started, using Realtime for job discovery (fallback poll every', FALLBACK_POLL_MS / 1000, 's)');
-    // Subscribe to new crawl jobs – wake immediately when a queued job appears
     supabase
         .channel('worker-crawl-jobs')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'crawl_jobs' }, (payload) => {
@@ -73,7 +72,7 @@ async function main() {
                 processor
                     .then(() => {
                     activeJobs.delete(job.id);
-                    wake(); // Free slot – try to claim next job
+                    wake();
                 })
                     .catch((error) => {
                     activeJobs.delete(job.id);
@@ -81,7 +80,6 @@ async function main() {
                     console.error(`❌ Job ${job.id.substring(0, 8)}... failed:`, error);
                 });
             }
-            // At capacity – wait for a slot before checking again
             scheduleFallback();
             await wakePromise();
         }

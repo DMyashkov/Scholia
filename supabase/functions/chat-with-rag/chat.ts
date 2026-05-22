@@ -60,7 +60,6 @@ Citation rules:
         raw = JSON.stringify({ content: inner.content, quotes: inner.quotes ?? [], title: inner.title });
       }
     } catch {
-      /* no-op */
     }
   }
   const parsed = JSON.parse(raw) as ChatResponse & { title?: string };
@@ -88,7 +87,6 @@ Citation rules:
     resolved.sort((a, b) => (a.ref ?? 999) - (b.ref ?? 999));
   }
   parsed.quotes = resolved.map(({ snippet, pageId }) => ({ snippet, pageId }));
-  // Only append missing refs when model cited zero—otherwise appending worsens placement.
   if (resolved.length > 0 && parsed.content) {
     const refsInContent = new Set<number>();
     for (const m of parsed.content.matchAll(/\[(\d+)\]/g)) refsInContent.add(parseInt(m[1], 10));

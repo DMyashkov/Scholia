@@ -6,7 +6,7 @@ import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
 import { supabase } from './db';
 import { indexSinglePageForRag, embedDiscoveredLinksForPage } from './indexer';
-import { extractLinks, extractLinksWithContext } from './crawler';
+import { extractLinks, extractLinksWithContext } from './crawler/index.js';
 import {
   CRAWLER_USER_AGENT,
   DEFAULT_PAGE_TITLE,

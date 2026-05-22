@@ -45,8 +45,22 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
     const discovered = new Set();
     const queue = [...seedUrls];
     seedUrls.forEach((u) => discovered.add(u));
-    /** Only count newly inserted pages toward maxPages so depth n always adds n new pages. */
     let newPagesCount = 0;
+    const existingInConversation = new Set();
+    const existingPageIdByUrl = new Map();
+    const { data: convSources } = await supabase.from('sources').select('id').eq('conversation_id', conversationId);
+    const convSourceIds = (convSources ?? []).map((s) => s.id);
+    if (convSourceIds.length > 0) {
+        const { data: existingPages } = await supabase.from('pages').select('id, url').in('source_id', convSourceIds);
+        (existingPages ?? []).forEach((p) => {
+            const norm = normalizeUrlForCrawl(p.url);
+            existingInConversation.add(norm);
+            existingPageIdByUrl.set(norm, p.id);
+        });
+    }
+    const seedNorm = seedUrls[0] ? normalizeUrlForCrawl(seedUrls[0]) : '';
+    const seedInSet = seedNorm && existingInConversation.has(seedNorm);
+    const seedPageId = seedNorm ? existingPageIdByUrl.get(seedNorm) ?? null : null;
     let sourceTitleUpdated = false;
     const firstSeedUrl = seedUrls[0];
     let robotsParser = null;
@@ -68,14 +82,6 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
     const sourceShort = new URL(firstSeedUrl).pathname?.replace(/^\/wiki\//, '') || firstSeedUrl.slice(0, 40);
     const crawlDepth = source.crawl_depth ?? 'shallow';
     const isDynamic = crawlDepth === 'dynamic';
-    console.log('[crawl] PHASE=CRAWL started', {
-        sourceShort,
-        maxPages,
-        crawlDepth,
-        isDynamic,
-        willInsertEncodedDiscovered: isDynamic,
-        note: 'Shallow/static: only page_edges inserted during crawl; encoded_discovered is DYNAMIC-only',
-    });
     while (queue.length > 0 && newPagesCount < maxPages) {
         const { data: sourceCheck } = await supabase.from('sources').select('id').eq('id', source.id).single();
         if (!sourceCheck) {
@@ -92,37 +98,38 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
             urlObj.pathname = urlObj.pathname.slice(0, -1);
         }
         const normalizedUrl = urlObj.toString();
+        const urlNormForLookup = normalizeUrlForCrawl(normalizedUrl);
         if (robotsParser && !robotsParser.isAllowed(normalizedUrl, 'ScholiaCrawler')) {
             continue;
         }
         try {
             if (!conversationId)
                 throw new Error(`conversationId is null before calling crawlPage!`);
-            const result = await crawlPage(normalizedUrl, source, conversationId);
+            const result = await crawlPage(normalizedUrl, source, conversationId, existingInConversation);
             if (!result) {
                 visited.add(normalizedUrl);
                 continue;
             }
             const { page, html, inserted } = result;
             visited.add(normalizedUrl);
-            if (inserted)
+            if (inserted && page) {
                 newPagesCount++;
-            if (!sourceTitleUpdated && page.title) {
+                const norm = normalizeUrlForCrawl(normalizedUrl);
+                existingInConversation.add(norm);
+                existingPageIdByUrl.set(norm, page.id);
+            }
+            const fromPageId = page?.id ?? existingPageIdByUrl.get(urlNormForLookup) ?? null;
+            if (page && !sourceTitleUpdated && page.title) {
                 const label = page.title.trim().substring(0, 100);
                 if (label) {
-                    try {
-                        const { error } = await supabase
-                            .from('sources')
-                            .update({ source_label: label })
-                            .eq('id', source.id);
-                        if (!error) {
-                            source.source_label = label;
-                        }
-                        sourceTitleUpdated = true;
+                    const { error } = await supabase
+                        .from('sources')
+                        .update({ source_label: label })
+                        .eq('id', source.id);
+                    if (!error) {
+                        source.source_label = label;
                     }
-                    catch {
-                        /* ignore */
-                    }
+                    sourceTitleUpdated = true;
                 }
             }
             const isDynamic = source.crawl_depth === 'dynamic';
@@ -132,14 +139,16 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
             const edgesToInsert = [];
             const linksToProcess = isDynamic ? links.slice(0, MAX_LINKS_PER_PAGE_DYNAMIC) : links;
             for (const link of linksToProcess) {
-                edgesToInsert.push({
-                    from_page_id: page.id,
-                    to_url: link,
-                    owner_id: source.owner_id,
-                });
                 if (!discovered.has(link) && !visited.has(link)) {
                     discovered.add(link);
                     queue.push(link);
+                }
+                if (fromPageId) {
+                    edgesToInsert.push({
+                        from_page_id: fromPageId,
+                        to_url: link,
+                        owner_id: source.owner_id,
+                    });
                 }
             }
             if (edgesToInsert.length > 0) {
@@ -156,32 +165,24 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
                         await new Promise((resolve) => setTimeout(resolve, 10));
                     }
                 }
-                console.log('[crawl] PHASE=CRAWL page_edges upserted', {
-                    pageNum: visited.size,
-                    pageId: page.id.slice(0, 8),
-                    edgesThisPage: edgesToInsert.length,
-                    batches: Math.ceil(edgesToInsert.length / batchSize),
-                });
             }
-            // Backfill to_page_id on existing edges whose to_url is this page's URL (only edges from this source's pages)
-            const { data: sourcePageIds } = await supabase.from('pages').select('id').eq('source_id', source.id);
-            const fromPageIds = (sourcePageIds ?? []).map((p) => p.id);
-            if (fromPageIds.length > 0) {
-                const { data: updatedEdges, error: backfillErr } = await supabase
-                    .from('page_edges')
-                    .update({ to_page_id: page.id })
-                    .eq('to_url', normalizedUrl)
-                    .in('from_page_id', fromPageIds)
-                    .is('to_page_id', null)
-                    .select('id');
-                if (backfillErr) {
-                    console.warn('[crawl] page_edges to_page_id backfill failed', { error: backfillErr.message, url: normalizedUrl.slice(0, 50) });
-                }
-                else if (updatedEdges?.length) {
-                    console.log('[crawl] PHASE=CRAWL to_page_id backfilled', { count: updatedEdges.length, pageId: page.id.slice(0, 8) });
+            if (page) {
+                const { data: convPageIds } = await supabase.from('pages').select('id').in('source_id', convSourceIds);
+                const fromPageIds = (convPageIds ?? []).map((p) => p.id);
+                if (fromPageIds.length > 0) {
+                    const { data: updatedEdges, error: backfillErr } = await supabase
+                        .from('page_edges')
+                        .update({ to_page_id: page.id })
+                        .eq('to_url', normalizedUrl)
+                        .in('from_page_id', fromPageIds)
+                        .is('to_page_id', null)
+                        .select('id');
+                    if (backfillErr) {
+                        console.warn('[crawl] page_edges to_page_id backfill failed', { error: backfillErr.message, url: normalizedUrl.slice(0, 50) });
+                    }
                 }
             }
-            if (isDynamic && edgesToInsert.length > 0) {
+            if (page && isDynamic && edgesToInsert.length > 0) {
                 const urlsToEncode = edgesToInsert.slice(0, 500).map((e) => e.to_url);
                 const { data: edgeRows } = await supabase
                     .from('page_edges')
@@ -217,21 +218,8 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
                         if (encError) {
                             console.warn('[crawl] encoded_discovered insert failed', encError.message);
                         }
-                        else {
-                            console.log('[crawl] PHASE=CRAWL encoded_discovered inserted (dynamic only)', {
-                                pageId: page.id.slice(0, 8),
-                                rows: encodedToInsert.length,
-                            });
-                        }
                     }
                 }
-            }
-            else if (edgesToInsert.length > 0 && !isDynamic) {
-                console.log('[crawl] PHASE=CRAWL encoded_discovered SKIP (not dynamic)', {
-                    pageId: page.id.slice(0, 8),
-                    edgesThisPage: edgesToInsert.length,
-                    note: 'Only dynamic sources get encoded_discovered during crawl',
-                });
             }
             await supabase
                 .from('crawl_jobs')
@@ -251,16 +239,6 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
             visited.add(normalizedUrl);
         }
     }
-    console.log('[crawl] PHASE=CRAWL done', {
-        visitedPages: visited.size,
-        discoveredUrls: discovered.size,
-        maxPages,
-        crawlDepth: source.crawl_depth,
-    });
-    console.log('[crawl] PHASE=INDEXING starting (crawl all pages done; now chunk+embed pages only; encoding_discovered only if dynamic and has rows)', {
-        sourceId: source.id.slice(0, 8),
-        jobId: job.id.slice(0, 8),
-    });
     const indexingUpdate = { status: 'indexing', updated_at: new Date().toISOString() };
     if (source.crawl_depth === 'dynamic') {
         const { data: pages } = await supabase.from('pages').select('id').eq('source_id', source.id);
@@ -283,14 +261,7 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
     }
     await updateCrawlJob(job.id, indexingUpdate);
     try {
-        console.log('[crawl] PHASE=INDEXING calling indexSourceForRag', {
-            sourceId: source.id.slice(0, 8),
-            jobId: job.id.slice(0, 8),
-            conversationId: conversationId?.slice(0, 8),
-            note: 'Indexer will: 1) fetch this source pages 2) chunk+embed 3) then embedDiscoveredLinks(conversation) - for shallow that finds 0 encoded_discovered',
-        });
         await indexSourceForRag(source.id, job.id, conversationId);
-        console.log('[crawl] PHASE=INDEXING indexSourceForRag returned');
     }
     catch (err) {
         console.warn('[crawl] RAG indexing failed', err);
@@ -308,7 +279,6 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
         updated_at: new Date().toISOString(),
     })
         .eq('id', job.id);
-    console.log('crawl: done', sourceShort, 'newPages=', newPagesCount, 'visited=', visited.size, 'totalSourcePages=', totalPagesForSource, queue.length === 0 ? '(queue empty)' : '(hit max)');
     const { data: insertedPages, error: verifyError } = await supabase
         .from('pages')
         .select('id, url')

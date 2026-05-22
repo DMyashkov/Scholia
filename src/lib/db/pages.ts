@@ -112,10 +112,6 @@ export const pageEdgesApi = {
     })) as PageEdge[];
   },
 
-  /**
-   * Edges where both from and to are in pageIds (and to_page_id is set).
-   * Small payload for the graph – no need to fetch 20k edges then filter client-side.
-   */
   async listGraphEdgesByConversation(conversationId: string, pageIds: string[]): Promise<PageEdge[]> {
     if (pageIds.length === 0) return [];
     const { data, error } = await supabase

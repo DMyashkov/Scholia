@@ -14,15 +14,12 @@ export const useChat = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<string>('');
   
-  // Track crawl intervals per source
   const crawlIntervals = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   const activeConversation = conversations.find(c => c.id === activeConversationId) || null;
   
-  // Get sources for current conversation
   const currentSources = activeConversation?.sources || [];
 
-  // Cleanup intervals on unmount
   useEffect(() => {
     const intervals = crawlIntervals.current;
     return () => {
@@ -31,7 +28,6 @@ export const useChat = () => {
   }, []);
 
   const createNewConversation = useCallback(() => {
-    // Clear any running crawl intervals
     crawlIntervals.current.forEach(interval => clearInterval(interval));
     crawlIntervals.current.clear();
     
@@ -101,7 +97,6 @@ export const useChat = () => {
     setActiveConversationId(id);
     setStreamingMessage('');
     
-    // Restart crawl simulations for crawling sources in the selected conversation
     const conversation = conversations.find(c => c.id === id);
     if (conversation) {
       conversation.sources
@@ -259,7 +254,6 @@ export const useChat = () => {
     setIsLoading(true);
     setStreamingMessage('');
 
-    // Get ready sources for quote generation
     const readySources = conversationSources.filter(s => s.status === 'ready');
     const crawlingSources = conversationSources.filter(s => s.status === 'crawling');
 

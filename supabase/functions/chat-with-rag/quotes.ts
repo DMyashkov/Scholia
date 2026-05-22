@@ -10,10 +10,6 @@ export function snippetFromChunk(c: ChunkRow): string {
   return (c.content ?? '').trim();
 }
 
-/**
- * Create one quote row from a chunk at retrieval time. Inserts into DB and returns the new quote id.
- * Caller must provide page info for page_title, page_path, domain.
- */
 export async function createQuoteFromChunk(
   supabase: SupabaseClient,
   params: {
@@ -77,10 +73,6 @@ export function replaceCitationPlaceholders(
   return { content, quoteIdsOrdered };
 }
 
-/**
- * Attach quotes to the final assistant message with citation order.
- * quoteIdsOrdered = list of quote ids in first-appearance order in the answer (deduplicated).
- */
 export async function attachQuotesToMessage(
   supabase: SupabaseClient,
   messageId: string,

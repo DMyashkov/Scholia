@@ -52,7 +52,6 @@ export async function crawlPage(
       DEFAULT_PAGE_TITLE;
     const title = rawTitle.replace(PAGE_TITLE_SUFFIX_REGEX, '').trim() || rawTitle;
 
-    // Main content: try semantic/standard selectors (main, article, #content, #bodyContent, etc.); fall back to body if none match or text is empty
     const mainContent = $(MAIN_CONTENT_SELECTOR).first();
     const mainText = (mainContent.length > 0 ? mainContent.text() : $('body').text()).trim().substring(0, MAX_PAGE_CONTENT_LENGTH);
     const content = mainText || $('body').text().trim().substring(0, MAX_PAGE_CONTENT_LENGTH);

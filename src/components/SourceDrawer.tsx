@@ -223,7 +223,6 @@ export const SourceDrawer = ({
           }
         }) ?? null;
       } catch {
-        /* ignore */
       }
     }
     const alreadyInSource = found && sourcePages.some((p) => p.id === found!.id);
@@ -300,7 +299,6 @@ export const SourceDrawer = ({
   });
   const stablePagesForGraph = useMemo(
     () => Array.from(stablePagesRef.current.values()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sourcePages]
   );
 

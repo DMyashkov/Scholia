@@ -2,11 +2,25 @@ import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
 import { supabase } from '../db';
 import { CRAWLER_USER_AGENT, DEFAULT_PAGE_TITLE, LOG_URL_MAX_LENGTH, MAIN_CONTENT_SELECTOR, MAX_PAGE_CONTENT_LENGTH, PAGE_TITLE_SUFFIX_REGEX, } from './constants';
-export async function crawlPage(url, source, conversationId) {
+import { normalizeUrlForCrawl } from './urlUtils';
+export async function crawlPage(url, source, conversationId, existingInConversation) {
     if (!conversationId) {
         throw new Error(`conversationId is required for page insertion`);
     }
     try {
+        const normalized = normalizeUrlForCrawl(url);
+        const skip = existingInConversation?.has(normalized);
+        if (skip) {
+            const response = await fetch(url, { headers: { 'User-Agent': CRAWLER_USER_AGENT } });
+            if (!response.ok)
+                throw new Error(`HTTP ${response.status}`);
+            const html = await response.text();
+            console.log('[crawl] [crawlPage] SKIP (already in conversation)', {
+                urlNorm: normalized.slice(-60),
+                inputUrlTail: url.slice(-50),
+            });
+            return { page: null, html, inserted: false };
+        }
         const response = await fetch(url, {
             headers: { 'User-Agent': CRAWLER_USER_AGENT },
         });
@@ -19,7 +33,6 @@ export async function crawlPage(url, source, conversationId) {
             $('h1').first().text().trim() ||
             DEFAULT_PAGE_TITLE;
         const title = rawTitle.replace(PAGE_TITLE_SUFFIX_REGEX, '').trim() || rawTitle;
-        // Main content: try semantic/standard selectors (main, article, #content, #bodyContent, etc.); fall back to body if none match or text is empty
         const mainContent = $(MAIN_CONTENT_SELECTOR).first();
         const mainText = (mainContent.length > 0 ? mainContent.text() : $('body').text()).trim().substring(0, MAX_PAGE_CONTENT_LENGTH);
         const content = mainText || $('body').text().trim().substring(0, MAX_PAGE_CONTENT_LENGTH);
@@ -57,11 +70,13 @@ export async function crawlPage(url, source, conversationId) {
                 .eq('url', url)
                 .single();
             if (existing) {
+                console.log('[crawl] [crawlPage] INSERT conflict (existing for this source)', { urlNorm: normalized.slice(-60) });
                 return { page: existing, html, inserted: false };
             }
             console.error('crawl: page insert failed', url.slice(0, LOG_URL_MAX_LENGTH), error.message);
             return null;
         }
+        console.log('[crawl] [crawlPage] INSERT new page', { pageId: page.id?.slice(0, 8), urlNorm: normalized.slice(-60) });
         return { page: page, html, inserted: true };
     }
     catch (error) {

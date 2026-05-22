@@ -154,7 +154,6 @@ async function buildChunkSpecsFromSinglePage(
   }));
 }
 
-/** Index one source's pages for RAG (used after a source crawl). Optionally run discovered-link embedding for the conversation. */
 export async function indexSourceForRag(
   sourceId: string,
   crawlJobId?: string,
@@ -374,7 +373,6 @@ function normalizeUrlForCompare(url: string): string {
   }
 }
 
-/** Fetch indexed page URLs for a page's source - we never suggest already-indexed pages */
 async function getIndexedPageUrlsForPage(pageId: string): Promise<Set<string>> {
   const { data: page } = await supabase.from('pages').select('source_id').eq('id', pageId).single();
   const sourceId = (page as { source_id?: string } | null)?.source_id;
@@ -388,7 +386,6 @@ async function getIndexedPageUrlsForPage(pageId: string): Promise<Set<string>> {
   return new Set(pages.map((p) => normalizeUrlForCompare(p.url || '')));
 }
 
-/** Fetch indexed page URLs for a conversation's sources - we never suggest already-indexed pages */
 async function getIndexedPageUrls(conversationId: string): Promise<Set<string>> {
   const { data: sources } = await supabase
     .from('sources')
@@ -533,7 +530,7 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
     const skipped = links.length - toEmbed.length;
     console.log('[indexer] Embedded', updated, 'encoded_discovered', skipped > 0 ? `(skipped ${skipped} already-indexed)` : '');
   }
-  return 0; // encoded_discovered rows updated; not counted in chunksCreated
+  return 0;
 }
 
 async function embedBatch(apiKey: string, texts: string[]): Promise<number[][]> {

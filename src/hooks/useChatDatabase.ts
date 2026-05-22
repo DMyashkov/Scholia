@@ -106,7 +106,6 @@ export const useChatDatabase = () => {
   const [ragStepProgress, setRagStepProgress] = useState<Array<{ current: number; total: number; label: string }>>([]);
   const [liveThoughtProcess, setLiveThoughtProcess] = useState<ThoughtProcess | null>(null);
 
-  // Database hooks
   const { data: dbConversations = [], isLoading: conversationsLoading } = useConversations();
   const createConversationMutation = useCreateConversation();
   const deleteConversationMutation = useDeleteConversation();
@@ -127,7 +126,6 @@ export const useChatDatabase = () => {
   const removeSourceMutation = useRemoveSourceFromConversation();
   const checkExistingSourceMutation = useCheckExistingSource();
 
-  // Get source IDs for realtime subscriptions
   const sourceIds = useMemo(() => 
     conversationSourcesData.map(cs => cs.source.id),
     [conversationSourcesData]
@@ -135,10 +133,6 @@ export const useChatDatabase = () => {
 
   useRealtimeCrawlUpdates(activeConversationId, sourceIds);
 
-  // Load sources with full data (pages, crawl jobs)
-  // Note: We can't use hooks in a map, so we'll create a component that uses the hook
-  
-  
   const activeConversationSources: Source[] = conversationSourcesData.map(cs => {
     const db = cs.source;
     return {
@@ -187,7 +181,6 @@ export const useChatDatabase = () => {
 
   const deleteConversation = useCallback(async (id: string) => {
     try {
-      // Clear active conversation first if it's the one being deleted
       if (activeConversationId === id) {
         setActiveConversationId(null);
       }
@@ -653,8 +646,6 @@ export const useChatDatabase = () => {
       setStreamingMessage(prev => prev + (i === 0 ? '' : ' ') + words[i]);
     }
 
-    // Fallback creates message without quotes (quotes table requires valid page_id FKs;
-    // mock quotes may have invalid refs)
     await createMessageMutation.mutateAsync({
       conversation_id: conversationId,
       role: 'assistant',

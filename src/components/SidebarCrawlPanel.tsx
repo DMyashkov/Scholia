@@ -91,7 +91,6 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
           }
         }) ?? undefined;
       } catch {
-        /* ignore */
       }
     }
     if (!found || sourcePagesForActive.some((p) => p.id === found!.id)) return null;
@@ -144,8 +143,6 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
       const sourcePages = pages.filter(p => p.source_id === source.id);
       const crawlJob = crawlJobMap.get(source.id);
       let status: Source['status'] = 'crawling';
-      // "pagesIndexed" should reflect pages the user can actually see (scraped pages),
-      // not ahead-of-time job counters, to avoid 1/5 vs 0/5 mismatches.
       let pagesIndexed = sourcePages.length;
       let totalPages = sourcePages.length;
       

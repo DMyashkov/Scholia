@@ -14,19 +14,15 @@ export function stripLeadFluff(text: string): string {
   let s = text.trim();
   if (!s) return '';
 
-  // Remove CSS rules (e.g. ".mw-parser-output .geo-nondefault{display:none}")
   while (/\.[^{]+\{[^}]*\}/.test(s)) {
     s = s.replace(/\.[^{]+\{[^}]*\}/g, '').trim();
   }
 
-  // Remove coordinate blocks (e.g. "35°11′40″N 101°48′28″W / 35.194327°N 101.807771°W / 35.194327; -101.807771")
   s = s.replace(/^[\d.°′″\s/;:-]+[NS]\s*[\d.°′″\s/;:-]+[EW][\s/;.-]*/gi, '').trim();
   s = s.replace(/^[\d.-]+\s*;\s*[\d.-]+[\s.]*/g, '').trim();
 
-  // Remove "From X, the free encyclopedia" and variants
   s = s.replace(/\bFrom\s+[^,]+,\s*the\s+free\s+encyclopedia\.?\s*/gi, '').trim();
 
-  // Drop lines that are purely CSS-like (contain braces)
   const lines = s.split('\n');
   const filtered = lines.filter((line) => {
     const t = line.trim();

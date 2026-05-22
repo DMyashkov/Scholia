@@ -34,7 +34,6 @@ function shouldSkipLinkUrl(linkUrl, normalizedCurrentUrl, source) {
             return true;
     }
     catch {
-        /* ignore */
     }
     if (isWikiStyleDomain(linkUrl.hostname)) {
         const pathParts = linkUrl.pathname.split('/').filter((p) => p);

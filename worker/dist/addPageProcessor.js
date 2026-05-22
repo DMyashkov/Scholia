@@ -1,22 +1,14 @@
-/**
- * Process add-page crawl jobs: fetch URL, insert page, edges, discovered_links, chunk+embed for RAG.
- * Add-page jobs are crawl_jobs with explicit_crawl_urls = [url]. Updates crawl_jobs for progress.
- */
 import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
 import { supabase } from './db';
 import { indexSinglePageForRag, embedDiscoveredLinksForPage } from './indexer';
-import { extractLinks, extractLinksWithContext } from './crawler';
+import { extractLinks, extractLinksWithContext } from './crawler/index.js';
 import { CRAWLER_USER_AGENT, DEFAULT_PAGE_TITLE, MAIN_CONTENT_SELECTOR, MAX_PAGE_CONTENT_LENGTH, } from './crawler/constants';
 import { normalizeUrlForCrawl } from './crawler/urlUtils';
 import { updateCrawlJob } from './crawler/job';
-/** Max outbound links / encoded_discovered rows to create per added page. */
 const MAX_LINKS_PER_ADD_PAGE = 500;
-/** Max snippet length stored in encoded_discovered. */
 const ENCODED_SNIPPET_MAX_LENGTH = 500;
-/** Max existing pages to link from when adding a new page (seed edges). */
 const SEED_EDGES_LIMIT = 10;
-/** Fallback snippet when link has no context. */
 const DEFAULT_SNIPPET_FALLBACK = 'Link from page';
 export async function processAddPageJob(job) {
     const { id: jobId, source_id: sourceId, explicit_crawl_urls } = job;
@@ -29,7 +21,6 @@ export async function processAddPageJob(job) {
     console.log('[add-page] process start', { jobId: jobId.slice(0, 8), url: normalizedUrl.slice(0, 50) });
     try {
         await updateCrawlJob(jobId, { status: 'indexing' });
-        // Check if page already exists (same source + url) – don't create duplicate; keep graph connected.
         const { data: existing } = await supabase
             .from('pages')
             .select('id')
@@ -72,7 +63,6 @@ export async function processAddPageJob(job) {
             await updateCrawlJob(jobId, { status: 'completed' });
             return;
         }
-        // Fetch page
         const res = await fetch(normalizedUrl, {
             headers: { 'User-Agent': CRAWLER_USER_AGENT },
         });
@@ -94,7 +84,6 @@ export async function processAddPageJob(job) {
             $('body').text().trim().substring(0, MAX_PAGE_CONTENT_LENGTH);
         const urlObj = new URL(normalizedUrl);
         const path = urlObj.pathname + urlObj.search;
-        // Get source
         const { data: source, error: srcErr } = await supabase
             .from('sources')
             .select('owner_id, same_domain_only, conversation_id, suggestion_mode')
@@ -105,7 +94,6 @@ export async function processAddPageJob(job) {
             throw new Error('Source not found');
         }
         const ownerId = source.owner_id;
-        // Insert page
         const { data: newPage, error: insertErr } = await supabase
             .from('pages')
             .insert({
@@ -163,7 +151,6 @@ export async function processAddPageJob(job) {
             await updateCrawlJob(jobId, { status: 'failed', error_message: insertErr.message });
             throw new Error(insertErr.message);
         }
-        // Create edges from existing pages to the new page
         const { data: seedPages } = await supabase
             .from('pages')
             .select('id, url')
@@ -181,7 +168,6 @@ export async function processAddPageJob(job) {
                 ignoreDuplicates: true,
             });
         }
-        // Set to_page_id on all edges pointing to this URL (from this source) so the graph has concrete page targets
         const { data: sourcePages } = await supabase.from('pages').select('id').eq('source_id', sourceId);
         const fromPageIds = (sourcePages ?? []).map((p) => p.id);
         if (fromPageIds.length > 0) {
@@ -192,13 +178,11 @@ export async function processAddPageJob(job) {
                 .in('from_page_id', fromPageIds)
                 .is('to_page_id', null);
         }
-        // Insert page_edges for new page's outbound links, then encoded_discovered
         const sourceForExtract = {
             same_domain_only: source.same_domain_only ?? true,
             suggestion_mode: source.suggestion_mode,
         };
         const isSurface = source.suggestion_mode !== 'dive';
-        /** In-page context snippet only for surface; dive uses target-page lead at embed time. */
         const linksWithContext = isSurface ? extractLinksWithContext(html, normalizedUrl, sourceForExtract) : [];
         const linksUrlOnly = extractLinks(html, normalizedUrl, sourceForExtract);
         console.log('[add-page] links', {
@@ -267,9 +251,7 @@ export async function processAddPageJob(job) {
         else {
             console.log('[add-page] no newLinks to insert', { linksUrlOnly: linksUrlOnly.length, linksWithContext: linksWithContext.length });
         }
-        // Chunk and embed page content
         await indexSinglePageForRag(newPage.id, content, ownerId, jobId);
-        // Embed encoded_discovered for this page
         const apiKey = process.env.OPENAI_API_KEY;
         const conversationId = source.conversation_id;
         if (!apiKey) {
@@ -282,7 +264,6 @@ export async function processAddPageJob(job) {
             console.log('[add-page] calling embedDiscoveredLinksForPage', { conversationId: conversationId.slice(0, 8), newPageId: newPage.id?.slice(0, 8) });
             await embedDiscoveredLinksForPage(conversationId, newPage.id, apiKey, jobId, ownerId);
         }
-        // Clear embeddings for links pointing to the newly added page - we'll never suggest it again
         const { data: edgesToNewPage } = await supabase.from('page_edges').select('id').eq('to_url', normalizedUrl);
         const edgeIdsToClear = (edgesToNewPage ?? []).map((r) => r.id);
         if (edgeIdsToClear.length > 0) {

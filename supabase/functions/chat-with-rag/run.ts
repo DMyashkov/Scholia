@@ -1,5 +1,4 @@
 
-/* eslint-disable-next-line @typescript-eslint/triple-slash-reference */
 /// <reference path="./deno_types.d.ts" />
 import type { SupabaseClient } from 'supabase';
 import { createClient } from 'supabase';

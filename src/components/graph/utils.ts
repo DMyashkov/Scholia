@@ -24,7 +24,6 @@ function normalizeUrlForMatching(url: string): string {
   }
 }
 
-/** Return canonical form and the other common root form so both match (worker may store either). */
 function urlMatchVariants(url: string): string[] {
   const n = normalizeUrlForMatching(url);
   const variants = [n, n.toLowerCase()];
@@ -33,12 +32,10 @@ function urlMatchVariants(url: string): string[] {
     if (u.pathname === '/' && n.endsWith('/')) variants.push(u.origin);
     else if (u.pathname === '/' && !n.endsWith('/')) variants.push(`${u.origin}/`);
   } catch {
-    /* ignore */
   }
   return variants;
 }
 
-/** Add protocol and host variants (http/https, www/non-www) so edge.to_url matches even if stored slightly differently. */
 function addUrlVariantsToMap(url: string, pageId: string, map: Map<string, string>): void {
   try {
     const u = new URL(url);
@@ -59,15 +56,9 @@ function addUrlVariantsToMap(url: string, pageId: string, map: Map<string, strin
       map.set(full.toLowerCase(), pageId);
     });
   } catch {
-    /* ignore */
   }
 }
 
-/**
- * Dedupe pages by normalized URL so the same URL from multiple sources (e.g. second static source
- * that is one of the first source's pages) becomes one node. Returns canonical page list and a map
- * from any page id to its canonical id for that URL.
- */
 function dedupePagesByUrl(
   pages: DiscoveredPage[],
   domain?: string

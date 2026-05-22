@@ -35,7 +35,6 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
   const prevPagesIndexedRef = useRef(0);
   const prevPageIdsKeyRef = useRef('');
 
-  // Create/update graph data when pages, pagesIndexed, or edges change
   const graphData = useMemo(() => {
     const pageIdsKey = pages.map((p) => p.id).sort().join(',');
     const pageSetChanged = pageIdsKey !== prevPageIdsKeyRef.current;
@@ -56,8 +55,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
       prevPagesIndexedRef.current = pagesIndexed;
       prevPageIdsKeyRef.current = pageIdsKey;
       const data = createGraphData(pages, pagesIndexed, dimensions, domain, edges);
-      
-      // Preserve positions of existing nodes for smooth transitions
+
       const existingNodes = graphDataRef.current.nodes;
       data.nodes.forEach(node => {
         const existing = existingNodes.find(n => n.id === node.id);
@@ -76,12 +74,10 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
 
   const { nodes, links } = graphData;
 
-  // Force re-render on tick
   const handleTick = useCallback(() => {
     forceUpdate({});
   }, []);
 
-  // Initialize simulation
   const {
     initSimulation,
     dragStart,
@@ -96,14 +92,12 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
     onTick: handleTick,
   });
 
-  // Initialize zoom with smooth transitions
   const { initZoom, zoomIn, zoomOut, getCurrentTransform } = useGraphZoom({
     svgRef,
     containerRef: graphContainerRef,
     onZoom: (transform) => setZoomLevel(transform.k),
   });
 
-  // Handle resize
   useEffect(() => {
     if (!containerRef.current) return;
     
@@ -120,16 +114,13 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
     return () => observer.disconnect();
   }, []);
 
-  // Initialize zoom behavior once
   useEffect(() => {
     initZoom();
   }, [initZoom]);
 
-  // Initialize/update simulation when data changes - with gentle reheat for new nodes
   useEffect(() => {
     if (nodes.length > 0) {
       initSimulation();
-      // Gentle reheat for smooth new node integration
       if (pagesIndexed > 0) {
         reheat(0.1);
       }
@@ -137,9 +128,7 @@ export const ForceGraph = ({ pages, pagesIndexed, className, domain, edges }: Fo
     return () => stop();
   }, [nodes.length, initSimulation, stop, reheat, pagesIndexed]);
 
-  // Handle node click (open URL in new tab)
   const handleNodeClick = useCallback((node: GraphNode, e: React.MouseEvent) => {
-    // Don't open if we were dragging
     if (dragStateRef.current.hasMoved) {
       e.stopPropagation();
       return;

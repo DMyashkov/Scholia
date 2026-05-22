@@ -26,7 +26,6 @@ function deriveLabelFromUrl(url: string): string | null {
 export function cleanPageTitleForDisplay(title: string | null | undefined, domain?: string): string {
   if (!title?.trim()) return title || '';
   let s = title.trim();
-  // Common suffixes that repeat the domain/source (wiki and similar sites)
   const suffixes = [
     /\s*-\s*Wikipedia\s*$/i,
     /\s*–\s*Wikipedia\s*$/i,

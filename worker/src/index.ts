@@ -1,5 +1,5 @@
 import { supabase } from './db';
-import { claimJob, processCrawlJob } from './crawler';
+import { claimJob, processCrawlJob } from './crawler/index.js';
 import { processAddPageJob } from './addPageProcessor';
 
 const FALLBACK_POLL_MS = parseInt(process.env.CRAWL_FALLBACK_POLL_MS || '60000', 10); 

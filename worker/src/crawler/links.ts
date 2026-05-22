@@ -39,7 +39,6 @@ function shouldSkipLinkUrl(linkUrl: URL, normalizedCurrentUrl: string, source: S
     const pathDecoded = decodeURIComponent(linkUrl.pathname);
     if (pathDecoded.toLowerCase().includes(DISAMBIGUATION_PATH_MARKER.toLowerCase())) return true;
   } catch {
-    /* ignore */
   }
   if (isWikiStyleDomain(linkUrl.hostname)) {
     const pathParts = linkUrl.pathname.split('/').filter((p) => p);

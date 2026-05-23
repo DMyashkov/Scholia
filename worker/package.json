@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --outfile=dist/index.js --format=esm --packages=external",
+    "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "crawl": "tsx src/index.ts",
@@ -18,11 +18,11 @@
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.5",
     "node-fetch": "^3.3.2",
-    "robots-parser": "^2.1.1"
+    "robots-parser": "^2.1.1",
+    "esbuild": "^0.28.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "esbuild": "^0.28.0",
     "tsx": "^4.7.0",
     "typescript": "^5.8.0"
   }

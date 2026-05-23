@@ -267,6 +267,19 @@ async function indexSinglePageForRag(pageId, content, ownerId, crawlJobId) {
     pageCount: 1
   });
 }
+async function countDiscoveredLinksToEmbedForPage(pageId) {
+  const indexedUrls = await getIndexedPageUrlsForPage(pageId);
+  const { data: edgeRows } = await supabase.from("page_edges").select("id, to_url").eq("from_page_id", pageId);
+  const edgeIds = (edgeRows ?? []).map((r) => r.id);
+  if (edgeIds.length === 0) return 0;
+  const { data: links, error: fetchError } = await supabase.from("encoded_discovered").select("id, page_edge_id").in("page_edge_id", edgeIds).is("embedding", null);
+  if (fetchError || !links?.length) return 0;
+  const edgeIdToUrl = new Map((edgeRows ?? []).map((r) => [r.id, r.to_url]));
+  return links.filter((l) => {
+    const url = edgeIdToUrl.get(l.page_edge_id) || "";
+    return !indexedUrls.has(normalizeUrlForCompare(url));
+  }).length;
+}
 async function embedDiscoveredLinksForPage(conversationId, pageId, apiKey, crawlJobId, ownerId) {
   const indexedUrls = await getIndexedPageUrlsForPage(pageId);
   const { data: edgeRows } = await supabase.from("page_edges").select("id, to_url").eq("from_page_id", pageId);
@@ -287,12 +300,16 @@ async function embedDiscoveredLinksForPage(conversationId, pageId, apiKey, crawl
     return !indexedUrls.has(normalizeUrlForCompare(url));
   });
   const total = toEmbed.length;
-  if (crawlJobId && total > 0) {
-    await supabase.from("crawl_jobs").update({
-      encoding_discovered_total: total,
-      encoding_discovered_done: 0,
-      updated_at: (/* @__PURE__ */ new Date()).toISOString()
-    }).eq("id", crawlJobId);
+  if (crawlJobId) {
+    const { data: jobRow } = await supabase.from("crawl_jobs").select("encoding_discovered_total, encoding_discovered_done").eq("id", crawlJobId).single();
+    const prevTotal = jobRow?.encoding_discovered_total ?? 0;
+    if (prevTotal !== total) {
+      await supabase.from("crawl_jobs").update({
+        encoding_discovered_total: total,
+        encoding_discovered_done: 0,
+        updated_at: (/* @__PURE__ */ new Date()).toISOString()
+      }).eq("id", crawlJobId);
+    }
   }
   if (toEmbed.length === 0) {
     return 0;
@@ -798,10 +815,6 @@ async function claimJob() {
     console.error("crawl: claim failed", job.id?.slice(0, 8), updateError);
     return null;
   }
-  const { data: cancelled } = await supabase.from("crawl_jobs").update({ status: "cancelled", updated_at: now }).eq("source_id", updated.source_id).eq("status", "queued").neq("id", updated.id).select("id");
-  if (cancelled?.length) {
-    console.log("[worker] cancelled duplicate queued jobs for source", updated.source_id.slice(0, 8), "count:", cancelled.length);
-  }
   return updated;
 }
 
@@ -834,18 +847,20 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
   const queue = [...seedUrls];
   seedUrls.forEach((u) => discovered.add(u));
   let newPagesCount = 0;
-  const existingForSource = /* @__PURE__ */ new Set();
+  const existingInConversation = /* @__PURE__ */ new Set();
   const existingPageIdByUrl = /* @__PURE__ */ new Map();
-  const { data: existingPagesOnSource } = await supabase.from("pages").select("id, url").eq("source_id", source.id);
-  (existingPagesOnSource ?? []).forEach((p) => {
-    const norm = normalizeUrlForCrawl(p.url);
-    existingForSource.add(norm);
-    existingPageIdByUrl.set(norm, p.id);
-  });
   const { data: convSources } = await supabase.from("sources").select("id").eq("conversation_id", conversationId);
   const convSourceIds = (convSources ?? []).map((s) => s.id);
+  if (convSourceIds.length > 0) {
+    const { data: existingPages } = await supabase.from("pages").select("id, url").in("source_id", convSourceIds);
+    (existingPages ?? []).forEach((p) => {
+      const norm = normalizeUrlForCrawl(p.url);
+      existingInConversation.add(norm);
+      existingPageIdByUrl.set(norm, p.id);
+    });
+  }
   const seedNorm = seedUrls[0] ? normalizeUrlForCrawl(seedUrls[0]) : "";
-  const seedInSet = seedNorm && existingForSource.has(seedNorm);
+  const seedInSet = seedNorm && existingInConversation.has(seedNorm);
   const seedPageId = seedNorm ? existingPageIdByUrl.get(seedNorm) ?? null : null;
   let sourceTitleUpdated = false;
   const firstSeedUrl = seedUrls[0];
@@ -866,27 +881,6 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
   const sourceShort = new URL(firstSeedUrl).pathname?.replace(/^\/wiki\//, "") || firstSeedUrl.slice(0, 40);
   const crawlDepth = source.crawl_depth ?? "shallow";
   const isDynamic = crawlDepth === "dynamic";
-  const isMainDynamicSeed = isDynamic && !(explicitKey && explicitKey.length > 0);
-  console.log("[crawl] start", {
-    job: job.id.slice(0, 8),
-    source: source.id.slice(0, 8),
-    dynamic: isDynamic,
-    mainSeedOnly: isMainDynamicSeed,
-    seedUrlCount: seedUrls.length,
-    maxPages,
-    existingPagesOnSource: existingForSource.size
-  });
-  if (isMainDynamicSeed && seedInSet && seedPageId) {
-    console.log("[crawl] dynamic seed already indexed on this source \u2014 skip re-scrape, run indexing only");
-    await updateCrawlJob(job.id, { status: "indexing", updated_at: (/* @__PURE__ */ new Date()).toISOString() });
-    try {
-      await indexSourceForRag(source.id, job.id, conversationId);
-    } catch (err) {
-      console.warn("[crawl] RAG indexing failed (duplicate main job)", err);
-    }
-    await updateJobStatus(job.id, "completed", null, null, (/* @__PURE__ */ new Date()).toISOString());
-    return;
-  }
   while (queue.length > 0 && newPagesCount < maxPages) {
     const { data: sourceCheck } = await supabase.from("sources").select("id").eq("id", source.id).single();
     if (!sourceCheck) {
@@ -908,7 +902,7 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
     }
     try {
       if (!conversationId) throw new Error(`conversationId is null before calling crawlPage!`);
-      const result = await crawlPage(normalizedUrl, source, conversationId, existingForSource);
+      const result = await crawlPage(normalizedUrl, source, conversationId, existingInConversation);
       if (!result) {
         visited.add(normalizedUrl);
         continue;
@@ -918,7 +912,7 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
       if (inserted && page) {
         newPagesCount++;
         const norm = normalizeUrlForCrawl(normalizedUrl);
-        existingForSource.add(norm);
+        existingInConversation.add(norm);
         existingPageIdByUrl.set(norm, page.id);
       }
       const fromPageId = page?.id ?? existingPageIdByUrl.get(urlNormForLookup) ?? null;
@@ -1282,6 +1276,12 @@ async function processAddPageJob(job) {
     } else {
       console.log("[add-page] no newLinks to insert", { linksUrlOnly: linksUrlOnly.length, linksWithContext: linksWithContext.length });
     }
+    const discoveredToEmbed = await countDiscoveredLinksToEmbedForPage(newPage.id);
+    await updateCrawlJob(jobId, {
+      status: "encoding",
+      encoding_discovered_total: discoveredToEmbed,
+      encoding_discovered_done: 0
+    });
     await indexSinglePageForRag(newPage.id, content, ownerId, jobId);
     const apiKey = process.env.OPENAI_API_KEY;
     const conversationId = source.conversation_id;

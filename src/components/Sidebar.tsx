@@ -28,6 +28,7 @@ interface SidebarProps {
   onDeleteConversation: (id: string) => void;
   currentSources?: import('@/types/source').Source[];
   addingPageSourceId?: string | null;
+  isChatLoading?: boolean;
 }
 
 export const Sidebar = ({
@@ -40,6 +41,7 @@ export const Sidebar = ({
   onDeleteConversation,
   currentSources = [],
   addingPageSourceId,
+  isChatLoading = false,
 }: SidebarProps) => {
   const groupedConversations = useMemo(() => {
     const today = new Date();
@@ -142,7 +144,7 @@ export const Sidebar = ({
         </ScrollArea>
 
         {}
-        <SidebarCrawlPanel sources={currentSources} conversationId={activeConversationId} addingPageSourceId={addingPageSourceId} />
+        <SidebarCrawlPanel sources={currentSources} conversationId={activeConversationId} addingPageSourceId={addingPageSourceId} isChatLoading={isChatLoading} />
 
         {}
         <UserMenu />

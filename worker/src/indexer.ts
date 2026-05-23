@@ -244,6 +244,29 @@ export async function indexSinglePageForRag(
 
 
 
+export async function countDiscoveredLinksToEmbedForPage(pageId: string): Promise<number> {
+  const indexedUrls = await getIndexedPageUrlsForPage(pageId);
+  const { data: edgeRows } = await supabase
+    .from('page_edges')
+    .select('id, to_url')
+    .eq('from_page_id', pageId);
+  const edgeIds = (edgeRows ?? []).map((r) => r.id);
+  if (edgeIds.length === 0) return 0;
+
+  const { data: links, error: fetchError } = await supabase
+    .from('encoded_discovered')
+    .select('id, page_edge_id')
+    .in('page_edge_id', edgeIds)
+    .is('embedding', null);
+  if (fetchError || !links?.length) return 0;
+
+  const edgeIdToUrl = new Map((edgeRows ?? []).map((r) => [r.id, r.to_url]));
+  return links.filter((l) => {
+    const url = edgeIdToUrl.get(l.page_edge_id) || '';
+    return !indexedUrls.has(normalizeUrlForCompare(url));
+  }).length;
+}
+
 export async function embedDiscoveredLinksForPage(
   conversationId: string,
   pageId: string,
@@ -281,15 +304,23 @@ export async function embedDiscoveredLinksForPage(
     return !indexedUrls.has(normalizeUrlForCompare(url));
   });
   const total = toEmbed.length;
-  if (crawlJobId && total > 0) {
-    await supabase
+  if (crawlJobId) {
+    const { data: jobRow } = await supabase
       .from('crawl_jobs')
-      .update({
-        encoding_discovered_total: total,
-        encoding_discovered_done: 0,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', crawlJobId);
+      .select('encoding_discovered_total, encoding_discovered_done')
+      .eq('id', crawlJobId)
+      .single();
+    const prevTotal = jobRow?.encoding_discovered_total ?? 0;
+    if (prevTotal !== total) {
+      await supabase
+        .from('crawl_jobs')
+        .update({
+          encoding_discovered_total: total,
+          encoding_discovered_done: 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', crawlJobId);
+    }
   }
   if (toEmbed.length === 0) {
     return 0;

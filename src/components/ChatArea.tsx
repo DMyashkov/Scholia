@@ -313,6 +313,7 @@ export const ChatArea = ({
         onRecrawl={onRecrawlSource}
         onRemove={handleRemoveSource}
         addingPageSourceId={addingPageSourceId}
+        isChatLoading={isLoading}
       />
 
       <SourcePreviewDrawer

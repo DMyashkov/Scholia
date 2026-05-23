@@ -303,7 +303,6 @@ export async function processAddPageJob(job: {
       console.log('[add-page] no newLinks to insert', { linksUrlOnly: linksUrlOnly.length, linksWithContext: linksWithContext.length });
     }
 
-    
     await indexSinglePageForRag(newPage.id, content, ownerId, jobId);
 
     

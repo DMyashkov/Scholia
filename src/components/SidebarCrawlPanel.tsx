@@ -28,9 +28,10 @@ interface SidebarCrawlPanelProps {
   className?: string;
   conversationId?: string | null;
   addingPageSourceId?: string | null;
+  isChatLoading?: boolean;
 }
 
-export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPageSourceId }: SidebarCrawlPanelProps) => {
+export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPageSourceId, isChatLoading = false }: SidebarCrawlPanelProps) => {
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
 
   const sourceIds = useMemo(() => sources.map(s => s.id), [sources]);
@@ -235,25 +236,22 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const isAddPageQueued = addPagePhase === 'queued';
   const isAddPageIndexing = addPagePhase === 'indexing';
   const isAddPageEncoding = addPagePhase === 'encoding';
-  const isAddPageResponding = addPagePhase === 'completed' && !!addingPageSourceId;
+  const isAddPageResponding =
+    isChatLoading && addPagePhase === 'completed' && !!addingPageSourceId;
   const hasAnySources = sources.length > 0;
 
-  const activeJobStatuses = ['queued', 'running', 'indexing', 'encoding'] as const;
   const progressCrawlJob = useMemo((): CrawlJob | null => {
-    if (addPageJob && activeJobStatuses.includes(addPageJob.status as (typeof activeJobStatuses)[number])) {
+    if (isAddingPageFlow && addPageJob && addPageJob.status !== 'failed' && addPageJob.status !== 'cancelled') {
       return addPageJob;
     }
     for (const s of displaySources) {
       const j = crawlJobMap.get(s.id);
-      if (j && activeJobStatuses.includes(j.status as (typeof activeJobStatuses)[number])) {
+      if (j && ['queued', 'running', 'indexing', 'encoding'].includes(j.status)) {
         return j as CrawlJob;
       }
     }
     return null;
-  }, [addPageJob, displaySources, crawlJobMap]);
-
-  const isProgressFromAddPage =
-    !!addPageJob && progressCrawlJob?.id === addPageJob.id;
+  }, [addPageJob, displaySources, crawlJobMap, isAddingPageFlow]);
   const isIndexingFromJob =
     !!progressCrawlJob &&
     (progressCrawlJob.status === 'indexing' || progressCrawlJob.status === 'encoding');

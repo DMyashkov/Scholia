@@ -39,6 +39,7 @@ interface SourceDrawerProps {
   onRecrawl: (sourceId: string) => void | Promise<void>;
   onRemove: (sourceId: string) => void;
   addingPageSourceId?: string | null;
+  isChatLoading?: boolean;
 }
 
 const getStatusBadge = (
@@ -96,6 +97,7 @@ export const SourceDrawer = ({
   onRecrawl,
   onRemove,
   addingPageSourceId,
+  isChatLoading = false,
 }: SourceDrawerProps) => {
   const [recrawlModalOpen, setRecrawlModalOpen] = useState(false);
   const [isRecrawling, setIsRecrawling] = useState(false);
@@ -140,22 +142,25 @@ export const SourceDrawer = ({
     return source.status || 'crawling';
   }, [source, crawlJob, addingPageSourceId]);
 
-  const isAddPageIndexing = addingPageSourceId === source?.id && addPageJob?.status === 'indexing';
-  const isAddPageEncoding = addingPageSourceId === source?.id && addPageJob?.status === 'encoding';
-  const isAddPageResponding = addingPageSourceId === source?.id && addPageJob?.status === 'completed';
-  const activeJobStatuses = ['queued', 'running', 'indexing', 'encoding'] as const;
+  const isAddingPageForSource = addingPageSourceId === source?.id && !!addPageJob;
+  const isAddPageIndexing = isAddingPageForSource && addPageJob?.status === 'indexing';
+  const isAddPageEncoding = isAddingPageForSource && addPageJob?.status === 'encoding';
+  const isAddPageResponding =
+    isChatLoading && isAddingPageForSource && addPageJob?.status === 'completed';
   const progressCrawlJob = useMemo((): typeof crawlJob => {
     if (
+      isAddingPageForSource &&
       addPageJob &&
-      activeJobStatuses.includes(addPageJob.status as (typeof activeJobStatuses)[number])
+      addPageJob.status !== 'failed' &&
+      addPageJob.status !== 'cancelled'
     ) {
       return addPageJob;
     }
-    if (crawlJob && activeJobStatuses.includes(crawlJob.status as (typeof activeJobStatuses)[number])) {
+    if (crawlJob && ['queued', 'running', 'indexing', 'encoding'].includes(crawlJob.status)) {
       return crawlJob;
     }
     return null;
-  }, [addPageJob, crawlJob]);
+  }, [addPageJob, crawlJob, isAddingPageForSource]);
 
   const isIndexing =
     progressCrawlJob?.status === 'indexing' || progressCrawlJob?.status === 'encoding';

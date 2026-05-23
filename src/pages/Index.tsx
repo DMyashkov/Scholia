@@ -204,6 +204,7 @@ const Index = () => {
             onDeleteConversation={deleteConversation}
             currentSources={currentSources}
             addingPageSourceId={addingPageSourceId}
+            isChatLoading={isLoading}
           />
         </div>
         

@@ -26,6 +26,7 @@ import type { Conversation as DBConversation, Message as DBMessage, MessageQuote
 import type { Conversation, Message, ThoughtProcess } from '@/types/chat';
 import type { Source } from '@/types/source';
 import { deriveTitleFromUrl } from '@/lib/utils';
+import { isAddPagePipelineComplete } from '@/lib/crawlJobProgress';
 import { generateTitle } from '@/data/mockResponses';
 import { generateQuotesForMessage, generateSourcedResponse } from '@/data/mockSourceContent';
 
@@ -334,13 +335,16 @@ export const useChatDatabase = () => {
       await new Promise((r) => setTimeout(r, pollMs));
       finalJob = await crawlJobsApi.get(jobId);
       if (!finalJob) continue;
-      if (finalJob.status === 'completed') break;
       if (finalJob.status === 'failed') {
         throw new Error(finalJob.error_message ?? 'Add page failed');
       }
+      if (isAddPagePipelineComplete(finalJob)) break;
     }
     if (finalJob?.status === 'failed') {
       throw new Error(finalJob.error_message ?? 'Add page failed');
+    }
+    if (finalJob && !isAddPagePipelineComplete(finalJob)) {
+      throw new Error('Add page timed out while encoding discovered links');
     }
 
     queryClient.invalidateQueries({ queryKey: [LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE, conversationId, sourceId] });

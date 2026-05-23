@@ -24,23 +24,7 @@ export const conversationSourcesApi = {
 
   async add(conversationId: string, sourceId: string, skipCrawlJob?: boolean) {
     if (skipCrawlJob) return { id: sourceId, conversation_id: conversationId, source_id: sourceId } as { id: string; conversation_id: string; source_id: string };
-    const existingJobs = await crawlJobsApi.listBySource(sourceId);
-    const activeJob = existingJobs.find((j) => j.status === 'queued' || j.status === 'running');
-    if (!activeJob) {
-      await crawlJobsApi.create({
-        source_id: sourceId,
-        status: 'queued',
-        indexed_count: 0,
-        discovered_count: 0,
-        total_pages: null,
-        error_message: null,
-        started_at: null,
-        completed_at: null,
-        last_activity_at: null,
-        encoding_chunks_done: 0,
-        encoding_discovered_done: 0,
-      });
-    }
+    await crawlJobsApi.createMainCrawlJobIfNeeded(sourceId);
     return { id: sourceId, conversation_id: conversationId, source_id: sourceId } as { id: string; conversation_id: string; source_id: string };
   },
 

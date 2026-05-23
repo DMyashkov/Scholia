@@ -63,7 +63,7 @@ async function embedAndInsertChunks(
 type IndexChunkOptions = {
   crawlJobId?: string;
   conversationId?: string;
-  
+  sourceId?: string;
   addPageStyle?: boolean;
 };
 
@@ -75,7 +75,7 @@ async function indexChunkSpecsForRag(
 ): Promise<{ chunksCreated: number }> {
   if (chunkSpecs.length === 0) return { chunksCreated: 0 };
 
-  const { crawlJobId, conversationId, addPageStyle, pageCount } = options;
+  const { crawlJobId, conversationId, sourceId, addPageStyle, pageCount } = options;
   const totalChunks = chunkSpecs.length;
 
   if (crawlJobId) {
@@ -110,7 +110,7 @@ async function indexChunkSpecsForRag(
 
   let discoveredEmbedded = 0;
   if (conversationId) {
-    discoveredEmbedded = await embedDiscoveredLinks(conversationId, apiKey, crawlJobId);
+    discoveredEmbedded = await embedDiscoveredLinks(conversationId, apiKey, crawlJobId, sourceId);
   }
 
   return { chunksCreated: inserted + discoveredEmbedded };
@@ -180,6 +180,7 @@ export async function indexSourceForRag(
   return indexChunkSpecsForRag(chunkSpecs, apiKey, {
     crawlJobId,
     conversationId,
+    sourceId,
     pageCount: pages.length,
     logLabel: `(source ${sourceId.slice(0, 8)})`,
   });
@@ -402,12 +403,21 @@ async function getIndexedPageUrls(conversationId: string): Promise<Set<string>> 
   return new Set(pages.map((p) => normalizeUrlForCompare(p.url || '')));
 }
 
-async function embedDiscoveredLinks(conversationId: string, apiKey: string, crawlJobId?: string): Promise<number> {
+async function embedDiscoveredLinks(
+  conversationId: string,
+  apiKey: string,
+  crawlJobId?: string,
+  scopeSourceId?: string
+): Promise<number> {
   const indexedUrls = await getIndexedPageUrls(conversationId);
-  const { data: sources } = await supabase
+  let sourcesQuery = supabase
     .from('sources')
     .select('id, suggestion_mode')
     .eq('conversation_id', conversationId);
+  if (scopeSourceId) {
+    sourcesQuery = sourcesQuery.eq('id', scopeSourceId);
+  }
+  const { data: sources } = await sourcesQuery;
   const sourceIds = (sources ?? []).map((s) => s.id);
   const sourceModeMap = new Map((sources ?? []).map((s) => [s.id, (s as { suggestion_mode?: string }).suggestion_mode]));
   if (sourceIds.length === 0) return 0;
@@ -530,7 +540,7 @@ async function embedDiscoveredLinks(conversationId: string, apiKey: string, craw
     const skipped = links.length - toEmbed.length;
     console.log('[indexer] Embedded', updated, 'encoded_discovered', skipped > 0 ? `(skipped ${skipped} already-indexed)` : '');
   }
-  return 0;
+  return updated;
 }
 
 async function embedBatch(apiKey: string, texts: string[]): Promise<number[][]> {

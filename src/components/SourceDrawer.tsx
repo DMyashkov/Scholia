@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Source } from '@/types/source';
 import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import { RecrawlConfirmModal } from './RecrawlConfirmModal';
@@ -17,7 +17,6 @@ import { cn } from '@/lib/utils';
 import { ForceGraph } from './graph';
 import { CrawlStats } from './CrawlStats';
 import { getEncodingStatusLabel, getEncodingPhase } from './EncodingProgressBar';
-import { useEffect, useMemo, useRef } from 'react';
 import { useConversationPages, useConversationGraphEdges } from '@/hooks/usePages';
 import { crawlJobsApi, discoveredLinksApi } from '@/lib/db';
 import type { CrawlJob, PageEdge } from '@/lib/db/types';
@@ -141,15 +140,29 @@ export const SourceDrawer = ({
     return source.status || 'crawling';
   }, [source, crawlJob, addingPageSourceId]);
 
-  const isIndexing = crawlJob?.status === 'indexing' || addPageJob?.status === 'encoding';
   const isAddPageIndexing = addingPageSourceId === source?.id && addPageJob?.status === 'indexing';
   const isAddPageEncoding = addingPageSourceId === source?.id && addPageJob?.status === 'encoding';
   const isAddPageResponding = addingPageSourceId === source?.id && addPageJob?.status === 'completed';
-  const useAddPageProgress = (isAddPageEncoding || isAddPageResponding) && addPageJob;
-  const encChunksDone = useAddPageProgress ? (addPageJob.encoding_chunks_done ?? 0) : (crawlJob?.encoding_chunks_done ?? 0);
-  const encChunksTotal = useAddPageProgress ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob?.encoding_chunks_total ?? 0);
-  const encDiscoveredDone = useAddPageProgress ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob?.encoding_discovered_done ?? 0);
-  const encDiscoveredTotal = useAddPageProgress ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob?.encoding_discovered_total ?? 0);
+  const activeJobStatuses = ['queued', 'running', 'indexing', 'encoding'] as const;
+  const progressCrawlJob = useMemo((): typeof crawlJob => {
+    if (
+      addPageJob &&
+      activeJobStatuses.includes(addPageJob.status as (typeof activeJobStatuses)[number])
+    ) {
+      return addPageJob;
+    }
+    if (crawlJob && activeJobStatuses.includes(crawlJob.status as (typeof activeJobStatuses)[number])) {
+      return crawlJob;
+    }
+    return null;
+  }, [addPageJob, crawlJob]);
+
+  const isIndexing =
+    progressCrawlJob?.status === 'indexing' || progressCrawlJob?.status === 'encoding';
+  const encChunksDone = progressCrawlJob?.encoding_chunks_done ?? 0;
+  const encChunksTotal = progressCrawlJob?.encoding_chunks_total ?? 0;
+  const encDiscoveredDone = progressCrawlJob?.encoding_discovered_done ?? 0;
+  const encDiscoveredTotal = progressCrawlJob?.encoding_discovered_total ?? 0;
   const encodingPhase = getEncodingPhase(
     realStatus === 'crawling',
     isIndexing,

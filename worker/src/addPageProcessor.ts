@@ -319,13 +319,6 @@ export async function processAddPageJob(job: {
     }
 
     
-    const { data: edgesToNewPage } = await supabase.from('page_edges').select('id').eq('to_url', normalizedUrl);
-    const edgeIdsToClear = (edgesToNewPage ?? []).map((r) => r.id);
-    if (edgeIdsToClear.length > 0) {
-      const { error: clearErr } = await supabase.from('encoded_discovered').update({ embedding: null }).in('page_edge_id', edgeIdsToClear);
-      console.log('[add-page] cleared embeddings for links→newPage', { edgeCount: edgeIdsToClear.length, error: clearErr?.message ?? null });
-    }
-
     await updateCrawlJob(jobId, { status: 'completed' });
     console.log('[add-page] success', newPage.id?.slice(0, 8));
   } catch (err) {

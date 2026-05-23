@@ -78,7 +78,11 @@ export const CrawlStats = ({
                 <div>
                   <StatItem
                     label="Encoded Discovered"
-                    value={Math.max(encodedDiscoveredCount, encodingDiscoveredDone)}
+                    value={
+                      encodingDiscoveredTotal > 0
+                        ? encodingDiscoveredDone
+                        : Math.max(encodedDiscoveredCount, encodingDiscoveredDone)
+                    }
                     highlight={isResponding || isEncodingDiscoveredPhase || (isIndexing && encodingDiscoveredTotal > 0)}
                   />
                 </div>

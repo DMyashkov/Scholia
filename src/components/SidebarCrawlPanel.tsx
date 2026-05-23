@@ -230,7 +230,6 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   );
   
   const isCrawling = crawlingSources.length > 0 || !!addingPageSourceId;
-  const isIndexingFromJob = displaySources.some(s => crawlJobMap.get(s.id)?.status === 'indexing');
   const isAddingPageFlow = !!addingPageSourceId && displaySources.some(s => s.id === addingPageSourceId);
   const addPagePhase = addPageJob?.status;
   const isAddPageQueued = addPagePhase === 'queued';
@@ -239,19 +238,40 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
   const isAddPageResponding = addPagePhase === 'completed' && !!addingPageSourceId;
   const hasAnySources = sources.length > 0;
 
-  
-  const indexingJob = displaySources.find(s => crawlJobMap.get(s.id)?.status === 'indexing');
-  const crawlJob = indexingJob ? crawlJobMap.get(indexingJob.id) : null;
+  const activeJobStatuses = ['queued', 'running', 'indexing', 'encoding'] as const;
+  const progressCrawlJob = useMemo((): CrawlJob | null => {
+    if (addPageJob && activeJobStatuses.includes(addPageJob.status as (typeof activeJobStatuses)[number])) {
+      return addPageJob;
+    }
+    for (const s of displaySources) {
+      const j = crawlJobMap.get(s.id);
+      if (j && activeJobStatuses.includes(j.status as (typeof activeJobStatuses)[number])) {
+        return j as CrawlJob;
+      }
+    }
+    return null;
+  }, [addPageJob, displaySources, crawlJobMap]);
+
+  const isProgressFromAddPage =
+    !!addPageJob && progressCrawlJob?.id === addPageJob.id;
+  const isIndexingFromJob =
+    !!progressCrawlJob &&
+    (progressCrawlJob.status === 'indexing' || progressCrawlJob.status === 'encoding');
+
   const isDynamic = displaySources.some(s => s.crawlDepth === 'dynamic');
-  const useAddPageProgress = (isAddPageEncoding || isAddPageResponding) && addPageJob;
-  const encChunksDone = useAddPageProgress ? (addPageJob.encoding_chunks_done ?? 0) : (crawlJob as CrawlJob | null)?.encoding_chunks_done ?? 0;
-  const encChunksTotal = useAddPageProgress ? (addPageJob.encoding_chunks_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_chunks_total ?? 0;
-  const encDiscoveredDone = useAddPageProgress ? (addPageJob.encoding_discovered_done ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_done ?? 0;
-  const encDiscoveredTotal = useAddPageProgress ? (addPageJob.encoding_discovered_total ?? 0) : (crawlJob as CrawlJob | null)?.encoding_discovered_total ?? 0;
+  const encChunksDone = progressCrawlJob?.encoding_chunks_done ?? 0;
+  const encChunksTotal = progressCrawlJob?.encoding_chunks_total ?? 0;
+  const encDiscoveredDone = progressCrawlJob?.encoding_discovered_done ?? 0;
+  const encDiscoveredTotal = progressCrawlJob?.encoding_discovered_total ?? 0;
+
+  const encodedDiscoveredDisplay =
+    progressCrawlJob && encDiscoveredTotal > 0
+      ? encDiscoveredDone
+      : totalEncodedDiscovered;
 
   const encodingPhase = getEncodingPhase(
     isCrawling && !activeSource,
-    isIndexingFromJob || isAddPageEncoding,
+    isIndexingFromJob,
     encChunksTotal,
     encChunksDone,
     encDiscoveredTotal
@@ -351,6 +371,12 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
 
   const [graphSectionMounted, setGraphSectionMounted] = useState(false);
   useEffect(() => {
+    setGraphSectionMounted(false);
+    setActiveSourceId(null);
+    stableEdgesRef.current = [];
+  }, [conversationId]);
+
+  useEffect(() => {
     if (!graphSectionMounted && !pagesLoading && !edgesLoading && displayPagesForGraph.length > 0) {
       setGraphSectionMounted(true);
     }
@@ -439,7 +465,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
                 {isDynamic && (
                   <StatItem
                     label="Encoded Discovered"
-                    value={encDiscoveredTotal > 0 ? Math.max(encDiscoveredDone, totalEncodedDiscovered) : totalEncodedDiscovered}
+                    value={encodedDiscoveredDisplay}
                     highlight={isAddPageResponding || encodingPhase === 'encoding-discovered' || ((isIndexingFromJob || isAddPageEncoding) && encDiscoveredTotal > 0)}
                     tooltip="Links with embedded context; used for AI suggestions when adding pages."
                   />
@@ -457,7 +483,7 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
                 discoveredTotal={encDiscoveredTotal}
                 phase={encodingPhase}
                 isDynamic={isDynamic}
-                isCrawling={(isCrawling || isAddingPageFlow) && !isIndexingFromJob && !isAddPageEncoding}
+                isCrawling={(isCrawling || isAddingPageFlow) && !isIndexingFromJob}
                 isResponding={isAddPageResponding}
               />
             ) : null}

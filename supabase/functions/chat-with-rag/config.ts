@@ -19,3 +19,6 @@ export const STAGNATION_THRESHOLD = 0;
 export const INCLUDE_FILL_STATUS_BY_SLOT = true;
 
 export const FINAL_ANSWER_CHUNKS_CAP = 80;
+
+export const SUGGESTION_MATCH_COUNT_MIN = 2;
+export const SUGGESTION_MATCH_COUNT_MAX = 10;

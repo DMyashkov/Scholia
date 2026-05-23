@@ -1,6 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { embedBatch } from './embed.ts';
-import { capWithFairAllocation, deriveTitleFromUrl } from './utils.ts';
+import { deriveTitleFromUrl } from './utils.ts';
+import {
+  SUGGESTION_MATCH_COUNT_MAX,
+  SUGGESTION_MATCH_COUNT_MIN,
+} from './config.ts';
 
 export type SuggestedPage = {
   url: string;
@@ -20,9 +24,11 @@ type MatchRow = {
   distance: number;
 };
 
-
-
-
+export function perRpcMatchCount(limit: number, queryCount: number): number {
+  if (queryCount <= 0) return Math.min(SUGGESTION_MATCH_COUNT_MAX, Math.max(SUGGESTION_MATCH_COUNT_MIN, limit));
+  const raw = Math.ceil(limit / queryCount) + 1;
+  return Math.min(SUGGESTION_MATCH_COUNT_MAX, Math.max(SUGGESTION_MATCH_COUNT_MIN, raw));
+}
 
 export async function getTopSuggestedPages(
   supabase: SupabaseClient,
@@ -33,41 +39,43 @@ export async function getTopSuggestedPages(
   limit = 10,
 ): Promise<SuggestedPage[]> {
   if (sourceIds.length === 0) return [];
-  const queries = queryStrings.length > 0 ? queryStrings.slice(0, 4) : [userMessage.trim().slice(0, 300)];
+
+  const queries =
+    queryStrings.length > 0
+      ? queryStrings.map((q) => q.trim()).filter((q) => q.length > 0)
+      : [userMessage.trim().slice(0, 300)].filter((q) => q.length > 0);
+  if (queries.length === 0) return [];
+
+  const perRpc = perRpcMatchCount(limit, queries.length);
   const queryEmbs = await embedBatch(openaiKey, queries);
   const matchMap = new Map<string, { m: MatchRow; distance: number }>();
-  const matchesByQueryIndex: { m: MatchRow; distance: number }[][] = [];
+
   for (let i = 0; i < queryEmbs.length; i++) {
     const { data: matches, error: rpcErr } = await supabase.rpc('match_discovered_links', {
       query_embedding: queryEmbs[i],
       match_source_ids: sourceIds,
-      match_count: 12,
+      match_count: perRpc,
     });
     if (rpcErr) {
       console.warn('[expand_corpus] match_discovered_links error:', rpcErr.message);
-      matchesByQueryIndex.push([]);
       continue;
     }
     const list = (matches || []) as MatchRow[];
-    const withDist = list.map((m) => {
+    for (const m of list) {
       const dist = m.distance ?? 1;
       const key = `${m.source_id}:${m.to_url}`;
       const existing = matchMap.get(key);
       if (!existing || existing.distance > dist) {
         matchMap.set(key, { m, distance: dist });
       }
-      return { m, distance: dist };
-    });
-    matchesByQueryIndex.push(withDist);
+    }
   }
-  const topN = capWithFairAllocation(
-    matchMap,
-    matchesByQueryIndex,
-    limit,
-    (x) => `${x.m.source_id}:${x.m.to_url}`,
-    (x) => x.distance,
-  );
-  const topMatchRows = topN.map((x) => x.m);
+
+  const topMatchRows = Array.from(matchMap.values())
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, limit)
+    .map((x) => x.m);
+
   if (topMatchRows.length === 0) return [];
 
   const fromPageIds = [...new Set(topMatchRows.map((m) => m.from_page_id).filter(Boolean))] as string[];
@@ -87,10 +95,6 @@ export async function getTopSuggestedPages(
     fromPageTitle: (m.from_page_id ? titleByPageId.get(m.from_page_id) : null) ?? undefined,
   }));
 }
-
-
-
-
 
 export async function doExpandCorpus(
   supabase: SupabaseClient,

@@ -460,7 +460,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const finishedQueryingSlotNames = slots.filter((s) => s.finished_querying).map((s) => s.name);
     const topSuggestedPages: SuggestedPage[] | null =
       dynamicMode && sourceIds.length > 0
-        ? await getTopSuggestedPages(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun.slice(0, 3), suggestedPageCandidates)
+        ? await getTopSuggestedPages(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun, suggestedPageCandidates)
         : null;
     log('extract-call', { iteration, chunkCount: evidenceChunksForExtract.length, topSuggestedCount: topSuggestedPages?.length ?? 0 });
     const snippetPreviews = evidenceChunksForExtract.map((q) => (q.snippet ?? '').slice(0, 120));
@@ -748,7 +748,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
           const oneBased = typeof idx === 'number' && idx >= 1 && idx <= topSuggestedPages.length ? idx : 1;
           suggestedPage = topSuggestedPages[oneBased - 1];
         } else {
-          suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun.slice(0, 3));
+          suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun);
         }
         if (suggestedPage) log('expand-suggested', { url: suggestedPage.url });
       }
@@ -798,7 +798,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
             ? 'Suggesting a page to add.'
             : thoughtProcess.hardStopReason + '; suggesting a page to add.';
           await emit({ thoughtProcess: { ...thoughtProcess } });
-          const suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun.slice(0, 3));
+          const suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun);
           if (suggestedPage) log('expand-suggested-on-stagnation', { url: suggestedPage.url });
           const stagnationModelMessage = (lastExtractResult?.why ?? '').trim();
           const stubContent = stagnationModelMessage.length > 0

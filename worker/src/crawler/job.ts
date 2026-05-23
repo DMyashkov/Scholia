@@ -88,16 +88,5 @@ export async function claimJob(): Promise<CrawlJob | null> {
     return null;
   }
 
-  const { data: cancelled } = await supabase
-    .from('crawl_jobs')
-    .update({ status: 'cancelled', updated_at: now })
-    .eq('source_id', updated.source_id)
-    .eq('status', 'queued')
-    .neq('id', updated.id)
-    .select('id');
-  if (cancelled?.length) {
-    console.log('[worker] cancelled duplicate queued jobs for source', updated.source_id.slice(0, 8), 'count:', cancelled.length);
-  }
-
   return updated as CrawlJob;
 }

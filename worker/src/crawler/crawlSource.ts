@@ -65,23 +65,21 @@ async function crawlSourceWithConversationId(
   let newPagesCount = 0;
 
   
-  const existingForSource = new Set<string>();
+  const existingInConversation = new Set<string>();
+  
   const existingPageIdByUrl = new Map<string, string>();
-  const { data: existingPagesOnSource } = await supabase
-    .from('pages')
-    .select('id, url')
-    .eq('source_id', source.id);
-  (existingPagesOnSource ?? []).forEach((p: { id: string; url: string }) => {
-    const norm = normalizeUrlForCrawl(p.url);
-    existingForSource.add(norm);
-    existingPageIdByUrl.set(norm, p.id);
-  });
-
   const { data: convSources } = await supabase.from('sources').select('id').eq('conversation_id', conversationId);
   const convSourceIds = (convSources ?? []).map((s: { id: string }) => s.id);
-
+  if (convSourceIds.length > 0) {
+    const { data: existingPages } = await supabase.from('pages').select('id, url').in('source_id', convSourceIds);
+    (existingPages ?? []).forEach((p: { id: string; url: string }) => {
+      const norm = normalizeUrlForCrawl(p.url);
+      existingInConversation.add(norm);
+      existingPageIdByUrl.set(norm, p.id);
+    });
+  }
   const seedNorm = seedUrls[0] ? normalizeUrlForCrawl(seedUrls[0]) : '';
-  const seedInSet = seedNorm && existingForSource.has(seedNorm);
+  const seedInSet = seedNorm && existingInConversation.has(seedNorm);
   const seedPageId = seedNorm ? existingPageIdByUrl.get(seedNorm) ?? null : null;
 
   let sourceTitleUpdated = false;
@@ -107,29 +105,6 @@ async function crawlSourceWithConversationId(
   const sourceShort = new URL(firstSeedUrl).pathname?.replace(/^\/wiki\//, '') || firstSeedUrl.slice(0, 40);
   const crawlDepth = (source as { crawl_depth?: string }).crawl_depth ?? 'shallow';
   const isDynamic = crawlDepth === 'dynamic';
-  const isMainDynamicSeed = isDynamic && !(explicitKey && explicitKey.length > 0);
-
-  console.log('[crawl] start', {
-    job: job.id.slice(0, 8),
-    source: source.id.slice(0, 8),
-    dynamic: isDynamic,
-    mainSeedOnly: isMainDynamicSeed,
-    seedUrlCount: seedUrls.length,
-    maxPages,
-    existingPagesOnSource: existingForSource.size,
-  });
-
-  if (isMainDynamicSeed && seedInSet && seedPageId) {
-    console.log('[crawl] dynamic seed already indexed on this source — skip re-scrape, run indexing only');
-    await updateCrawlJob(job.id, { status: 'indexing', updated_at: new Date().toISOString() });
-    try {
-      await indexSourceForRag(source.id, job.id, conversationId);
-    } catch (err) {
-      console.warn('[crawl] RAG indexing failed (duplicate main job)', err);
-    }
-    await updateJobStatus(job.id, 'completed', null, null, new Date().toISOString());
-    return;
-  }
 
   while (queue.length > 0 && newPagesCount < maxPages) {
     const { data: sourceCheck } = await supabase.from('sources').select('id').eq('id', source.id).single();
@@ -156,7 +131,7 @@ async function crawlSourceWithConversationId(
 
     try {
       if (!conversationId) throw new Error(`conversationId is null before calling crawlPage!`);
-      const result = await crawlPage(normalizedUrl, source, conversationId, existingForSource);
+      const result = await crawlPage(normalizedUrl, source, conversationId, existingInConversation);
       if (!result) {
         visited.add(normalizedUrl);
         continue;
@@ -167,7 +142,7 @@ async function crawlSourceWithConversationId(
       if (inserted && page) {
         newPagesCount++;
         const norm = normalizeUrlForCrawl(normalizedUrl);
-        existingForSource.add(norm);
+        existingInConversation.add(norm);
         existingPageIdByUrl.set(norm, page.id);
       }
 

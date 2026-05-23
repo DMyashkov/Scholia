@@ -101,31 +101,6 @@ export const crawlJobsApi = {
     return data as CrawlJob;
   },
 
-  async createMainCrawlJobIfNeeded(sourceId: string) {
-    const jobs = await this.listBySource(sourceId);
-    const mainJobs = jobs.filter((j) => j.explicit_crawl_urls == null);
-    const inFlight = mainJobs.find((j) =>
-      ['queued', 'running', 'indexing', 'encoding'].includes(j.status)
-    );
-    if (inFlight) return inFlight;
-    for (const j of mainJobs.filter((j) => j.status === 'queued')) {
-      await this.update(j.id, { status: 'cancelled' });
-    }
-    return this.create({
-      source_id: sourceId,
-      status: 'queued',
-      indexed_count: 0,
-      discovered_count: 0,
-      total_pages: null,
-      error_message: null,
-      started_at: null,
-      completed_at: null,
-      last_activity_at: null,
-      encoding_chunks_done: 0,
-      encoding_discovered_done: 0,
-    });
-  },
-
   async update(id: string, updates: Partial<CrawlJob>) {
     const { data, error } = await supabase
       .from('crawl_jobs')

@@ -44,4 +44,20 @@ export const messagesApi = {
 
     if (error) throw error;
   },
+
+  async deleteFrom(conversationId: string, messageId: string) {
+    const { data: msg, error: fetchErr } = await supabase
+      .from('messages')
+      .select('created_at')
+      .eq('id', messageId)
+      .single();
+    if (fetchErr || !msg) throw fetchErr ?? new Error('Message not found');
+
+    const { error } = await supabase
+      .from('messages')
+      .delete()
+      .eq('conversation_id', conversationId)
+      .gte('created_at', (msg as { created_at: string }).created_at);
+    if (error) throw error;
+  },
 };

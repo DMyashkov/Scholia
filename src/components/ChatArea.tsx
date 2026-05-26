@@ -37,6 +37,7 @@ interface ChatAreaProps {
   onDynamicModeChange?: (enabled: boolean) => void;
   onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, scrapedPageDisplay?: string) => Promise<void>;
   addingPageSourceId?: string | null;
+  onEditMessage?: (messageId: string, newContent: string) => Promise<void>;
 }
 
 export const ChatArea = ({
@@ -58,6 +59,7 @@ export const ChatArea = ({
   onDynamicModeChange,
   onAddSuggestedPage,
   addingPageSourceId,
+  onEditMessage,
 }: ChatAreaProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [addSourceOpen, setAddSourceOpen] = useState(false);
@@ -240,6 +242,8 @@ export const ChatArea = ({
                     onSourceClick={handleKnowledgeTrailClick}
                     onAddSuggestedPage={onAddSuggestedPage}
                     conversationId={conversation.id}
+                    onEditMessage={onEditMessage}
+                    isEditingDisabled={isLoading || !!addingPageSourceId}
                   />
                 );
               })}

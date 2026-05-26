@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { User, Sparkles, Layers, Plus, Loader2 } from 'lucide-react';
+import { User, Sparkles, Layers, Plus, Loader2, Pencil, CornerDownLeft, X } from 'lucide-react';
 import { Message, SuggestedPage } from '@/types/chat';
 import { Quote } from '@/types/source';
 import { cn } from '@/lib/utils';
@@ -16,7 +16,7 @@ import {
 
 interface ChatMessageProps {
   message: Message;
-  
+
   followUp?: Message;
   isStreaming?: boolean;
   sources?: { id: string; domain: string }[];
@@ -24,6 +24,8 @@ interface ChatMessageProps {
   onSourceClick?: (sourceId: string) => void;
   onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, scrapedPageDisplay?: string) => Promise<void>;
   conversationId?: string | null;
+  onEditMessage?: (messageId: string, newContent: string) => Promise<void>;
+  isEditingDisabled?: boolean;
 }
 
 export const ChatMessage = ({
@@ -33,12 +35,60 @@ export const ChatMessage = ({
   onQuoteClick,
   onAddSuggestedPage,
   conversationId,
+  onEditMessage,
+  isEditingDisabled,
 }: ChatMessageProps) => {
   const isUser = message.role === 'user';
   const quotes = message.quotes || [];
   const tp = message.thoughtProcess;
   const isComplex = (tp?.iterationCount ?? 0) > 2 || message.wasMultiStep;
   const completionPct = tp?.completeness != null ? Math.round(tp.completeness * 100) : null;
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleEditClick = () => {
+    setEditContent(message.content);
+    setIsEditing(true);
+    setTimeout(() => {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = ta.value.length;
+      }
+    }, 0);
+  };
+
+  const handleEditCancel = () => {
+    setIsEditing(false);
+    setEditContent('');
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editContent.trim() || !onEditMessage || isSubmittingEdit) return;
+    setIsSubmittingEdit(true);
+    try {
+      await onEditMessage(message.id, editContent.trim());
+      setIsEditing(false);
+      setEditContent('');
+    } catch (err) {
+      toast.error('Failed to edit message', { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  };
+
+  const handleEditKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      handleEditSubmit();
+    }
+    if (e.key === 'Escape') {
+      handleEditCancel();
+    }
+  };
 
   return (
     <div
@@ -105,18 +155,75 @@ export const ChatMessage = ({
                 </Tooltip>
               )}
             </div>
-            <CopyMessageButton message={message} className="h-8 w-8 shrink-0 opacity-70 hover:opacity-100" />
+            <div className="flex items-center gap-1 shrink-0">
+              {isUser && !isStreaming && !isEditing && onEditMessage && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={handleEditClick}
+                      disabled={isEditingDisabled}
+                      className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary opacity-70 hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity"
+                      aria-label="Edit message"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Edit & resend</TooltipContent>
+                </Tooltip>
+              )}
+              {!isEditing && <CopyMessageButton message={message} className="h-8 w-8 shrink-0 opacity-70 hover:opacity-100" />}
+            </div>
           </div>
-          <div className="prose prose-invert prose-sm max-w-none">
-            <MessageContent 
-              content={message.content} 
-              quotes={quotes}
-              onQuoteClick={onQuoteClick}
-            />
-            {isStreaming && (
-              <span className="inline-block w-2 h-4 ml-1 bg-primary animate-pulse-glow" />
-            )}
-          </div>
+          {isEditing ? (
+            <div className="space-y-2">
+              <textarea
+                ref={textareaRef}
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                onKeyDown={handleEditKeyDown}
+                disabled={isSubmittingEdit}
+                className="w-full min-h-[80px] rounded-md border border-border bg-secondary/50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-y disabled:opacity-50"
+                rows={3}
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleEditSubmit}
+                  disabled={isSubmittingEdit || !editContent.trim()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isSubmittingEdit ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CornerDownLeft className="h-3.5 w-3.5" />
+                  )}
+                  {isSubmittingEdit ? 'Sending…' : 'Send'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEditCancel}
+                  disabled={isSubmittingEdit}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border border-border hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Cancel
+                </button>
+                <span className="text-xs text-muted-foreground ml-1">⌘↵ to send · Esc to cancel</span>
+              </div>
+            </div>
+          ) : (
+            <div className="prose prose-invert prose-sm max-w-none">
+              <MessageContent
+                content={message.content}
+                quotes={quotes}
+                onQuoteClick={onQuoteClick}
+              />
+              {isStreaming && (
+                <span className="inline-block w-2 h-4 ml-1 bg-primary animate-pulse-glow" />
+              )}
+            </div>
+          )}
 
           {}
           {!isUser && !isStreaming && quotes.length > 0 && onQuoteClick && (

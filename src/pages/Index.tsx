@@ -45,6 +45,7 @@ const Index = () => {
     selectConversation,
     deleteConversation,
     sendMessage,
+    editAndResendMessage,
     addSourceToConversation,
     removeSourceFromConversation,
     recrawlSource,
@@ -245,6 +246,7 @@ const Index = () => {
           onDynamicModeChange={handleDynamicModeChange}
           onAddSuggestedPage={handleAddSuggestedPage}
           addingPageSourceId={addingPageSourceId}
+          onEditMessage={editAndResendMessage}
         />
 
         <GuestModeRequiredModal

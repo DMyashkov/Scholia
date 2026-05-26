@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useConversations, useCreateConversation, useDeleteConversation, useUpdateConversation, useDeleteAllConversations, DELETE_ALL_CONVERSATIONS_EVENT } from './useConversations';
 import { useMessages, useCreateMessage, useUpdateMessage } from './useMessages';
+import { messagesApi } from '@/lib/db/messages';
 import { useConversationSources, useAddSourceToConversation, useRemoveSourceFromConversation, useCheckExistingSource } from './useConversationSources';
 import { recrawlSource as recrawlSourceApi } from '@/lib/db/recrawl';
 import { crawlJobsApi } from '@/lib/db';
@@ -661,6 +662,13 @@ export const useChatDatabase = () => {
     setIsLoading(false);
   }, [activeConversationId, isLoading, currentSources, createConversationMutation, createMessageMutation, queryClient]);
 
+  const editAndResendMessage = useCallback(async (messageId: string, newContent: string) => {
+    if (!activeConversationId) return;
+    await messagesApi.deleteFrom(activeConversationId, messageId);
+    await queryClient.refetchQueries({ queryKey: ['messages', activeConversationId] });
+    await sendMessage(newContent);
+  }, [activeConversationId, queryClient, sendMessage]);
+
   return {
     conversations,
     activeConversation,
@@ -674,6 +682,7 @@ export const useChatDatabase = () => {
     selectConversation,
     deleteConversation,
     sendMessage,
+    editAndResendMessage,
     addSourceToConversation,
     removeSourceFromConversation,
     recrawlSource,

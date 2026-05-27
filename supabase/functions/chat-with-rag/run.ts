@@ -283,14 +283,25 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     for (const s of slots) countBySlot.set(s.id, 0);
 
     const distinctKeysByMappingCoverageSlotId = new Map<string, Set<string>>();
+    const distinctValuesByListSlotId = new Map<string, Set<string>>();
     const { data: items } = await supabase
       .from('slot_items')
-      .select('slot_id, key')
+      .select('slot_id, key, value_json')
       .in('slot_id', slots.map((s) => s.id));
 
-    for (const row of (items ?? []) as { slot_id: string; key: string | null }[]) {
+    for (const row of (items ?? []) as { slot_id: string; key: string | null; value_json: unknown }[]) {
       const slot = slotById.get(row.slot_id);
       if (!slot) continue;
+
+      if (slot.type === 'list') {
+        let set = distinctValuesByListSlotId.get(row.slot_id);
+        if (!set) {
+          set = new Set<string>();
+          distinctValuesByListSlotId.set(row.slot_id, set);
+        }
+        set.add(slotValueDedupKey(row.value_json));
+        continue;
+      }
 
       if (slot.type === 'mapping' && (slot.items_per_key ?? 0) === 0) {
         if (row.key == null) continue;
@@ -309,6 +320,9 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     for (const [slotId, keys] of distinctKeysByMappingCoverageSlotId.entries()) {
       countBySlot.set(slotId, keys.size);
     }
+    for (const [slotId, values] of distinctValuesByListSlotId.entries()) {
+      countBySlot.set(slotId, values.size);
+    }
 
     return countBySlot;
   };
@@ -316,12 +330,25 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
   const slotsWithAttempts = slots.filter((s) => s.type === 'list' || s.type === 'mapping');
 
   const getCurrentSlotItemsState = async (): Promise<SlotSnapshotState> => {
+    const slotById = new Map(slots.map((s) => [s.id, s]));
     const { data: items } = await supabase
       .from('slot_items')
       .select('slot_id, key, value_json')
       .in('slot_id', slots.map((s) => s.id));
     const bySlot = new Map<string, { key: string | null; value: unknown }[]>();
+    const seenListValueBySlotId = new Map<string, Set<string>>();
     for (const row of (items ?? []) as { slot_id: string; key: string | null; value_json: unknown }[]) {
+      const slot = slotById.get(row.slot_id);
+      if (slot?.type === 'list') {
+        const dk = slotValueDedupKey(row.value_json);
+        let seen = seenListValueBySlotId.get(row.slot_id);
+        if (!seen) {
+          seen = new Set();
+          seenListValueBySlotId.set(row.slot_id, seen);
+        }
+        if (seen.has(dk)) continue;
+        seen.add(dk);
+      }
       const list = bySlot.get(row.slot_id) ?? [];
       list.push({ key: row.key, value: row.value_json });
       bySlot.set(row.slot_id, list);

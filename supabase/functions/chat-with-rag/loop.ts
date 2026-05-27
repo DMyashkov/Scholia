@@ -253,12 +253,14 @@ export async function insertClaims(
       continue;
     }
 
-    const { data: existingList } = await supabase
+    // PostgREST: .eq('key', null) does not match NULL keys — use .is() for list slots.
+    let existingQuery = supabase
       .from('slot_items')
       .select('id, value_json')
-      .eq('slot_id', slotId)
-      .eq('key', key)
-      .limit(500);
+      .eq('slot_id', slotId);
+    existingQuery =
+      key == null ? existingQuery.is('key', null) : existingQuery.eq('key', key);
+    const { data: existingList } = await existingQuery.limit(500);
     const existing = (existingList ?? []).find(
       (row) => slotValueDedupKey(row.value_json) === dedupKey,
     );

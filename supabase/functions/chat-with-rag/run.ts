@@ -25,6 +25,7 @@ import { slotCompleteness, overallCompleteness } from './completeness.ts';
 import type { SlotForCompleteness, SlotCompletenessMeta } from './completeness.ts';
 import { doExpandCorpus, getTopSuggestedPages, type SuggestedPage } from './expand.ts';
 import { getLastMessages } from './chat.ts';
+import { buildCorpusContextBlock } from './corpusContext.ts';
 
 export type Emit = (obj: unknown) => Promise<void>;
 export type Log = (phase: string, detail?: Record<string, unknown>) => void;
@@ -169,7 +170,12 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
   if (!planResult) {
     log('plan-call');
-    planResult = await callPlan(openaiKey, userMsg);
+    const corpusContext = buildCorpusContextBlock({
+      pages,
+      sourceById,
+      leadChunks: leadList,
+    });
+    planResult = await callPlan(openaiKey, userMsg, corpusContext);
     log('plan-result', { action: planResult.action, slotCount: planResult.slots.length, subqueryCount: planResult.subqueries.length });
     const { data: stepRow, error: stepErr } = await supabase
       .from('reasoning_steps')

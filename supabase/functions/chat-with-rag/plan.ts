@@ -1,32 +1,13 @@
 import type { PlanResult, PlanSlot, PlanSubquery, SlotType } from './types.ts';
 import { OPENAI_CHAT_MODEL } from './config.ts';
+import { buildPlanUserMessage } from './corpusContext.ts';
+import { PLAN_SYSTEM } from './prompts.ts';
 
-const PLAN_SYSTEM = `You plan semantic search and evidence gathering for a question over indexed documents.
-
-Output JSON only with this shape:
-- why: short reason for this action
-- slots: array of slot objects. Fields: name, type, description?, dependsOn?, target_item_count? (list), items_per_key? (mapping only).
-  - type is one of: "scalar" (one value), "list" (set of items), "mapping" (key->value per list item; use dependsOn: slot name of the list)
-
-  - dependsOn: slot whose extracted values are required to build this slot’s query. 
-  Use only when independent querying can't be meaningfully done without those values. (mapping always depends on a list)
-
-  - description: one short sentence for what this slot represents (helps extraction and UI)
-  
-  - target_item_count: for list slots only. Set to the number of items the user asked for (e.g. "top 5 products" -> 5). 
-  Set to 0 if the user did not specify a concrete number. Omit or 0 for scalar/mapping.
-
-  - items_per_key: (mapping only) Values per key (e.g. "top 2 achievements per product" -> 2). Backend: target = dependency target_item_count × items_per_key. Include in slots array for every mapping slot.
-
-- subqueries: array of { slot, query } — only for slots that have no dependencies (omit dependsOn). 
-Each query is a search phrase for the slot. Do not include subqueries for mapping slots or any slot that dependsOn another; those are run later once dependencies are filled.
-
-Rules:
-- Start with action "retrieve" unless the question is ambiguous (then "clarify" with questions).
-- Subqueries: only for slots with no dependencies (scalars and lists that do not dependOn another slot). 
-For scalar slots use 1–2 focused queries. For list slots use 1–2 high-level discovery (BROAD) queries (e.g. "company product list", "Biden major achievements").`;
-
-export async function callPlan(apiKey: string, userMessage: string): Promise<PlanResult> {
+export async function callPlan(
+  apiKey: string,
+  userMessage: string,
+  corpusContext = '',
+): Promise<PlanResult> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -34,7 +15,7 @@ export async function callPlan(apiKey: string, userMessage: string): Promise<Pla
       model: OPENAI_CHAT_MODEL,
       messages: [
         { role: 'system', content: PLAN_SYSTEM },
-        { role: 'user', content: userMessage },
+        { role: 'user', content: buildPlanUserMessage(userMessage, corpusContext) },
       ],
       response_format: { type: 'json_object' },
     }),

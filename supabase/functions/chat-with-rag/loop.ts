@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ExtractClaim, ExtractResult, ExtractSubquery } from './types.ts';
 import type { SuggestedPage } from './expand.ts';
 import { OPENAI_CHAT_MODEL } from './config.ts';
+import { EXTRACT_SYSTEM } from './prompts.ts';
 
 export interface SlotRow {
   id: string;
@@ -17,42 +18,6 @@ export interface EvidenceChunk {
   id: string;
   snippet: string;
 }
-
-const EXTRACT_SYSTEM = `You extract atomic claims from the provided evidence (chunks) and decide the next step.
-
-Output JSON only:
-{
-  "claims": [
-    { "slot": "slot_name", "value": <atomic value: string or number>, "key": "<only for mapping slots>", "confidence": 0.0-1.0, "chunkIds": ["chunk-uuid-1", "chunk-uuid-2"] }
-  ],
-  "next_action": "retrieve" | "expand_corpus" | "clarify" | "answer",
-  "why": "short reason",
-  "subqueries": "optional: when next_action is retrieve, array of { "slot": "slot_name", "query": "search phrase" } or for mapping slots { "slot": "slot_name", "query": "__map__", "map_description": "optional phrase per key (e.g. achievements)" }; backend expands __map__ to one query per key from the dependency list",
-  "questions": "optional: when next_action is clarify, array of clarifying question strings",
-  "suggested_page_index": "optional: when next_action is expand_corpus and a candidate list was provided, integer 1–10 (1 = first); omit for first",
-  "broad_query_completed_slot_fully": "optional: array of BROAD slot names (listed below) for which no more retrieval is needed; evidence sufficient."
-}
-
-Rules:
-- Claims: only from given chunks; each claim must list at least one chunkId (exact UUID from [uuid] lines). 
-Scalar: one value, no key. List: one claim per item. Mapping: key = one of the dependency slot's entity names from current slot state; do not invent keys.
-
-- Prefer "retrieve" or "answer"; use "expand_corpus" only when evidence genuinely lacks the facts (not merely spread across chunks). 
-Use "clarify" only when the question is ambiguous, not when evidence is missing.
-
-- Answer: Set next_action to "answer" only when every slot that matters for the user’s question has been filled (non-empty / at target) and a useful answer can be given, or retrieval has clearly stagnated and no further useful evidence is likely. 
-Backend runs a separate final-answer step; you do not write answer text.
-
-- Subqueries: omit for (a) slots that have finished querying (listed below), (b) scalar slots that already have a value in current slot state, 
-(c) list/mapping slots that have reached target (see "Slots to fill" targets; target 0 = no fixed target, continue until broad_query_completed_slot_fully or stagnate). 
-Only suggest subqueries for slots that still need retrieval after your claims.
-For mapping slots you may output a single map directive: { "slot": "slot_name", "query": "__map__", "map_description": "optional phrase per key" }; backend will expand it into one query per key from the dependency list (matrix).
-
-- BROAD vs TARGETED: Backend lists BROAD slots this step. Use broad-style only for those; targeted for other list/mapping. 
-For BROAD slots you may set broad_query_completed_slot_fully if no more retrieval needed. Never repeat an identical query; use "last queries and items" to try something different.
-
-- Candidate suggested pages: prefer "expand_corpus" only when evidence genuinely lacks info AND a candidate is clearly relevant; 
-otherwise "retrieve" with subqueries or "answer". If expand_corpus, set suggested_page_index (1–10) or omit for first.`;
 
 export async function callExtractAndDecide(
   apiKey: string,

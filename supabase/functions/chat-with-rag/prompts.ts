@@ -25,6 +25,8 @@ Rules:
 - Start with action "retrieve" unless the question is ambiguous (then "clarify" with questions).
 - Subqueries: only for slots with no dependencies (scalars and lists that do not dependOn another slot). 
 For scalar slots use 1–2 focused queries. For list slots use 1–2 high-level discovery (BROAD) queries (e.g. "company product list", "Biden major achievements").
+- Make sure each slot serves a different function; avoid duplicates. If two slots would produce mostly the same claims, keep only one.
+- Descriptions should be concrete. For mapping slots, say what the key is and what the value is.
 - Language: If the user message includes an "Indexed corpus" section, infer the primary language of the crawled site from its domains, page titles, and sample passages. Write every slot name, slot description, and subquery search phrase in that corpus language—even when the question is in another language.`;
 
 export const EXTRACT_SYSTEM = `You extract atomic claims from the provided evidence (chunks) and decide the next step.

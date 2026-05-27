@@ -54,6 +54,47 @@ function targetTooltipLineForSlot(slot: ThoughtProcessSlot): string | null {
   return null;
 }
 
+function countFilledInSnapshot(entry: SlotSnapshotEntry): number {
+  if (entry.type === 'scalar') return entry.items.length > 0 ? 1 : 0;
+  return entry.items.length;
+}
+
+/** Match backend getEffectiveTarget using snapshot counts at this step. */
+function snapshotTargetForSlot(
+  slotMeta: ThoughtProcessSlot,
+  slots: ThoughtProcessSlot[],
+  snapshot: Record<string, SlotSnapshotEntry>,
+): number | null {
+  if (slotMeta.type === 'scalar') return 1;
+  if (slotMeta.type === 'list') {
+    const n = slotMeta.targetItemCount ?? 0;
+    return n > 0 ? n : null;
+  }
+  if (slotMeta.type === 'mapping' && slotMeta.dependsOn && slotMeta.itemsPerKey != null && slotMeta.itemsPerKey >= 1) {
+    const parent = snapshot[slotMeta.dependsOn];
+    const parentFilled = parent ? countFilledInSnapshot(parent) : 0;
+    if (parentFilled > 0) return parentFilled * slotMeta.itemsPerKey;
+    const parentMeta = slots.find((s) => s.name === slotMeta.dependsOn);
+    const parentPlanTarget = parentMeta?.targetItemCount ?? 0;
+    if (parentPlanTarget > 0) return parentPlanTarget * slotMeta.itemsPerKey;
+    return null;
+  }
+  return null;
+}
+
+function formatSnapshotFillLabel(
+  slotMeta: ThoughtProcessSlot | undefined,
+  entry: SlotSnapshotEntry,
+  slots: ThoughtProcessSlot[],
+  snapshot: Record<string, SlotSnapshotEntry>,
+): string {
+  const filled = countFilledInSnapshot(entry);
+  if (!slotMeta) return `${filled}`;
+  const target = snapshotTargetForSlot(slotMeta, slots, snapshot);
+  if (target != null && target > 0) return `${filled} / ${target}`;
+  return `${filled}`;
+}
+
 function SlotFillSummaryTable({ rows }: { rows: SlotFillSummaryRow[] }) {
   if (rows.length === 0) return null;
   return (
@@ -95,7 +136,13 @@ function SlotFillSummaryTable({ rows }: { rows: SlotFillSummaryRow[] }) {
   );
 }
 
-function SlotSnapshotBlock({ snapshot }: { snapshot: Record<string, SlotSnapshotEntry> }) {
+function SlotSnapshotBlock({
+  snapshot,
+  slots = [],
+}: {
+  snapshot: Record<string, SlotSnapshotEntry>;
+  slots?: ThoughtProcessSlot[];
+}) {
   const [open, setOpen] = useState(false);
   const entries = Object.entries(snapshot);
   if (entries.length === 0) return null;
@@ -104,14 +151,18 @@ function SlotSnapshotBlock({ snapshot }: { snapshot: Record<string, SlotSnapshot
       <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/25 transition-colors rounded-lg">
         <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
         <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Slot snapshot</span>
-        <span className="text-[10px] text-muted-foreground/80">({entries.length})</span>
+        <span className="text-[10px] text-muted-foreground/80">({entries.length} slots)</span>
       </CollapsibleTrigger>
       <CollapsibleContent className="px-3 pb-2.5 pt-0 space-y-2 border-t border-border/30">
-        {entries.map(([name, entry]) => (
+        {entries.map(([name, entry]) => {
+          const slotMeta = slots.find((s) => s.name === name);
+          const fillLabel = formatSnapshotFillLabel(slotMeta, entry, slots, snapshot);
+          return (
           <div key={name} className="text-xs">
-            <p className="font-medium text-foreground/85 mb-1">
-              {name}
-              <span className="text-muted-foreground font-normal"> · {entry.type}</span>
+            <p className="font-medium text-foreground/85 mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <span>{name}</span>
+              <span className="text-muted-foreground font-normal">· {entry.type}</span>
+              <span className="text-[10px] font-medium tabular-nums text-primary/90">{fillLabel}</span>
             </p>
             {entry.type === 'scalar' && (
               <p className="text-muted-foreground pl-2 border-l-2 border-border/60">
@@ -154,7 +205,8 @@ function SlotSnapshotBlock({ snapshot }: { snapshot: Record<string, SlotSnapshot
               <p className="text-muted-foreground pl-2 text-[11px]">{entry.items.length} item(s)</p>
             )}
           </div>
-        ))}
+          );
+        })}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -397,7 +449,7 @@ function PhaseContent({
                       </div>
                     )}
                     {step.slotSnapshot && Object.keys(step.slotSnapshot).length > 0 && (
-                      <SlotSnapshotBlock snapshot={step.slotSnapshot} />
+                      <SlotSnapshotBlock snapshot={step.slotSnapshot} slots={tp.slots ?? []} />
                     )}
                     {step.nextAction && (
                       <div className="pt-1.5">

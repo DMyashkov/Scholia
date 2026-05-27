@@ -47,6 +47,7 @@ Output JSON only:
 Rules:
 - Claims: only from given chunks; each claim must list at least one chunkId (exact UUID from [uuid] lines). 
 Scalar: one value, no key. List: one claim per distinct NEW item only—never re-emit a value already in Current slot state (same entity with different spacing or punctuation counts as duplicate). 
+List target_item_count is a minimum, not a cap: if the list already has at least that many items and this step's chunks name another distinct variety/entity not in state, still emit a list claim for it. Do not skip new list items just because count >= target.
 It is fine to add list claims during a step focused on another slot if this step's chunks name an item not already listed. Use one canonical spelling per name (trim; normalize spaces around parentheses). 
 Mapping: key = one of the dependency slot's entity names from current slot state (use the exact string from state when possible); do not invent keys.
 

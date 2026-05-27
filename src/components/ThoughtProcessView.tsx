@@ -194,19 +194,33 @@ function SlotSnapshotBlock({
               </ul>
             )}
             {entry.type === 'mapping' && (
-              <ul className="pl-2 border-l-2 border-border/60 space-y-0.5 text-muted-foreground font-mono text-[11px]">
+              <div className="pl-2 border-l-2 border-border/60 space-y-1 text-muted-foreground font-mono text-[11px]">
                 {entry.items.length === 0 ? (
-                  <li className="italic font-sans">no pairs</li>
+                  <p className="italic font-sans">no pairs</p>
                 ) : (
-                  entry.items.map((item, i) => (
-                    <li key={i} className="leading-snug">
-                      <span className="text-foreground/75">{item.key ?? '—'}</span>
-                      <span className="text-muted-foreground/60">: </span>
-                      {formatSlotValue(item.value)}
-                    </li>
-                  ))
+                  (() => {
+                    const valuesByKey = new Map<string, unknown[]>();
+                    for (const item of entry.items) {
+                      const key = (item.key ?? '—').toString();
+                      const arr = valuesByKey.get(key) ?? [];
+                      arr.push(item.value);
+                      valuesByKey.set(key, arr);
+                    }
+                    return Array.from(valuesByKey.entries()).map(([key, values]) => (
+                      <div key={key} className="leading-snug">
+                        <div className="flex flex-wrap gap-x-1.5 items-baseline">
+                          <span className="text-foreground/75">{key}:</span>
+                        </div>
+                        <ul className="pl-4 list-disc space-y-0.5">
+                          {values.map((v, i) => (
+                            <li key={i}>{formatSlotValue(v)}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ));
+                  })()
                 )}
-              </ul>
+              </div>
             )}
             {entry.type !== 'scalar' && entry.type !== 'list' && entry.type !== 'mapping' && (
               <p className="text-muted-foreground pl-2 text-[11px]">{entry.items.length} item(s)</p>
@@ -377,17 +391,50 @@ function PhaseContent({
                       )}
                     </div>
                     {step.subqueries && step.subqueries.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 items-center">
-                        <Search className="h-3 w-3 text-muted-foreground shrink-0" />
-                        {step.subqueries.map((sq, qi) => (
-                          <span
-                            key={qi}
-                            className="text-[11px] px-1.5 py-0.5 rounded bg-muted/50 text-muted-foreground border border-border/50 font-mono"
-                            title={sq.slot ? `Slot: ${sq.slot}` : undefined}
-                          >
-                            &ldquo;{sq.query}&rdquo;{sq.slot ? ` (${sq.slot})` : ''}
-                          </span>
-                        ))}
+                      <div className="flex flex-wrap gap-1.5 items-start">
+                        {(() => {
+                          const bySlot = new Map<string, { slotLabel: string; queries: string[] }>();
+                          for (const sq of step.subqueries ?? []) {
+                            const slotLabel = (sq.slot ?? '').trim();
+                            const key = slotLabel.length > 0 ? slotLabel : '__no_slot__';
+                            const existing = bySlot.get(key) ?? { slotLabel, queries: [] };
+                            existing.queries.push(sq.query);
+                            bySlot.set(key, existing);
+                          }
+                          return Array.from(bySlot.entries()).map(([slotKey, group]) => {
+                            const hasSlot = slotKey !== '__no_slot__' && group.slotLabel.length > 0;
+                            return (
+                              <div key={slotKey} className="flex flex-col gap-1">
+                                {hasSlot && (
+                                  <div
+                                    className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/90"
+                                    title={`Slot: ${group.slotLabel}`}
+                                  >
+                                    <Search className="h-3 w-3 shrink-0" />
+                                    <span className="px-2 py-0.5 rounded bg-muted/40 border border-border/50">
+                                      {group.slotLabel}
+                                    </span>
+                                  </div>
+                                )}
+                                <div
+                                  className={cn(
+                                    'flex flex-wrap gap-1.5 items-center',
+                                    hasSlot && 'pl-2 ml-1 border-l-2 border-border/50'
+                                  )}
+                                >
+                                  {group.queries.map((q, qi) => (
+                                    <span
+                                      key={`${slotKey}-${qi}`}
+                                      className="text-[11px] px-1.5 py-0.5 rounded bg-muted/50 text-muted-foreground border border-border/50 font-mono"
+                                    >
+                                      &ldquo;{q}&rdquo;
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          }).flat();
+                        })()}
                       </div>
                     )}
                     {step.statements?.length ? (

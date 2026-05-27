@@ -8,34 +8,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Message } from '@/types/chat';
-import { Quote } from '@/types/source';
-import { useCopyIncludeEvidence } from '@/hooks/useCopyIncludeEvidence';
+import { useCopyFormat } from '@/hooks/useCopyFormat';
+import { buildMessageCopyText, type CopyFormat } from '@/lib/copyMessageText';
 
 const COPIED_DURATION_MS = 2000;
-
-function stripCitations(content: string): string {
-  return content
-    .replace(/\s*\[\d+\]\s*/g, ' ')
-    .replace(/  +/g, ' ')
-    .replace(/ +([.,;:!?])/g, '$1') 
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function buildCopyWithEvidence(content: string, quotes: Quote[]): string {
-  let out = content;
-  if (quotes.length > 0) {
-    const refLines: string[] = ['\n\nReferences:'];
-    for (let i = 0; i < quotes.length; i++) {
-      const q = quotes[i];
-      const num = i + 1;
-      const url = q.pageUrl ?? `https://${q.domain}${q.pagePath}`;
-      refLines.push(`[${num}] "${q.snippet}" — ${q.pageTitle} (${url})`);
-    }
-    out += refLines.join('\n');
-  }
-  return out;
-}
 
 interface CopyMessageButtonProps {
   message: Message;
@@ -44,7 +20,7 @@ interface CopyMessageButtonProps {
 
 export const CopyMessageButton = ({ message, className }: CopyMessageButtonProps) => {
   const [justCopied, setJustCopied] = useState(false);
-  const { copyIncludeEvidence: includeEvidence, setCopyIncludeEvidence } = useCopyIncludeEvidence();
+  const { copyFormat, setCopyFormat } = useCopyFormat();
 
   useEffect(() => {
     if (!justCopied) return;
@@ -53,20 +29,15 @@ export const CopyMessageButton = ({ message, className }: CopyMessageButtonProps
   }, [justCopied]);
 
   const isUser = message.role === 'user';
-  const quotes = message.quotes ?? [];
 
   const doCopy = () => {
-    const withEvidence = isUser ? true : includeEvidence;
-    const text = withEvidence && !isUser
-      ? buildCopyWithEvidence(message.content, quotes)
-      : stripCitations(message.content);
+    const format: CopyFormat = isUser ? 'plain' : copyFormat;
+    const text = buildMessageCopyText(message, format);
     navigator.clipboard.writeText(text).then(
       () => setJustCopied(true),
       () => {},
     );
   };
-
-  const setMode = (withEvidence: boolean) => setCopyIncludeEvidence(withEvidence);
 
   if (isUser) {
     return (
@@ -95,17 +66,25 @@ export const CopyMessageButton = ({ message, className }: CopyMessageButtonProps
           {justCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
         </Button>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 px-0 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0" aria-label="Copy format">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0 px-0 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+            aria-label="Copy format"
+          >
             <ChevronDown className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
       </div>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setMode(true)}>
-          {includeEvidence ? '✓ ' : ''}Copy with evidence
+        <DropdownMenuItem onClick={() => setCopyFormat('evidence')}>
+          {copyFormat === 'evidence' ? '✓ ' : ''}Copy with evidence
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setMode(false)}>
-          {!includeEvidence ? '✓ ' : ''}Copy without evidence
+        <DropdownMenuItem onClick={() => setCopyFormat('plain')}>
+          {copyFormat === 'plain' ? '✓ ' : ''}Copy without evidence
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setCopyFormat('debug')}>
+          {copyFormat === 'debug' ? '✓ ' : ''}Copy with evidence + thinking
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

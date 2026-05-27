@@ -18,7 +18,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Settings, Trash2 } from 'lucide-react';
-import { useCopyIncludeEvidence } from '@/hooks/useCopyIncludeEvidence';
+import { useCopyFormat } from '@/hooks/useCopyFormat';
 import { useSuggestedPageCandidates } from '@/hooks/useSuggestedPageCandidates';
 import { useDeleteAllConversations } from '@/hooks/useConversations';
 import { useState } from 'react';
@@ -33,13 +33,10 @@ export const SettingsSheet = ({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) => {
-  const { copyIncludeEvidence: includeEvidence, setCopyIncludeEvidence } = useCopyIncludeEvidence();
+  const { copyFormat, setCopyFormat } = useCopyFormat();
   const { suggestedPageCandidates, setSuggestedPageCandidates } = useSuggestedPageCandidates();
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const deleteAllMutation = useDeleteAllConversations();
-
-  const handleWithEvidence = () => setCopyIncludeEvidence(true);
-  const handleWithoutEvidence = () => setCopyIncludeEvidence(false);
 
   const handleDeleteAll = async () => {
     try {
@@ -67,20 +64,27 @@ export const SettingsSheet = ({
             <p className="text-sm text-muted-foreground">
               When copying assistant messages, which format to use by default.
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
-                variant={includeEvidence ? 'default' : 'outline'}
+                variant={copyFormat === 'evidence' ? 'default' : 'outline'}
                 size="sm"
-                onClick={handleWithEvidence}
+                onClick={() => setCopyFormat('evidence')}
               >
                 With evidence
               </Button>
               <Button
-                variant={!includeEvidence ? 'default' : 'outline'}
+                variant={copyFormat === 'plain' ? 'default' : 'outline'}
                 size="sm"
-                onClick={handleWithoutEvidence}
+                onClick={() => setCopyFormat('plain')}
               >
                 Without evidence
+              </Button>
+              <Button
+                variant={copyFormat === 'debug' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setCopyFormat('debug')}
+              >
+                With evidence + thinking
               </Button>
             </div>
           </div>

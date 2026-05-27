@@ -2,28 +2,22 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { userSettingsApi, type UserSettings } from '@/lib/db/user-settings';
+import {
+  type CopyFormat,
+  copyFormatFromLegacy,
+  getStoredCopyFormat,
+  setStoredCopyFormat,
+} from '@/lib/copyMessageText';
 import { optimisticUpdateSingle } from '@/hooks/optimisticMutation';
 
-const STORAGE_KEY = 'scholia-copy-include-evidence';
-
-
-function getLocal(): boolean {
-  if (typeof window === 'undefined') return true;
-  const v = localStorage.getItem(STORAGE_KEY);
-  if (v === 'false') return false;
-  if (v === 'true') return true;
-  return true;
+function getLocalFormat(): CopyFormat {
+  return getStoredCopyFormat() ?? 'evidence';
 }
 
-
-function setLocal(include: boolean): void {
-  localStorage.setItem(STORAGE_KEY, String(include));
-}
-
-export function useCopyIncludeEvidence() {
+export function useCopyFormat() {
   const { user } = useAuthContext();
   const queryClient = useQueryClient();
-  const [guestValue, setGuestValue] = useState(getLocal);
+  const [guestFormat, setGuestFormat] = useState<CopyFormat>(getLocalFormat);
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ['user-settings', user?.id],
@@ -52,27 +46,37 @@ export function useCopyIncludeEvidence() {
     ...optimistic,
   });
 
-  const copyIncludeEvidence = user
-    ? (settings?.copy_include_evidence ?? true)
-    : guestValue;
+  const copyFormat: CopyFormat = user
+    ? getStoredCopyFormat() ?? copyFormatFromLegacy(settings?.copy_include_evidence ?? true)
+    : guestFormat;
 
-  const setCopyIncludeEvidence = (include: boolean) => {
+  const setCopyFormat = (format: CopyFormat) => {
+    setStoredCopyFormat(format);
     if (user) {
-      upsertMutation.mutate(include);
+      upsertMutation.mutate(format !== 'plain');
     } else {
-      setLocal(include);
-      setGuestValue(include);
+      setGuestFormat(format);
     }
   };
 
-  
   useEffect(() => {
-    if (!user) setGuestValue(getLocal());
+    if (!user) setGuestFormat(getLocalFormat());
   }, [user]);
 
   return {
-    copyIncludeEvidence,
-    setCopyIncludeEvidence,
+    copyFormat,
+    setCopyFormat,
     isLoading: !!user && isLoading,
+  };
+}
+
+/** @deprecated Use useCopyFormat */
+export function useCopyIncludeEvidence() {
+  const { copyFormat, setCopyFormat, isLoading } = useCopyFormat();
+  return {
+    copyIncludeEvidence: copyFormat !== 'plain',
+    setCopyIncludeEvidence: (include: boolean) =>
+      setCopyFormat(include ? (copyFormat === 'debug' ? 'debug' : 'evidence') : 'plain'),
+    isLoading,
   };
 }

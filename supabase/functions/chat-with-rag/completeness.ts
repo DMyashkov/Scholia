@@ -34,7 +34,11 @@ export function slotCompleteness(
   const meta = slotMetaBySlotId?.get(slot.id);
   if (slot.type === 'list' || slot.type === 'mapping') {
     if (meta != null) {
-      if (meta.target_item_count === 0) return count >= 1 ? 1 : 0;
+      if (meta.target_item_count <= 0) {
+        // For lists, target_item_count=0 means "open ended": any non-empty list is considered complete.
+        // For mappings, target_item_count=0 should not collapse completeness to 1; it indicates "no required coverage".
+        return slot.type === 'list' ? (count >= 1 ? 1 : 0) : 0;
+      }
       return Math.min(1, count / meta.target_item_count);
     }
     if (slot.type === 'list') return count >= 1 ? 1 : 0;

@@ -65,16 +65,20 @@ function buildThoughtSlots(slots: SlotDb[], planSlots?: PlanSlot[]): ThoughtSlot
     if (depName) o.dependsOn = depName;
     const target = s.target_item_count ?? plan?.target_item_count;
     if (target != null && target >= 0) o.targetItemCount = target;
-    const perKey = s.items_per_key ?? plan?.items_per_key;
-    if (perKey != null && perKey >= 1) o.itemsPerKey = perKey;
+    if (s.type === 'mapping') {
+      const perKey = s.items_per_key ?? plan?.items_per_key ?? 0;
+      if (perKey >= 0) o.itemsPerKey = perKey;
+    }
     return o;
   });
 }
 
 function getEffectiveTarget(slot: SlotDb, counts: Map<string, number>): number {
   if (slot.type === 'list') return slot.target_item_count ?? 0;
-  if (slot.type === 'mapping' && slot.depends_on_slot_id && slot.items_per_key != null) {
-    return (counts.get(slot.depends_on_slot_id) ?? 0) * slot.items_per_key;
+  if (slot.type === 'mapping' && slot.depends_on_slot_id) {
+    const parentCount = counts.get(slot.depends_on_slot_id) ?? 0;
+    const perKey = slot.items_per_key ?? 0;
+    return perKey >= 1 ? parentCount * perKey : parentCount;
   }
   return 0;
 }
@@ -202,7 +206,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       description: s.description ?? null,
       depends_on_slot_id: null as string | null,
       target_item_count: s.type === 'list' ? (s.target_item_count ?? 0) : 0,
-      items_per_key: s.type === 'mapping' && s.items_per_key != null ? s.items_per_key : null,
+      items_per_key: s.type === 'mapping' ? (s.items_per_key ?? 0) : null,
     }));
     const { data: insertedSlots } = await supabase.from('slots').insert(slotInserts).select('id, name');
     const insertedSlotsList = (insertedSlots ?? []) as { id: string; name: string }[];
@@ -274,12 +278,38 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
   };
 
   const getSlotItemCountBySlotId = async (): Promise<Map<string, number>> => {
-    const { data: items } = await supabase.from('slot_items').select('slot_id').in('slot_id', slots.map((s) => s.id));
+    const slotById = new Map(slots.map((s) => [s.id, s]));
     const countBySlot = new Map<string, number>();
     for (const s of slots) countBySlot.set(s.id, 0);
-    for (const row of (items ?? []) as { slot_id: string }[]) {
+
+    const distinctKeysByMappingCoverageSlotId = new Map<string, Set<string>>();
+    const { data: items } = await supabase
+      .from('slot_items')
+      .select('slot_id, key')
+      .in('slot_id', slots.map((s) => s.id));
+
+    for (const row of (items ?? []) as { slot_id: string; key: string | null }[]) {
+      const slot = slotById.get(row.slot_id);
+      if (!slot) continue;
+
+      if (slot.type === 'mapping' && (slot.items_per_key ?? 0) === 0) {
+        if (row.key == null) continue;
+        let set = distinctKeysByMappingCoverageSlotId.get(row.slot_id);
+        if (!set) {
+          set = new Set<string>();
+          distinctKeysByMappingCoverageSlotId.set(row.slot_id, set);
+        }
+        set.add(String(row.key));
+        continue;
+      }
+
       countBySlot.set(row.slot_id, (countBySlot.get(row.slot_id) ?? 0) + 1);
     }
+
+    for (const [slotId, keys] of distinctKeysByMappingCoverageSlotId.entries()) {
+      countBySlot.set(slotId, keys.size);
+    }
+
     return countBySlot;
   };
 
@@ -530,6 +560,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         type: s.type,
         description: s.description ?? undefined,
         depends_on_slot_id: s.depends_on_slot_id ?? undefined,
+        ...(s.type === 'mapping' ? { items_per_key: s.items_per_key ?? 0 } : {}),
         ...((s.type === 'list' || s.type === 'mapping') && target > 0 ? { target_item_count: target } : {}),
       };
     });
@@ -611,9 +642,16 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       if (hadSubqueriesThisStep) {
         slot.attempt_count += 1;
         slot.last_queries = thisStepQueriesBySlotId.get(slot.id) ?? slot.last_queries ?? [];
-        if ((extractResult.broad_query_completed_slot_fully ?? []).includes(slot.name)) slot.finished_querying = true;
+        if ((extractResult.broad_query_completed_slot_fully ?? []).includes(slot.name)) {
+          // Only allow "broad query done" to finalize a slot if the effective target is already met.
+          if (effectiveTarget <= 0 || currentCount >= effectiveTarget) slot.finished_querying = true;
+        }
         const prevCount = prevItemCountBySlotId.get(slot.id) ?? 0;
-        if (currentCount === prevCount) slot.finished_querying = true;
+        if (currentCount === prevCount) {
+          // Avoid marking a slot "finished" just because we didn't find new items this step.
+          // For list/mapping with a known target, we only finish early when the target is already satisfied.
+          if (effectiveTarget <= 0 || currentCount >= effectiveTarget) slot.finished_querying = true;
+        }
       }
     }
     
@@ -648,7 +686,12 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     }));
     const completeness = overallCompleteness(slotsForCompleteness, slotItemCountBySlotId, slotMetaBySlotId);
     const allFinished = slots.every((s) => s.finished_querying);
-    const effectiveNextAction = (extractResult.next_action === 'retrieve' && allFinished) ? 'answer' : extractResult.next_action;
+    const effectiveNextAction =
+      extractResult.next_action === 'answer' && !allFinished
+        ? 'retrieve'
+        : (extractResult.next_action === 'retrieve' && allFinished)
+          ? 'answer'
+          : extractResult.next_action;
 
     await supabase
       .from('reasoning_steps')
@@ -769,7 +812,10 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         const parentCount = slotItemCountBySlotId.get(s.depends_on_slot_id) ?? 0;
         const myCount = slotItemCountBySlotId.get(s.id) ?? 0;
         if (parentCount === 0) return false;
-        if (s.type === 'mapping') return myCount < parentCount;
+        if (s.type === 'mapping') {
+          const expected = getEffectiveTarget(s, slotItemCountBySlotId);
+          return expected > 0 ? myCount < expected : false;
+        }
         return myCount < 1;
       });
       if (dependentSlotsToFill.length > 0) {

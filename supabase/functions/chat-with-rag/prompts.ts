@@ -13,7 +13,10 @@ Output JSON only with this shape:
   - target_item_count: for list slots only. Desired number of distinct items to find (e.g. "top 5 products" -> 5). 
   Set to 0 if the user did not specify a concrete number. Omit or 0 for scalar/mapping.
 
-  - items_per_key: (mapping only) Values per key (e.g. "top 2 achievements per product" -> 2). Backend: target = dependency target_item_count × items_per_key. Include in slots array for every mapping slot.
+  - items_per_key: (mapping only) Values per key (e.g. "top 2 achievements per product" -> 2).
+    Use 0 to mean "key coverage mode": at least one value per dependency key, without a fixed per-key quota.
+    Backend: if items_per_key >= 1, target = dependency target_item_count × items_per_key; if items_per_key === 0, target = dependency target_item_count (key coverage).
+    Include in slots array for every mapping slot.
 
 - subqueries: array of { slot, query } — only for slots that have no dependencies (omit dependsOn). 
 Each query is a search phrase for the slot. Do not include subqueries for mapping slots or any slot that dependsOn another; those are run later once dependencies are filled.
@@ -52,7 +55,7 @@ Use "clarify" only when the question is ambiguous, not when evidence is missing.
 Backend runs a separate final-answer step; you do not write answer text.
 
 - Subqueries: omit for (a) slots that have finished querying (listed below), (b) scalar slots that already have a value in current slot state, 
-(c) list/mapping slots that have reached target (for lists, target is a minimum—keep retrieving only while you still expect genuinely new distinct items; target 0 = no fixed minimum, continue until broad_query_completed_slot_fully or stagnate). 
+(c) list/mapping slots that have reached target (for lists, target is a minimum—keep retrieving only while you still expect genuinely new distinct items; target 0 = no fixed minimum, continue until broad_query_completed_slot_fully or stagnate; for mappings, target is either total expected values when items_per_key>=1, or distinct-key coverage when items_per_key===0). 
 Only suggest subqueries for slots that still need retrieval after your claims.
 For mapping slots you may output a single map directive: { "slot": "slot_name", "query": "__map__", "map_description": "optional phrase per key" }; backend will expand it into one query per key from the dependency list (matrix).
 

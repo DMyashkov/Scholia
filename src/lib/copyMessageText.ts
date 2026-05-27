@@ -112,7 +112,7 @@ export function buildThoughtProcessSection(tp: ThoughtProcess | null | undefined
         parts.push(` · target ${s.targetItemCount}`);
       }
       if (s.type === 'mapping' && s.itemsPerKey != null) {
-        parts.push(` · ${s.itemsPerKey}/key`);
+        parts.push(s.itemsPerKey === 0 ? ' · key coverage' : ` · ${s.itemsPerKey}/key`);
       }
       lines.push(parts.join(''));
     }

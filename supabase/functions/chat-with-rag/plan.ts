@@ -43,7 +43,7 @@ export async function callPlan(
       description: typeof s.description === 'string' ? s.description : undefined,
       dependsOn: typeof s.dependsOn === 'string' ? s.dependsOn : undefined,
       target_item_count: typeof s.target_item_count === 'number' && Number.isInteger(s.target_item_count) && s.target_item_count >= 0 ? s.target_item_count : undefined,
-      items_per_key: typeof s.items_per_key === 'number' && Number.isInteger(s.items_per_key) && s.items_per_key >= 1 ? s.items_per_key : undefined,
+      items_per_key: typeof s.items_per_key === 'number' && Number.isInteger(s.items_per_key) && s.items_per_key >= 0 ? s.items_per_key : undefined,
     }))
     .filter((s) => s.name.length > 0);
   const slotNamesWithNoDeps = new Set(slots.filter((s) => !s.dependsOn).map((s) => s.name));

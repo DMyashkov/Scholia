@@ -13,6 +13,7 @@ export interface SlotRow {
   depends_on_slot_id?: string | null;
   
   target_item_count?: number;
+  items_per_key?: number | null;
 }
 
 export interface EvidenceChunk {
@@ -40,7 +41,8 @@ export async function callExtractAndDecide(
   const slotBlock = slots
     .map((s) => {
       const targetStr = s.target_item_count != null && (s.type === 'list' || s.type === 'mapping') ? ` target=${s.target_item_count}` : '';
-      return `- ${s.name} (${s.type})${targetStr}${s.description ? `: ${s.description}` : ''}`;
+      const perKeyStr = s.type === 'mapping' && s.items_per_key != null ? ` items_per_key=${s.items_per_key}` : '';
+      return `- ${s.name} (${s.type})${targetStr}${perKeyStr}${s.description ? `: ${s.description}` : ''}`;
     })
     .join('\n');
 

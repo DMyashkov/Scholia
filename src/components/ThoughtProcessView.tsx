@@ -36,7 +36,8 @@ function targetPillLabelForSlot(slot: ThoughtProcessSlot): string | null {
     const n = slot.targetItemCount ?? 0;
     return n > 0 ? `target ${n}` : 'open target';
   }
-  if (slot.type === 'mapping' && slot.itemsPerKey != null && slot.itemsPerKey >= 1) {
+  if (slot.type === 'mapping' && slot.itemsPerKey != null) {
+    if (slot.itemsPerKey === 0) return 'key coverage';
     return `${slot.itemsPerKey}/key`;
   }
   return null;
@@ -48,14 +49,20 @@ function targetTooltipLineForSlot(slot: ThoughtProcessSlot): string | null {
     const n = slot.targetItemCount ?? 0;
     return n > 0 ? `Target: ${n}` : 'Target: open (no fixed count)';
   }
-  if (slot.type === 'mapping' && slot.itemsPerKey != null && slot.itemsPerKey >= 1) {
-    return `Mapping: ${slot.itemsPerKey} per key`;
+  if (slot.type === 'mapping' && slot.itemsPerKey != null) {
+    return slot.itemsPerKey === 0 ? 'Mapping: key coverage (>=1 per key)' : `Mapping: ${slot.itemsPerKey} per key`;
   }
   return null;
 }
 
-function countFilledInSnapshot(entry: SlotSnapshotEntry): number {
+function countFilledInSnapshot(entry: SlotSnapshotEntry, slotMeta?: ThoughtProcessSlot): number {
   if (entry.type === 'scalar') return entry.items.length > 0 ? 1 : 0;
+  if (entry.type === 'mapping' && slotMeta?.itemsPerKey != null && slotMeta.itemsPerKey === 0) {
+    const keys = entry.items
+      .map((i) => i.key ?? null)
+      .filter((k): k is string => k != null && String(k).trim().length > 0);
+    return new Set(keys).size;
+  }
   return entry.items.length;
 }
 
@@ -70,13 +77,13 @@ function snapshotTargetForSlot(
     const n = slotMeta.targetItemCount ?? 0;
     return n > 0 ? n : null;
   }
-  if (slotMeta.type === 'mapping' && slotMeta.dependsOn && slotMeta.itemsPerKey != null && slotMeta.itemsPerKey >= 1) {
+  if (slotMeta.type === 'mapping' && slotMeta.dependsOn && slotMeta.itemsPerKey != null) {
     const parent = snapshot[slotMeta.dependsOn];
-    const parentFilled = parent ? countFilledInSnapshot(parent) : 0;
-    if (parentFilled > 0) return parentFilled * slotMeta.itemsPerKey;
     const parentMeta = slots.find((s) => s.name === slotMeta.dependsOn);
+    const parentFilled = parent ? countFilledInSnapshot(parent, parentMeta) : 0;
+    if (parentFilled > 0) return slotMeta.itemsPerKey === 0 ? parentFilled : parentFilled * slotMeta.itemsPerKey;
     const parentPlanTarget = parentMeta?.targetItemCount ?? 0;
-    if (parentPlanTarget > 0) return parentPlanTarget * slotMeta.itemsPerKey;
+    if (parentPlanTarget > 0) return slotMeta.itemsPerKey === 0 ? parentPlanTarget : parentPlanTarget * slotMeta.itemsPerKey;
     return null;
   }
   return null;
@@ -88,7 +95,7 @@ function formatSnapshotFillLabel(
   slots: ThoughtProcessSlot[],
   snapshot: Record<string, SlotSnapshotEntry>,
 ): string {
-  const filled = countFilledInSnapshot(entry);
+  const filled = countFilledInSnapshot(entry, slotMeta);
   if (!slotMeta) return `${filled}`;
   const target = snapshotTargetForSlot(slotMeta, slots, snapshot);
   if (target != null && target > 0) return `${filled} / ${target}`;

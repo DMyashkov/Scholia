@@ -3,6 +3,7 @@ import type { ExtractClaim, ExtractResult, ExtractSubquery } from './types.ts';
 import type { SuggestedPage } from './expand.ts';
 import { OPENAI_CHAT_MODEL } from './config.ts';
 import { EXTRACT_SYSTEM } from './prompts.ts';
+import { normalizeSlotEntityString, slotValueDedupKey } from './utils.ts';
 
 export interface SlotRow {
   id: string;
@@ -217,30 +218,47 @@ export async function insertClaims(
 ): Promise<{ insertedSlotItemIds: string[] }> {
   const { slotIdByName, slots, claims, ownerId, allowedKeysByMappingSlotId } = params;
   const inserted: string[] = [];
+  const batchDedup = new Map<string, string>();
 
   for (const claim of claims) {
     const slotId = slotIdByName.get(claim.slot);
     if (!slotId) continue;
 
     const slot = slots.find((s) => s.id === slotId);
+    const key =
+      claim.key != null
+        ? normalizeSlotEntityString(typeof claim.key === 'string' ? claim.key : String(claim.key))
+        : null;
+
     if (slot?.type === 'mapping' && allowedKeysByMappingSlotId?.has(slotId)) {
       const allowed = allowedKeysByMappingSlotId.get(slotId)!;
-      const keyStr = claim.key != null ? (typeof claim.key === 'string' ? claim.key : String(claim.key)) : null;
-      if (keyStr == null || !allowed.has(keyStr)) continue;
+      if (key == null || !allowed.has(key)) continue;
     }
 
-    const valueJson = typeof claim.value === 'object' && claim.value !== null ? claim.value : claim.value;
-    const key = claim.key ?? null;
+    const rawValue = typeof claim.value === 'object' && claim.value !== null ? claim.value : claim.value;
+    const valueJson =
+      typeof rawValue === 'string' ? normalizeSlotEntityString(rawValue) : rawValue;
+    const dedupKey = slotValueDedupKey(valueJson);
+    const batchKey = `${slotId}\0${key ?? ''}\0${dedupKey}`;
+    const batchHit = batchDedup.get(batchKey);
+    if (batchHit) {
+      for (const chunkId of claim.chunkIds) {
+        await supabase.from('claim_evidence').upsert(
+          { slot_item_id: batchHit, chunk_id: chunkId, owner_id: ownerId },
+          { onConflict: 'slot_item_id,chunk_id', ignoreDuplicates: true },
+        );
+      }
+      continue;
+    }
 
-    
     const { data: existingList } = await supabase
       .from('slot_items')
       .select('id, value_json')
       .eq('slot_id', slotId)
       .eq('key', key)
-      .limit(50);
+      .limit(500);
     const existing = (existingList ?? []).find(
-      (row) => JSON.stringify(row.value_json) === JSON.stringify(valueJson),
+      (row) => slotValueDedupKey(row.value_json) === dedupKey,
     );
 
     let slotItemId: string;
@@ -263,6 +281,8 @@ export async function insertClaims(
       slotItemId = insertedRow.id;
       inserted.push(slotItemId);
     }
+
+    batchDedup.set(batchKey, slotItemId);
 
     for (const chunkId of claim.chunkIds) {
       await supabase.from('claim_evidence').upsert(

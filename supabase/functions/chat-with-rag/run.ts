@@ -26,6 +26,7 @@ import type { SlotForCompleteness, SlotCompletenessMeta } from './completeness.t
 import { doExpandCorpus, getTopSuggestedPages, type SuggestedPage } from './expand.ts';
 import { getLastMessages } from './chat.ts';
 import { buildCorpusContextBlock } from './corpusContext.ts';
+import { slotValueDedupKey } from './utils.ts';
 
 export type Emit = (obj: unknown) => Promise<void>;
 export type Log = (phase: string, detail?: Record<string, unknown>) => void;
@@ -568,7 +569,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         .in('slot_id', parentIds);
       const keysByParentId = new Map<string, Set<string>>();
       for (const row of (parentItems ?? []) as { slot_id: string; value_json: unknown }[]) {
-        const key = String(row.value_json != null && typeof row.value_json === 'object' ? JSON.stringify(row.value_json) : row.value_json);
+        const key = slotValueDedupKey(row.value_json);
         let set = keysByParentId.get(row.slot_id);
         if (!set) {
           set = new Set();

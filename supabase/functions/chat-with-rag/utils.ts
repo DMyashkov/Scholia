@@ -1,7 +1,23 @@
 
 
+/** Normalize list/mapping entity labels for dedup (spacing, parentheses, Unicode). */
+export function normalizeSlotEntityString(raw: string): string {
+  let s = raw.trim().replace(/\s+/g, ' ');
+  s = s.replace(/\s*\(\s*/g, '(').replace(/\s*\)\s*/g, ')');
+  try {
+    s = s.normalize('NFKC');
+  } catch {
+    /* older runtimes */
+  }
+  return s;
+}
 
-
+/** Stable key for matching slot item values across minor string variants. */
+export function slotValueDedupKey(valueJson: unknown): string {
+  if (typeof valueJson === 'string') return normalizeSlotEntityString(valueJson);
+  if (typeof valueJson === 'number' || typeof valueJson === 'boolean') return String(valueJson);
+  return JSON.stringify(valueJson);
+}
 
 export function capWithFairAllocation<T>(
   map: Map<string, T>,

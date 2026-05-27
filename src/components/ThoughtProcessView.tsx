@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Brain, CheckCircle2, AlertCircle, Info, Sear
 import type { SlotFillSummaryRow, SlotSnapshotEntry, ThoughtProcess, ThoughtProcessSlot } from '@/types/chat';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Table,
   TableBody,
@@ -29,13 +30,26 @@ function formatTargetLabel(target: number | null, type: string): string {
   return String(target);
 }
 
-function targetLabelForSlot(slot: ThoughtProcessSlot): string | null {
+/** Short label shown on the slot pill in "Looking for". */
+function targetPillLabelForSlot(slot: ThoughtProcessSlot): string | null {
   if (slot.type === 'list') {
     const n = slot.targetItemCount ?? 0;
     return n > 0 ? `target ${n}` : 'open target';
   }
   if (slot.type === 'mapping' && slot.itemsPerKey != null && slot.itemsPerKey >= 1) {
     return `${slot.itemsPerKey}/key`;
+  }
+  return null;
+}
+
+/** Tooltip line for target / mapping (no duplicated "target" prefix). */
+function targetTooltipLineForSlot(slot: ThoughtProcessSlot): string | null {
+  if (slot.type === 'list') {
+    const n = slot.targetItemCount ?? 0;
+    return n > 0 ? `Target: ${n}` : 'Target: open (no fixed count)';
+  }
+  if (slot.type === 'mapping' && slot.itemsPerKey != null && slot.itemsPerKey >= 1) {
+    return `Mapping: ${slot.itemsPerKey} per key`;
   }
   return null;
 }
@@ -82,12 +96,17 @@ function SlotFillSummaryTable({ rows }: { rows: SlotFillSummaryRow[] }) {
 }
 
 function SlotSnapshotBlock({ snapshot }: { snapshot: Record<string, SlotSnapshotEntry> }) {
+  const [open, setOpen] = useState(false);
   const entries = Object.entries(snapshot);
   if (entries.length === 0) return null;
   return (
-    <div className="rounded-lg border border-border/40 bg-muted/15 px-3 py-2 space-y-2">
-      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Slot snapshot</p>
-      <div className="space-y-2">
+    <Collapsible open={open} onOpenChange={setOpen} className="rounded-lg border border-border/40 bg-muted/15">
+      <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/25 transition-colors rounded-lg">
+        <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Slot snapshot</span>
+        <span className="text-[10px] text-muted-foreground/80">({entries.length})</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="px-3 pb-2.5 pt-0 space-y-2 border-t border-border/30">
         {entries.map(([name, entry]) => (
           <div key={name} className="text-xs">
             <p className="font-medium text-foreground/85 mb-1">
@@ -136,8 +155,8 @@ function SlotSnapshotBlock({ snapshot }: { snapshot: Record<string, SlotSnapshot
             )}
           </div>
         ))}
-      </div>
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -227,11 +246,12 @@ function PhaseContent({
           <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-2">Looking for</p>
           <div className="flex flex-wrap gap-2">
             {tp.slots.map((s) => {
-              const targetHint = targetLabelForSlot(s);
+              const targetPill = targetPillLabelForSlot(s);
+              const targetTooltip = targetTooltipLineForSlot(s);
               const tooltipBody = [
                 s.description,
                 s.dependsOn && `Depends on: ${s.dependsOn}`,
-                targetHint && (s.type === 'list' ? `Target: ${targetHint}` : `Mapping: ${targetHint}`),
+                targetTooltip,
               ]
                 .filter(Boolean)
                 .join('\n\n');
@@ -239,8 +259,8 @@ function PhaseContent({
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-muted/40 text-muted-foreground border border-border/50 max-w-full">
                   <span className="font-medium text-foreground/80 shrink-0">{s.name}</span>
                   <span className="text-[10px] opacity-80 shrink-0">· {s.type}</span>
-                  {s.type === 'list' && targetHint && (
-                    <span className="text-[10px] shrink-0 text-primary/90 font-medium">{targetHint}</span>
+                  {s.type === 'list' && targetPill && (
+                    <span className="text-[10px] shrink-0 text-primary/90 font-medium">{targetPill}</span>
                   )}
                   {s.dependsOn && (
                     <span className="text-[10px] truncate min-w-0 text-amber-600 dark:text-amber-400" title={`Depends on: ${s.dependsOn}`}>

@@ -10,7 +10,7 @@ Output JSON only with this shape:
 
   - description: one short sentence for what this slot represents (helps extraction and UI)
   
-  - target_item_count: for list slots only. Set to the number of items the user asked for (e.g. "top 5 products" -> 5). 
+  - target_item_count: for list slots only. Desired number of distinct items to find (e.g. "top 5 products" -> 5). 
   Set to 0 if the user did not specify a concrete number. Omit or 0 for scalar/mapping.
 
   - items_per_key: (mapping only) Values per key (e.g. "top 2 achievements per product" -> 2). Backend: target = dependency target_item_count × items_per_key. Include in slots array for every mapping slot.
@@ -41,7 +41,9 @@ Output JSON only:
 
 Rules:
 - Claims: only from given chunks; each claim must list at least one chunkId (exact UUID from [uuid] lines). 
-Scalar: one value, no key. List: one claim per item. Mapping: key = one of the dependency slot's entity names from current slot state; do not invent keys.
+Scalar: one value, no key. List: one claim per distinct NEW item only—never re-emit a value already in Current slot state (same entity with different spacing or punctuation counts as duplicate). 
+It is fine to add list claims during a step focused on another slot if this step's chunks name an item not already listed. Use one canonical spelling per name (trim; normalize spaces around parentheses). 
+Mapping: key = one of the dependency slot's entity names from current slot state (use the exact string from state when possible); do not invent keys.
 
 - Prefer "retrieve" or "answer"; use "expand_corpus" only when evidence genuinely lacks the facts (not merely spread across chunks). 
 Use "clarify" only when the question is ambiguous, not when evidence is missing.
@@ -50,7 +52,7 @@ Use "clarify" only when the question is ambiguous, not when evidence is missing.
 Backend runs a separate final-answer step; you do not write answer text.
 
 - Subqueries: omit for (a) slots that have finished querying (listed below), (b) scalar slots that already have a value in current slot state, 
-(c) list/mapping slots that have reached target (see "Slots to fill" targets; target 0 = no fixed target, continue until broad_query_completed_slot_fully or stagnate). 
+(c) list/mapping slots that have reached target (for lists, target is a minimum—keep retrieving only while you still expect genuinely new distinct items; target 0 = no fixed minimum, continue until broad_query_completed_slot_fully or stagnate). 
 Only suggest subqueries for slots that still need retrieval after your claims.
 For mapping slots you may output a single map directive: { "slot": "slot_name", "query": "__map__", "map_description": "optional phrase per key" }; backend will expand it into one query per key from the dependency list (matrix).
 

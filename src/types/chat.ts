@@ -12,9 +12,30 @@ export interface SuggestedPage {
 }
 
 
+export interface ThoughtProcessSlot {
+  name: string;
+  type: string;
+  description?: string;
+  dependsOn?: string;
+  targetItemCount?: number;
+  itemsPerKey?: number;
+}
+
+export interface SlotFillSummaryRow {
+  name: string;
+  type: string;
+  target: number | null;
+  filled: number;
+}
+
+export interface SlotSnapshotEntry {
+  type: string;
+  items: { key?: string | null; value: unknown }[];
+}
+
 export interface ThoughtProcess {
-  slots?: { name: string; type: string; description?: string; dependsOn?: string }[];
-  
+  slots?: ThoughtProcessSlot[];
+  slotFillSummary?: SlotFillSummaryRow[];
   planReason?: string;
   steps?: {
     iter: number;
@@ -26,10 +47,9 @@ export interface ThoughtProcess {
     claims?: unknown[];
     completeness?: number;
     fillStatusBySlot?: Record<string, string>;
-    
     statements?: string[];
-    
     nextAction?: string;
+    slotSnapshot?: Record<string, SlotSnapshotEntry>;
   }[];
   iterationCount?: number;
   completeness?: number;

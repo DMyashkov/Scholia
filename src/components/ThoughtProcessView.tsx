@@ -1,8 +1,145 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, Brain, CheckCircle2, AlertCircle, Info, Search, Circle, XCircle, FilePlus } from 'lucide-react';
-import type { ThoughtProcess } from '@/types/chat';
+import type { SlotFillSummaryRow, SlotSnapshotEntry, ThoughtProcess, ThoughtProcessSlot } from '@/types/chat';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+
+function formatSlotValue(value: unknown): string {
+  if (value == null) return '—';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatTargetLabel(target: number | null, type: string): string {
+  if (type === 'scalar') return '1';
+  if (target == null || target <= 0) return '—';
+  return String(target);
+}
+
+function targetLabelForSlot(slot: ThoughtProcessSlot): string | null {
+  if (slot.type === 'list') {
+    const n = slot.targetItemCount ?? 0;
+    return n > 0 ? `target ${n}` : 'open target';
+  }
+  if (slot.type === 'mapping' && slot.itemsPerKey != null && slot.itemsPerKey >= 1) {
+    return `${slot.itemsPerKey}/key`;
+  }
+  return null;
+}
+
+function SlotFillSummaryTable({ rows }: { rows: SlotFillSummaryRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-border/50 overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent border-border/50">
+            <TableHead className="h-8 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Slot</TableHead>
+            <TableHead className="h-8 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Type</TableHead>
+            <TableHead className="h-8 text-[10px] uppercase tracking-wider text-muted-foreground font-medium text-right">Target</TableHead>
+            <TableHead className="h-8 text-[10px] uppercase tracking-wider text-muted-foreground font-medium text-right">Filled</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => {
+            const met = row.target != null && row.target > 0 ? row.filled >= row.target : row.filled > 0;
+            const partial = row.target != null && row.target > 0 && row.filled > 0 && row.filled < row.target;
+            return (
+              <TableRow key={row.name} className="border-border/40 hover:bg-muted/20">
+                <TableCell className="py-2 text-xs font-medium text-foreground/90">{row.name}</TableCell>
+                <TableCell className="py-2 text-[11px] text-muted-foreground">{row.type}</TableCell>
+                <TableCell className="py-2 text-[11px] text-muted-foreground text-right tabular-nums">
+                  {formatTargetLabel(row.target, row.type)}
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    'py-2 text-[11px] text-right tabular-nums font-medium',
+                    met ? 'text-primary' : partial ? 'text-foreground/80' : 'text-muted-foreground'
+                  )}
+                >
+                  {row.filled}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function SlotSnapshotBlock({ snapshot }: { snapshot: Record<string, SlotSnapshotEntry> }) {
+  const entries = Object.entries(snapshot);
+  if (entries.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-border/40 bg-muted/15 px-3 py-2 space-y-2">
+      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Slot snapshot</p>
+      <div className="space-y-2">
+        {entries.map(([name, entry]) => (
+          <div key={name} className="text-xs">
+            <p className="font-medium text-foreground/85 mb-1">
+              {name}
+              <span className="text-muted-foreground font-normal"> · {entry.type}</span>
+            </p>
+            {entry.type === 'scalar' && (
+              <p className="text-muted-foreground pl-2 border-l-2 border-border/60">
+                {entry.items.length === 0 ? (
+                  <span className="italic">empty</span>
+                ) : (
+                  formatSlotValue(entry.items[0]?.value)
+                )}
+              </p>
+            )}
+            {entry.type === 'list' && (
+              <ul className="pl-2 border-l-2 border-border/60 space-y-0.5 text-muted-foreground">
+                {entry.items.length === 0 ? (
+                  <li className="italic">no items</li>
+                ) : (
+                  entry.items.map((item, i) => (
+                    <li key={i} className="leading-snug">
+                      {formatSlotValue(item.value)}
+                    </li>
+                  ))
+                )}
+              </ul>
+            )}
+            {entry.type === 'mapping' && (
+              <ul className="pl-2 border-l-2 border-border/60 space-y-0.5 text-muted-foreground font-mono text-[11px]">
+                {entry.items.length === 0 ? (
+                  <li className="italic font-sans">no pairs</li>
+                ) : (
+                  entry.items.map((item, i) => (
+                    <li key={i} className="leading-snug">
+                      <span className="text-foreground/75">{item.key ?? '—'}</span>
+                      <span className="text-muted-foreground/60">: </span>
+                      {formatSlotValue(item.value)}
+                    </li>
+                  ))
+                )}
+              </ul>
+            )}
+            {entry.type !== 'scalar' && entry.type !== 'list' && entry.type !== 'mapping' && (
+              <p className="text-muted-foreground pl-2 text-[11px]">{entry.items.length} item(s)</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 
 function nextActionLabel(nextAction: string): string {
@@ -78,16 +215,33 @@ function PhaseContent({
         </div>
       )}
 
+      {tp.slotFillSummary && tp.slotFillSummary.length > 0 && (
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-2">Slot progress</p>
+          <SlotFillSummaryTable rows={tp.slotFillSummary} />
+        </div>
+      )}
+
       {tp.slots && tp.slots.length > 0 && (
         <div>
           <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-2">Looking for</p>
           <div className="flex flex-wrap gap-2">
             {tp.slots.map((s) => {
-              const tooltipBody = [s.description, s.dependsOn && `Depends on: ${s.dependsOn}`].filter(Boolean).join('\n\n');
+              const targetHint = targetLabelForSlot(s);
+              const tooltipBody = [
+                s.description,
+                s.dependsOn && `Depends on: ${s.dependsOn}`,
+                targetHint && (s.type === 'list' ? `Target: ${targetHint}` : `Mapping: ${targetHint}`),
+              ]
+                .filter(Boolean)
+                .join('\n\n');
               const pill = (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-muted/40 text-muted-foreground border border-border/50 max-w-full">
                   <span className="font-medium text-foreground/80 shrink-0">{s.name}</span>
                   <span className="text-[10px] opacity-80 shrink-0">· {s.type}</span>
+                  {s.type === 'list' && targetHint && (
+                    <span className="text-[10px] shrink-0 text-primary/90 font-medium">{targetHint}</span>
+                  )}
                   {s.dependsOn && (
                     <span className="text-[10px] truncate min-w-0 text-amber-600 dark:text-amber-400" title={`Depends on: ${s.dependsOn}`}>
                       ↳ {s.dependsOn}
@@ -221,6 +375,9 @@ function PhaseContent({
                           );
                         })}
                       </div>
+                    )}
+                    {step.slotSnapshot && Object.keys(step.slotSnapshot).length > 0 && (
+                      <SlotSnapshotBlock snapshot={step.slotSnapshot} />
                     )}
                     {step.nextAction && (
                       <div className="pt-1.5">

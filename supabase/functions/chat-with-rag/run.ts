@@ -29,6 +29,70 @@ import { getLastMessages } from './chat.ts';
 export type Emit = (obj: unknown) => Promise<void>;
 export type Log = (phase: string, detail?: Record<string, unknown>) => void;
 
+export type ThoughtSlotUi = {
+  name: string;
+  type: string;
+  description?: string;
+  dependsOn?: string;
+  targetItemCount?: number;
+  itemsPerKey?: number;
+};
+
+export type SlotFillRow = {
+  name: string;
+  type: string;
+  target: number | null;
+  filled: number;
+};
+
+export type SlotSnapshotState = Record<
+  string,
+  { type: string; items: { key?: string | null; value: unknown }[] }
+>;
+
+function buildThoughtSlots(slots: SlotDb[], planSlots?: PlanSlot[]): ThoughtSlotUi[] {
+  const planByName = new Map((planSlots ?? []).map((p) => [p.name, p]));
+  return slots.map((s) => {
+    const plan = planByName.get(s.name);
+    const depName = s.depends_on_slot_id
+      ? slots.find((x) => x.id === s.depends_on_slot_id)?.name
+      : plan?.dependsOn;
+    const o: ThoughtSlotUi = { name: s.name, type: s.type };
+    const desc = s.description ?? plan?.description;
+    if (desc) o.description = desc;
+    if (depName) o.dependsOn = depName;
+    const target = s.target_item_count ?? plan?.target_item_count;
+    if (target != null && target >= 0) o.targetItemCount = target;
+    const perKey = s.items_per_key ?? plan?.items_per_key;
+    if (perKey != null && perKey >= 1) o.itemsPerKey = perKey;
+    return o;
+  });
+}
+
+function getEffectiveTarget(slot: SlotDb, counts: Map<string, number>): number {
+  if (slot.type === 'list') return slot.target_item_count ?? 0;
+  if (slot.type === 'mapping' && slot.depends_on_slot_id && slot.items_per_key != null) {
+    return (counts.get(slot.depends_on_slot_id) ?? 0) * slot.items_per_key;
+  }
+  return 0;
+}
+
+function buildSlotFillSummary(
+  slots: SlotDb[],
+  slotItemCountBySlotId: Map<string, number>,
+): SlotFillRow[] {
+  return slots.map((slot) => {
+    const filled = slotItemCountBySlotId.get(slot.id) ?? 0;
+    if (slot.type === 'scalar') {
+      return { name: slot.name, type: slot.type, target: 1, filled: Math.min(filled, 1) };
+    }
+    const eff = getEffectiveTarget(slot, slotItemCountBySlotId);
+    const planTarget = slot.target_item_count ?? 0;
+    const target = eff > 0 ? eff : (slot.type === 'list' && planTarget > 0 ? planTarget : null);
+    return { name: slot.name, type: slot.type, target, filled };
+  });
+}
+
 export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> {
   log('start');
   const body = (await req.json()) as LoadRagBody & { rootMessageId?: string };
@@ -158,14 +222,11 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       }
     }
     await emit({ plan: { action: planResult.action, why: planResult.why, slots: planResult.slots, subqueries: planResult.subqueries } });
+    const initialThoughtSlots = buildThoughtSlots(slots, planResult.slots);
     const initialThought = {
-      slots: (planResult.slots ?? []).map((s) => {
-        const o: { name: string; type: string; description?: string; dependsOn?: string } = { name: s.name, type: s.type };
-        if (s.description) o.description = s.description;
-        if (s.dependsOn) o.dependsOn = s.dependsOn;
-        return o;
-      }),
+      slots: initialThoughtSlots,
       steps: [],
+      slotFillSummary: buildSlotFillSummary(slots, new Map(slots.map((s) => [s.id, 0]))),
     };
     await emit({ thoughtProcess: initialThought });
   }
@@ -184,9 +245,11 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     fillStatusBySlot?: Record<string, string>;
     statements?: string[];
     nextAction?: string;
+    slotSnapshot?: SlotSnapshotState;
   };
   const thoughtProcess: {
-    slots: { name: string; type: string; description?: string; dependsOn?: string }[];
+    slots: ThoughtSlotUi[];
+    slotFillSummary?: SlotFillRow[];
     planReason?: string;
     steps: ThoughtStep[];
     iterationCount?: number;
@@ -197,12 +260,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     extractionGaps?: string[];
     partialAnswerNote?: string;
   } = {
-    slots: (planResult?.slots ?? []).map((s) => {
-      const o: { name: string; type: string; description?: string; dependsOn?: string } = { name: s.name, type: s.type };
-      if (s.description) o.description = s.description;
-      if (s.dependsOn) o.dependsOn = s.dependsOn;
-      return o;
-    }),
+    slots: buildThoughtSlots(slots, planResult?.slots ?? undefined),
+    slotFillSummary: buildSlotFillSummary(slots, new Map(slots.map((s) => [s.id, 0]))),
     planReason: appendId ? 'Same question, with the new page in the corpus.' : (planResult?.why ?? undefined),
     steps: [],
   };
@@ -219,16 +278,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
   const slotsWithAttempts = slots.filter((s) => s.type === 'list' || s.type === 'mapping');
 
-  
-  const getEffectiveTarget = (slot: SlotDb, counts: Map<string, number>): number => {
-    if (slot.type === 'list') return slot.target_item_count ?? 0;
-    if (slot.type === 'mapping' && slot.depends_on_slot_id && slot.items_per_key != null)
-      return (counts.get(slot.depends_on_slot_id) ?? 0) * slot.items_per_key;
-    return 0;
-  };
-
-  
-  const getCurrentSlotItemsState = async (): Promise<Record<string, { type: string; items: { key?: string | null; value: unknown }[] }>> => {
+  const getCurrentSlotItemsState = async (): Promise<SlotSnapshotState> => {
     const { data: items } = await supabase
       .from('slot_items')
       .select('slot_id, key, value_json')
@@ -633,6 +683,10 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       };
     }
 
+    const slotSnapshot = await getCurrentSlotItemsState();
+    thoughtProcess.slotFillSummary = buildSlotFillSummary(slots, slotItemCountBySlotId);
+    thoughtProcess.completeness = completeness;
+
     const stepEntry: ThoughtStep = {
       iter: iteration,
       action: 'retrieve',
@@ -645,6 +699,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       fillStatusBySlot: INCLUDE_FILL_STATUS_BY_SLOT ? fillStatusBySlot : undefined,
       statements: stepStatements,
       nextAction: effectiveNextAction,
+      slotSnapshot,
       ...(Object.keys(listSlotDebug).length > 0 ? { listSlotState: listSlotDebug } : {}),
     };
     thoughtProcess.steps.push(stepEntry);

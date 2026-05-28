@@ -53,6 +53,7 @@ Typical shapes (use the minimum that fits the question):
 - Subqueries for step 1:
   - Slots with no dependsOn: 1–2 BROAD discovery queries appropriate to the slot description.
   - Slots with dependsOn: exactly one exploratory BROAD query per such slot — corpus-level discovery for that slot’s topic, without embedding parent key values, without per-key queries, without __map__ (matrix comes in later extract steps).
+  - IMPORTANT: subqueries are semantic similarity queries against indexed document chunks — NOT web searches. Do not use site: operators, boolean syntax, or any other web-search notation. Write natural-language phrases as a human would type them in a document search field.
 - Later steps use the extract phase; slot definitions here stay the same.
 - Descriptions should be concrete. For mapping slots, say what the key is and what the value is.
 - Language: If the user message includes an "Indexed corpus" section, infer the primary language of the crawled site from its domains, page titles, and sample passages. Write every slot name, slot description, and subquery search phrase in that corpus language—even when the question is in another language.`;
@@ -75,7 +76,7 @@ Output JSON only:
 Rules:
 - Only fill slots listed under "Slots to fill". Do not treat other topics as required even if they appear on the same website pages.
 - Claims: each claim must cite at least one chunkId from the Evidence list (prefer chunk indices 1..N or UUIDs in chunkIds).
-- Slot values may be a concise paraphrase or summary of what the cited chunks support — they do NOT need to appear verbatim in the chunk text.
+- Slot values must reflect what the cited chunks directly state. You may rephrase for conciseness (e.g. extract a number or name from prose) but must not infer, generalize, or add context that is not explicitly present in the cited chunk text.
 - Do NOT invent facts, conclusions, or "standard practice" generalizations that are not supported by the cited chunks for that slot/key.
 - Do NOT cite a chunk unless it actually discusses the entity (mapping key) or fact you are claiming. Use each chunk's page URL and retrieved_by subquery/slot to judge attribution: for mapping keys, prefer chunks retrieved by that key's targeted query or whose page URL/title clearly matches the entity.
 Scalar: one value, no key. List: one claim per distinct NEW item only—never one comma-separated claim bundling many entities; emit separate list claims per entity. Never re-emit a value already in Current slot state (same entity with different spacing or punctuation counts as duplicate). 
@@ -92,7 +93,7 @@ Backend runs a separate final-answer step; you do not write answer text.
 - Subqueries: omit for (a) slots that have finished querying (listed below), (b) scalar slots that already have a value in current slot state, 
 (c) list/mapping slots that have reached target (for lists, target is a minimum—keep retrieving only while you still expect genuinely new distinct items; target 0 = no fixed minimum, continue until broad_query_completed_slot_fully or stagnate; for mappings, target is either total expected values when items_per_key>=1, or distinct-key coverage when items_per_key===0). 
 Only suggest subqueries for slots that still need retrieval after your claims.
-For mapping slots with a satisfied parent you MUST use __map__ (not one subquery per key, not one query listing many keys). Backend expands to one query per unfilled non-stagnated key.
+For mapping slots with a satisfied parent you MUST use __map__ (not one subquery per key, not one query listing many keys). Backend expands to one query per unfilled non-stagnated key. Writing per-key queries manually defeats batching, causes timeouts, and is not allowed.
 
 ${MAPPING_MATRIX_QUERY_RULES}
 

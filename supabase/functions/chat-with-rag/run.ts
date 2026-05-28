@@ -519,12 +519,14 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         getParentItems: (depSlotName) => currentSlotStateForExpand[depSlotName]?.items ?? [],
         maxMappingPerIter: MAX_MAPPING_SUBQUERIES_PER_ITER,
         maxPerIter: MAX_SUBQUERIES_PER_ITER,
+        // Exclude queries already run in prior steps so the cap-N selection picks from genuinely new queries.
+        skipQuery: (slotId, query) => seen.has(seenKey(slotId, query)),
       });
       droppedSubqueriesPreparedThisIter = prepared.dropped;
       for (const q of prepared.runnable) {
         const sid = slotIdByName.get(q.slot);
         if (!sid) continue;
-        // Skip queries already run in a previous step so the DB stays clean.
+        // Safety net: also check here in case skipQuery wasn't called for some path.
         if (seen.has(seenKey(sid, q.query))) continue;
         const slot = slots.find((s) => s.id === sid);
         const fill = fillBySlotId.get(sid);
@@ -595,6 +597,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
           getParentItems: (depSlotName) => currentSlotStateForRecovery[depSlotName]?.items ?? [],
           maxMappingPerIter: MAX_MAPPING_SUBQUERIES_PER_ITER,
           maxPerIter: MAX_SUBQUERIES_PER_ITER,
+          skipQuery: (slotId, query) => seen.has(seenKey(slotId, query)),
         });
         droppedSubqueriesPreparedThisIter = [...(droppedSubqueriesPreparedThisIter ?? []), ...recoveryPrepared.dropped];
         for (const q of recoveryPrepared.runnable) {

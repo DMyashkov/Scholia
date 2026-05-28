@@ -907,6 +907,8 @@ export function prepareRunnableSubqueries(params: {
   getParentItems: (depSlotName: string) => { value?: unknown; key?: string | null }[];
   maxMappingPerIter: number;
   maxPerIter: number;
+  /** Optional predicate — return true to exclude a query (e.g. already run in a prior step). */
+  skipQuery?: (slotId: string, query: string) => boolean;
 }): { runnable: { slot: string; query: string }[]; dropped: { slot: string; query: string; reason: string }[] } {
   const {
     subsInput,
@@ -918,6 +920,7 @@ export function prepareRunnableSubqueries(params: {
     getParentItems,
     maxMappingPerIter,
     maxPerIter,
+    skipQuery,
   } = params;
 
   const dropped: { slot: string; query: string; reason: string }[] = [];
@@ -949,6 +952,11 @@ export function prepareRunnableSubqueries(params: {
           dropped.push({ slot: q.slot, query: q.query, reason: 'invalid_map_syntax (use query="__map__" with map_description/key_connector)' });
           continue;
         }
+        const sid2 = slotIdByName.get(q.slot) ?? '';
+        if (skipQuery && skipQuery(sid2, q.query)) {
+          dropped.push({ slot: q.slot, query: q.query, reason: 'already_run_in_prior_step' });
+          continue;
+        }
         out.push({ slot: q.slot, query: q.query });
         continue;
       }
@@ -961,18 +969,23 @@ export function prepareRunnableSubqueries(params: {
       const depSlot = slots.find((s) => s.id === slot.depends_on_slot_id);
       const fill = fillBySlotId.get(sid);
       const depItems = depSlot ? getParentItems(depSlot.name) : [];
-      out.push(
-        ...expandMapSubqueries({
-          slotName: q.slot,
-          slot,
-          mapDescription: q.map_description,
-          keyConnector: q.key_connector,
-          depSlot,
-          fill,
-          parentItems: depItems,
-          stagnatedKeys: stagnationBySlotId.get(sid)?.stagnatedKeys,
-        }),
-      );
+      const expanded = expandMapSubqueries({
+        slotName: q.slot,
+        slot,
+        mapDescription: q.map_description,
+        keyConnector: q.key_connector,
+        depSlot,
+        fill,
+        parentItems: depItems,
+        stagnatedKeys: stagnationBySlotId.get(sid)?.stagnatedKeys,
+      });
+      for (const eq of expanded) {
+        if (skipQuery && skipQuery(sid, eq.query)) {
+          dropped.push({ slot: eq.slot, query: eq.query, reason: 'already_run_in_prior_step' });
+          continue;
+        }
+        out.push(eq);
+      }
     }
     return out;
   };

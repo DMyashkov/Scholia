@@ -33,7 +33,19 @@ export function looksLikeLanguageMismatch(text: string, lang: CorpusLanguage): b
   const s = normalizeSlotEntityString(text);
   if (!s) return false;
   if (lang.code === 'bg') {
-        return !/[\u0400-\u04FF]/.test(s);
+    // Bulgarian corpus: output should contain Cyrillic
+    return !/[\u0400-\u04FF]/.test(s);
+  }
+  if (lang.code === 'el') {
+    // Greek corpus: output should contain Greek characters
+    return !/[\u0370-\u03FF]/.test(s);
+  }
+  if (lang.code === 'en') {
+    // English corpus: output shouldn't be mostly Cyrillic or Greek
+    const letters = (s.match(/\p{L}/gu) ?? []).length;
+    if (letters === 0) return false;
+    const nonLatin = (s.match(/[\u0370-\u03FF\u0400-\u04FF]/g) ?? []).length;
+    return nonLatin / letters >= 0.5;
   }
   return false;
 }

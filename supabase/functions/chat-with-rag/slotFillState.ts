@@ -168,24 +168,9 @@ export function pickDiversifiedBroadQuery(
   seen: Set<string>,
 ): string | null {
   const base = (slot.description ?? slot.name).trim().replace(/\.+$/, '');
+  // Only use the base description — discovery term diversification is the AI's job
+  // (plan/extract phases generate language-appropriate subqueries).
   const variants: string[] = [base];
-  if (slot.type === 'list') {
-    variants.push(
-      `${base} сортове`,
-      `${base} каталог`,
-      `${base} асортимент`,
-      `${base} пълен списък`,
-      `${base} портфолио`,
-      `${base} всички`,
-    );
-  } else if (slot.type === 'mapping') {
-    variants.push(
-      `${base} общо`,
-      `${base} препоръки`,
-    );
-  } else {
-    variants.push(`${base} информация`, `${base} препоръки`);
-  }
   const prior = new Set(fill?.broadQueriesAttempted ?? []);
   const normalizeTokens = (s: string): string[] =>
     normalizeSlotEntityString(s)
@@ -229,19 +214,6 @@ export function ensureSubqueriesForSlotModes(
   seen: Set<string>,
 ): { slot: string; query: string }[] {
   const out = [...subs];
-  const listFacetSuffixes = ['каталог', 'асортимент', 'портфолио', 'пълен списък', 'всички'];
-  const makeListFacetQueries = (slot: SlotDb, fill: SlotFillStatus | undefined): string[] => {
-    const base = (slot.description ?? slot.name).trim().replace(/\.+$/, '');
-    const priorBroad = new Set(fill?.broadQueriesAttempted ?? []);
-    const built: string[] = [];
-    for (const suf of listFacetSuffixes) {
-      const q = `${base} ${suf}`.replace(/\s+/g, ' ').trim();
-      if (!q) continue;
-      if (priorBroad.has(q)) continue;
-      built.push(q);
-    }
-    return built.slice(0, 5);
-  };
 
   for (const slot of slots) {
     if (slot.finished_querying) continue;
@@ -267,12 +239,6 @@ export function ensureSubqueriesForSlotModes(
           out.push({ slot: slot.name, query: marker });
           seen.add(`${slot.id}\0${marker}`);
         }
-      } else if (slot.type === 'list') {
-        for (const q of makeListFacetQueries(slot, fill)) {
-          if (seen.has(`${slot.id}\0${q}`)) continue;
-          out.push({ slot: slot.name, query: q });
-          seen.add(`${slot.id}\0${q}`);
-        }
       } else if (slot.type === 'scalar') {
         const q = pickNewBroadQuery(slot, fill, seen);
         if (q) {
@@ -280,6 +246,8 @@ export function ensureSubqueriesForSlotModes(
           seen.add(`${slot.id}\0${q}`);
         }
       }
+      // For list slots in targeted mode: rely on AI-generated subqueries from the extract phase.
+      // No hardcoded language-specific facet terms injected here.
     }
   }
 
@@ -1043,7 +1011,7 @@ export function prepareRunnableSubqueries(params: {
       return {
         slot: q.slot,
         query: '__map__' as const,
-        map_description: slot?.description ?? slot?.name,
+        map_description: slot?.name ?? slot?.description ?? q.slot,
       };
     }),
   );
@@ -1098,16 +1066,7 @@ export function buildRecoverySubqueries(
       }
     }
 
-    if (slot.type === 'list' && (mode === 'targeted_only' || mode === 'broad_and_targeted')) {
-      const base = (slot.description ?? slot.name).trim().replace(/\.+$/, '');
-      for (const suf of ['каталог', 'асортимент', 'портфолио', 'пълен списък', 'всички']) {
-        const q = `${base} ${suf}`.replace(/\s+/g, ' ').trim();
-        if (!q) continue;
-        if (seen.has(`${slot.id}\0${q}`)) continue;
-        out.push({ slot: slot.name, query: q });
-        seen.add(`${slot.id}\0${q}`);
-      }
-    }
+    // For list slots in targeted mode: recovery subqueries are AI-driven; no hardcoded language facets.
   }
 
   return out;

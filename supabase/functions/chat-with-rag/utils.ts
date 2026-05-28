@@ -64,28 +64,6 @@ export function capWithFairAllocation<T>(
   return [...selected, ...fill].sort((a, b) => getDistance(a) - getDistance(b)).slice(0, cap);
 }
 
-export function indicatesCantAnswer(content: string): boolean {
-  const lower = content.toLowerCase();
-  const patterns = [
-    /doesn't include|does not include|context does not|context doesn't/,
-    /does not provide|doesn't provide|does not contain|doesn't contain/,
-    /does not list|doesn't list|does not have|doesn't have/,
-    /unable to (find|provide|list|answer)/,
-    /i don't have|i do not have|i cannot find|i can't find/,
-    /no (indexed |)(information|content|list|data) (in |)(the |)context/,
-    /the (provided |)context does not/,
-    /(the |)context (does not|doesn't) (include|contain|have|provide|list)/,
-    /focuses exclusively on|mainly discusses|only (discusses|mentions|covers)/,
-    /aside from|other than.*not (included|mentioned|listed)/,
-    /not (available|mentioned|covered|included|found) (in |)(the |)context/,
-    /(the |)context (only |)(includes|contains|covers|mentions)/,
-    /cannot (find|provide|answer|determine)/,
-    /is not (in |)(the |)context|not in the (provided |)context/,
-    /limited to.*context|based (solely |)on the context/,
-  ];
-  return patterns.some((p) => p.test(lower));
-}
-
 export function deriveTitleFromUrl(url: string): string {
   try {
     const u = new URL(url);
@@ -100,10 +78,20 @@ export function deriveTitleFromUrl(url: string): string {
 
 
 export function extractQueryTerms(query: string): string[] {
-  const stop = new Set(['a', 'an', 'the', 'of', 'to', 'for', 'in', 'on', 'at', 'by', 'with', 'other', 'than', 'give', 'me', 'get', 'show', 'find']);
+  const stop = new Set([
+    // English
+    'a', 'an', 'the', 'of', 'to', 'for', 'in', 'on', 'at', 'by', 'with',
+    'other', 'than', 'give', 'me', 'get', 'show', 'find', 'what', 'how',
+    'is', 'are', 'was', 'were', 'all', 'each', 'every', 'list', 'about',
+    // Bulgarian
+    'за', 'на', 'в', 'и', 'от', 'с', 'е', 'да', 'се', 'не', 'по', 'до',
+    'при', 'като', 'но', 'или', 'са', 'ще', 'ми', 'му', 'им', 'тя', 'те',
+    'той', 'то', 'ги', 'го', 'си', 'ти', 'аз', 'ни',
+  ]);
+  // Use unicode-aware replacement so Cyrillic/Greek letters are preserved
   return query
     .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .split(/\s+/)
     .filter((w) => w.length > 1 && !stop.has(w));
 }

@@ -27,20 +27,21 @@ export async function doRetrieve(
   const queries = subqueries.map((s) => s.query);
   const embeddings = await embedBatch(openaiKey, queries);
   const chunkMap = new Map<string, ChunkRow>();
-  const chunksByQueryIndex: ChunkRow[][] = [];
-  const chunksPerSubquery: number[] = [];
+  const chunksByQueryIndex: ChunkRow[][] = new Array(embeddings.length).fill(null);
+  const chunksPerSubquery: number[] = new Array(embeddings.length).fill(0);
   const provenanceByChunkId = new Map<string, EvidenceChunkProvenance[]>();
 
-  for (let i = 0; i < embeddings.length; i++) {
+  // Fire all pgvector searches in parallel instead of sequentially
+  await Promise.all(embeddings.map(async (embedding, i) => {
     const { slot, query } = subqueries[i];
     const { data: matchedChunks } = await supabase.rpc('match_chunks', {
-      query_embedding: embeddings[i],
+      query_embedding: embedding,
       match_page_ids: pageIds,
       match_count: perQuery,
     });
     const list = (matchedChunks || []) as ChunkRow[];
-    chunksPerSubquery.push(list.length);
-    chunksByQueryIndex.push(list);
+    chunksByQueryIndex[i] = list;
+    chunksPerSubquery[i] = list.length;
     for (const c of list) {
       const dist = distanceOf(c);
       const existing = chunkMap.get(c.id);
@@ -54,7 +55,7 @@ export async function doRetrieve(
       }
       provenanceByChunkId.set(c.id, prov);
     }
-  }
+  }));
   const chunks = capWithFairAllocation(
     chunkMap,
     chunksByQueryIndex,

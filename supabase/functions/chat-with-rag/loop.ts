@@ -130,6 +130,10 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
       next_action: 'retrieve',
       why: 'Parse error',
       extractionGaps: ['Could not parse extract response (invalid JSON)'],
+      debug: {
+        request: userContent.slice(0, 20000),
+        responseRaw: content.slice(0, 20000),
+      },
     };
   }
   const obj = parsed as Record<string, unknown>;
@@ -221,6 +225,10 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
     extractionGaps: undefined,
     suggested_page_index,
     broad_query_completed_slot_fully,
+    debug: {
+      request: userContent.slice(0, 20000),
+      responseRaw: content.slice(0, 20000),
+    },
   };
 }
 

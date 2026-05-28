@@ -93,6 +93,11 @@ export interface ExtractResult {
   suggested_page_index?: number;
   
   broad_query_completed_slot_fully?: string[];
+
+  debug?: {
+    request?: string;
+    responseRaw?: string;
+  };
 }
 
 export type ChunkRow = {

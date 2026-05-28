@@ -14,6 +14,7 @@ import {
   MAX_MAPPING_SUBQUERIES_PER_ITER,
   MAX_EXPANSIONS,
   INCLUDE_FILL_STATUS_BY_SLOT,
+  EXTRACT_CHUNKS_CAP,
 } from './config.ts';
 import type { PageRow, SourceRow } from './types.ts';
 import { callPlan } from './plan.ts';
@@ -574,7 +575,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
             return {
               slot: q.slot,
               query: q.query,
-              ...(q.query === '__map__' && slot?.description ? { map_description: slot.description } : {}),
+              ...(q.query === '__map__' ? { map_description: slot?.name ?? slot?.description ?? q.slot } : {}),
             };
           }),
           slots,
@@ -643,7 +644,14 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       });
     }
 
-    const evidenceChunksForExtract: EvidenceChunk[] = Array.from(evidenceChunksById.values());
+    // Cap evidence sent to the extraction LLM so context doesn't blow up across iterations.
+    // Sort by ascending distance (most relevant first) before slicing.
+    const allEvidence = Array.from(evidenceChunksById.values());
+    const evidenceChunksForExtract: EvidenceChunk[] = allEvidence.length > EXTRACT_CHUNKS_CAP
+      ? allEvidence
+          .sort((a, b) => ((a as { distance?: number }).distance ?? 1) - ((b as { distance?: number }).distance ?? 1))
+          .slice(0, EXTRACT_CHUNKS_CAP)
+      : allEvidence;
 
     const currentSlotState = await getCurrentSlotItemsState();
     const currentSlotStateJson = Object.keys(currentSlotState).length > 0 ? JSON.stringify(currentSlotState, null, 2) : '';
@@ -1001,6 +1009,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       queryGuidance: queryGuidanceBlock,
       ...(droppedClaims.length ? { droppedClaims } : {}),
       ...(droppedSubqueriesPreparedThisIter.length ? { droppedSubqueries: droppedSubqueriesPreparedThisIter.slice(0, 50) } : {}),
+      ...(extractResult.debug ? { extractDebug: extractResult.debug } : {}),
       ...(Object.keys(listSlotDebug).length > 0 ? { listSlotState: listSlotDebug } : {}),
     };
     thoughtProcess.steps.push(stepEntry);

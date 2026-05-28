@@ -441,6 +441,22 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     type SubqWithSlot = { slotId: string; query: string; strategy?: 'broad' | 'targeted' };
     let subqueriesWithSlot: SubqWithSlot[] = [];
 
+    // Build the seen set before insertion so fresh runs can skip duplicates upfront.
+    // This also acts as a safety net for the resume path.
+    const previousStepIds = stepList.filter((s) => s.iteration_number < iteration).map((s) => s.id);
+    const seen = new Set<string>();
+    // Normalize to lowercase so "Информация за X" and "информация за X" are the same key.
+    const seenKey = (slotId: string, query: string) => `${slotId}::${query.trim().toLowerCase()}`;
+    if (previousStepIds.length > 0) {
+      const { data: allPrevSubq } = await supabase
+        .from('reasoning_subqueries')
+        .select('slot_id, query_text')
+        .in('reasoning_step_id', previousStepIds);
+      for (const row of (allPrevSubq ?? []) as { slot_id: string; query_text: string }[]) {
+        seen.add(seenKey(row.slot_id, row.query_text));
+      }
+    }
+
     if (retrieveStep) {
       
       currentStepId = retrieveStep.id;
@@ -508,6 +524,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       for (const q of prepared.runnable) {
         const sid = slotIdByName.get(q.slot);
         if (!sid) continue;
+        // Skip queries already run in a previous step so the DB stays clean.
+        if (seen.has(seenKey(sid, q.query))) continue;
         const slot = slots.find((s) => s.id === sid);
         const fill = fillBySlotId.get(sid);
         const strategy = inferSubqueryStrategy(slot, fill, q.query);
@@ -538,21 +556,9 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         }));
     }
 
-    
-    const previousStepIds = stepList.filter((s) => s.iteration_number < iteration).map((s) => s.id);
-    const seen = new Set<string>();
-    // Normalize query text to lowercase so "Информация за X" and "информация за X" are the same key.
-    const seenKey = (slotId: string, query: string) => `${slotId}::${query.trim().toLowerCase()}`;
-    if (previousStepIds.length > 0) {
-      const { data: allPrevSubq } = await supabase
-        .from('reasoning_subqueries')
-        .select('slot_id, query_text')
-        .in('reasoning_step_id', previousStepIds);
-      for (const row of (allPrevSubq ?? []) as { slot_id: string; query_text: string }[]) {
-        seen.add(seenKey(row.slot_id, row.query_text));
-      }
-    }
-
+    // `seen` and `seenKey` were computed above before insertion; no need to rebuild.
+    // Keep the post-block filter as a safety net (handles the resume path where queries
+    // were inserted by an older code version that lacked pre-insertion dedup).
     const seenDedupKey = (slotId: string, query: string) => `${slotId}\0${query}`;
     let runnable = subqueriesWithSlot.filter(
       (sq) => sq.query && !seen.has(seenKey(sq.slotId, sq.query)),

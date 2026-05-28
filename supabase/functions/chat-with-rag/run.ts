@@ -336,6 +336,9 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       .in('slot_id', slots.map((s) => s.id));
     const bySlot = new Map<string, { key: string | null; value: unknown }[]>();
     const seenListValueBySlotId = new Map<string, Set<string>>();
+    // For mapping slots where items_per_key=0 (one value per key), deduplicate by key
+    // so the slot state (and thus the final answer LLM) only sees one entry per variety.
+    const seenMappingKeyBySlotId = new Map<string, Set<string>>();
     for (const row of (items ?? []) as { slot_id: string; key: string | null; value_json: unknown }[]) {
       const slot = slotById.get(row.slot_id);
       if (slot?.type === 'list') {
@@ -344,6 +347,15 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         if (!seen) {
           seen = new Set();
           seenListValueBySlotId.set(row.slot_id, seen);
+        }
+        if (seen.has(dk)) continue;
+        seen.add(dk);
+      } else if (slot?.type === 'mapping' && (slot.items_per_key ?? 0) === 0 && row.key != null) {
+        const dk = slotValueDedupKey(row.key);
+        let seen = seenMappingKeyBySlotId.get(row.slot_id);
+        if (!seen) {
+          seen = new Set();
+          seenMappingKeyBySlotId.set(row.slot_id, seen);
         }
         if (seen.has(dk)) continue;
         seen.add(dk);

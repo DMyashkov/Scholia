@@ -1,6 +1,6 @@
 import type { ChunkRow, PageRow, SourceRow } from './types.ts';
 
-/** Sample indexed pages and lead chunks so the planner can infer corpus language. */
+
 export function buildCorpusContextBlock(params: {
   pages: PageRow[];
   sourceById: Map<string, SourceRow>;

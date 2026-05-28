@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, Brain, CheckCircle2, AlertCircle, Info, Search, Circle, XCircle, FilePlus } from 'lucide-react';
-import type { SlotFillSummaryRow, SlotSnapshotEntry, ThoughtProcess, ThoughtProcessSlot } from '@/types/chat';
+import type {
+  SlotFillSummaryRow,
+  SlotSnapshotEntry,
+  ThoughtProcess,
+  ThoughtProcessSlot,
+  ThoughtProcessSubquery,
+  DroppedClaimInfo,
+  DroppedSubqueryInfo,
+} from '@/types/chat';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -12,6 +20,125 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+
+function inferSubqueryStrategy(sq: ThoughtProcessSubquery): 'broad' | 'targeted' | undefined {
+  if (sq.strategy === 'broad' || sq.strategy === 'targeted') return sq.strategy;
+  if (sq.query.includes(' for ')) return 'targeted';
+  return undefined;
+}
+
+function SubqueryStrategyBadge({ strategy }: { strategy: 'broad' | 'targeted' }) {
+  const isBroad = strategy === 'broad';
+  return (
+    <span
+      className={cn(
+        'shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1 py-px rounded border',
+        isBroad
+          ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/25'
+          : 'bg-amber-500/10 text-amber-800 dark:text-amber-200 border-amber-500/25',
+      )}
+      title={isBroad ? 'Broad discovery query' : 'Targeted query (slot- or key-specific)'}
+    >
+      {isBroad ? 'broad' : 'targeted'}
+    </span>
+  );
+}
+
+function DroppedClaimsBlock({ dropped }: { dropped: DroppedClaimInfo[] }) {
+  if (dropped.length === 0) return null;
+  return (
+    <details className="rounded-lg border border-destructive/25 bg-destructive/5 text-[11px]">
+      <summary className="cursor-pointer px-3 py-2 text-destructive/80 font-medium">
+        Dropped claims ({dropped.length})
+      </summary>
+      <div className="px-3 pb-2.5 space-y-2">
+        {dropped.slice(0, 50).map((d, i) => (
+          <div key={i} className="rounded border border-border/40 bg-background/50 px-2 py-1.5">
+            <div className="flex flex-wrap gap-x-2 gap-y-0.5 items-baseline">
+              <span className="font-semibold text-foreground/85">{d.slot}</span>
+              {d.key && <span className="text-muted-foreground">· key: {d.key}</span>}
+            </div>
+            {d.value && (
+              <div className="text-muted-foreground font-mono whitespace-pre-wrap leading-snug mt-0.5">
+                {d.value}
+              </div>
+            )}
+            <div className="text-destructive/80 mt-0.5">{d.reason}</div>
+            {d.chunkIds?.length ? (
+              <div className="text-[10px] text-muted-foreground mt-0.5">
+                chunks: {d.chunkIds.slice(0, 3).join(', ')}
+                {d.chunkIds.length > 3 ? ` (+${d.chunkIds.length - 3} more)` : ''}
+              </div>
+            ) : null}
+          </div>
+        ))}
+        {dropped.length > 50 && (
+          <div className="text-[10px] text-muted-foreground">Showing first 50 dropped claims.</div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function DroppedSubqueriesBlock({ dropped }: { dropped: DroppedSubqueryInfo[] }) {
+  if (dropped.length === 0) return null;
+  return (
+    <details className="rounded-lg border border-border/50 bg-muted/20 text-[11px]">
+      <summary className="cursor-pointer px-3 py-2 text-muted-foreground font-medium">
+        Dropped subqueries ({dropped.length})
+      </summary>
+      <div className="px-3 pb-2.5 space-y-2">
+        {dropped.slice(0, 50).map((d, i) => (
+          <div key={i} className="rounded border border-border/40 bg-background/50 px-2 py-1.5">
+            <div className="flex flex-wrap gap-x-2 gap-y-0.5 items-baseline">
+              <span className="font-semibold text-foreground/85">{d.slot}</span>
+              <span className="text-muted-foreground font-mono whitespace-pre-wrap leading-snug">{d.query}</span>
+            </div>
+            <div className="text-muted-foreground mt-0.5">{d.reason}</div>
+          </div>
+        ))}
+        {dropped.length > 50 && (
+          <div className="text-[10px] text-muted-foreground">Showing first 50 dropped subqueries.</div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function DroppedQuotesBlock({
+  droppedQuotes,
+  quoteDiagnostics,
+}: {
+  droppedQuotes?: string[];
+  quoteDiagnostics?: ThoughtProcess['quoteDiagnostics'];
+}) {
+  const dropped = quoteDiagnostics?.dropped ?? [];
+  const ids = droppedQuotes ?? (dropped.length ? dropped.map((d) => d.id) : []);
+  if (ids.length === 0) return null;
+  return (
+    <details className="rounded-lg border border-amber-500/25 bg-amber-500/5 text-[11px]">
+      <summary className="cursor-pointer px-3 py-2 text-amber-800 dark:text-amber-200 font-medium">
+        Dropped quotes ({ids.length})
+        {quoteDiagnostics?.verifiedQuotes != null && quoteDiagnostics?.placeholdersUnique != null
+          ? ` · kept ${quoteDiagnostics.verifiedQuotes}/${quoteDiagnostics.placeholdersUnique}`
+          : ''}
+      </summary>
+      <div className="px-3 pb-2.5 space-y-2">
+        {dropped.length ? (
+          dropped.slice(0, 50).map((d, i) => (
+            <div key={i} className="rounded border border-border/40 bg-background/50 px-2 py-1.5">
+              <div className="font-mono text-[10px] text-muted-foreground break-all">{d.id}</div>
+              <div className="text-amber-800/80 dark:text-amber-200/80 mt-0.5">{d.reason}</div>
+            </div>
+          ))
+        ) : (
+          <div className="text-muted-foreground">Quote placeholders were removed during verification.</div>
+        )}
+        {dropped.length > 50 && <div className="text-[10px] text-muted-foreground">Showing first 50.</div>}
+      </div>
+    </details>
+  );
+}
 
 function formatSlotValue(value: unknown): string {
   if (value == null) return '—';
@@ -30,7 +157,7 @@ function formatTargetLabel(target: number | null, type: string): string {
   return String(target);
 }
 
-/** Short label shown on the slot pill in "Looking for". */
+
 function targetPillLabelForSlot(slot: ThoughtProcessSlot): string | null {
   if (slot.type === 'list') {
     const n = slot.targetItemCount ?? 0;
@@ -43,7 +170,7 @@ function targetPillLabelForSlot(slot: ThoughtProcessSlot): string | null {
   return null;
 }
 
-/** Tooltip line for target / mapping (no duplicated "target" prefix). */
+
 function targetTooltipLineForSlot(slot: ThoughtProcessSlot): string | null {
   if (slot.type === 'list') {
     const n = slot.targetItemCount ?? 0;
@@ -66,7 +193,7 @@ function countFilledInSnapshot(entry: SlotSnapshotEntry, slotMeta?: ThoughtProce
   return entry.items.length;
 }
 
-/** Match backend getEffectiveTarget using snapshot counts at this step. */
+
 function snapshotTargetForSlot(
   slotMeta: ThoughtProcessSlot,
   slots: ThoughtProcessSlot[],
@@ -393,12 +520,18 @@ function PhaseContent({
                     {step.subqueries && step.subqueries.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 items-start">
                         {(() => {
-                          const bySlot = new Map<string, { slotLabel: string; queries: string[] }>();
+                          const bySlot = new Map<
+                            string,
+                            { slotLabel: string; queries: { text: string; strategy?: 'broad' | 'targeted' }[] }
+                          >();
                           for (const sq of step.subqueries ?? []) {
                             const slotLabel = (sq.slot ?? '').trim();
                             const key = slotLabel.length > 0 ? slotLabel : '__no_slot__';
                             const existing = bySlot.get(key) ?? { slotLabel, queries: [] };
-                            existing.queries.push(sq.query);
+                            existing.queries.push({
+                              text: sq.query,
+                              strategy: inferSubqueryStrategy(sq),
+                            });
                             bySlot.set(key, existing);
                           }
                           return Array.from(bySlot.entries()).map(([slotKey, group]) => {
@@ -425,9 +558,10 @@ function PhaseContent({
                                   {group.queries.map((q, qi) => (
                                     <span
                                       key={`${slotKey}-${qi}`}
-                                      className="text-[11px] px-1.5 py-0.5 rounded bg-muted/50 text-muted-foreground border border-border/50 font-mono"
+                                      className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-muted/50 text-muted-foreground border border-border/50 font-mono max-w-full"
                                     >
-                                      &ldquo;{q}&rdquo;
+                                      {q.strategy && <SubqueryStrategyBadge strategy={q.strategy} />}
+                                      <span className="truncate">&ldquo;{q.text}&rdquo;</span>
                                     </span>
                                   ))}
                                 </div>
@@ -501,6 +635,22 @@ function PhaseContent({
                           );
                         })}
                       </div>
+                    )}
+                    {step.queryGuidance && step.queryGuidance.trim().length > 0 && (
+                      <details className="rounded-lg border border-border/40 bg-muted/10 text-[11px]">
+                        <summary className="cursor-pointer px-3 py-2 text-muted-foreground font-medium">
+                          Query guidance (model context)
+                        </summary>
+                        <pre className="px-3 pb-2.5 whitespace-pre-wrap font-mono text-muted-foreground leading-snug">
+                          {step.queryGuidance}
+                        </pre>
+                      </details>
+                    )}
+                    {step.droppedClaims && step.droppedClaims.length > 0 && (
+                      <DroppedClaimsBlock dropped={step.droppedClaims} />
+                    )}
+                    {step.droppedSubqueries && step.droppedSubqueries.length > 0 && (
+                      <DroppedSubqueriesBlock dropped={step.droppedSubqueries} />
                     )}
                     {step.slotSnapshot && Object.keys(step.slotSnapshot).length > 0 && (
                       <SlotSnapshotBlock snapshot={step.slotSnapshot} slots={tp.slots ?? []} />
@@ -580,6 +730,7 @@ function PhaseContent({
               <span>{tp.partialAnswerNote}</span>
             </div>
           )}
+          <DroppedQuotesBlock droppedQuotes={tp.droppedQuotes} quoteDiagnostics={tp.quoteDiagnostics} />
           {tp.expandCorpusReason && outcome !== 'Suggested a page' && (
             <div className="flex items-start gap-2 text-xs text-muted-foreground">
               <Info className="h-3.5 w-3.5 shrink-0 mt-0.25" />

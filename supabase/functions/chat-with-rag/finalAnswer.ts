@@ -6,11 +6,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { OPENAI_CHAT_MODEL } from './config.ts';
 import { FINAL_ANSWER_CHUNKS_CAP } from './config.ts';
 import { capWithFairAllocation } from './utils.ts';
-
-export interface EvidenceChunk {
-  id: string;
-  snippet: string;
-}
+import type { EvidenceChunk } from './types.ts';
+import { formatEvidenceForPrompt } from './evidenceFormat.ts';
 
 export interface FinalAnswerResult {
   final_answer: string;
@@ -24,7 +21,7 @@ export interface FinalAnswerResult {
 export async function getEvidenceChunksForFinalAnswer(
   supabase: SupabaseClient,
   slotIds: string[],
-  evidenceChunksById: Map<string, string>,
+  evidenceChunksById: Map<string, EvidenceChunk>,
   cap: number = FINAL_ANSWER_CHUNKS_CAP,
 ): Promise<EvidenceChunk[]> {
   if (slotIds.length === 0) return [];
@@ -59,9 +56,9 @@ export async function getEvidenceChunksForFinalAnswer(
     const list: EvidenceChunk[] = [];
     if (ids) {
       for (const id of ids) {
-        const snippet = evidenceChunksById.get(id);
-        if (snippet == null) continue;
-        const obj = { id, snippet };
+        const chunk = evidenceChunksById.get(id);
+        if (chunk == null) continue;
+        const obj = chunk;
         chunkMap.set(id, obj);
         list.push(obj);
       }
@@ -90,7 +87,9 @@ Output JSON only:
 
 Rules:
 - Base the answer only on the evidence below. Cite every claim with [[quote:uuid]] using the chunk id from the evidence block.
-- In cited_snippets, map each cited chunk uuid to the exact verbatim passage you are quoting (one sentence or short passage). Copy from the evidence exactly.
+- In cited_snippets, map each cited chunk uuid to the exact verbatim passage you are quoting (one sentence or short passage). Copy from the evidence exactly — unverified quotes are removed from the saved answer.
+- Slot state summaries may paraphrase evidence; final-answer quotes must be verbatim from the chunk text.
+- Format the answer in Markdown with clear newlines. Prefer lists/tables when the question asks for per-entity answers.
 - If some parts of the question could not be answered from the evidence: 
 (1) briefly say why (e.g. no evidence in the provided sources); (2) present what you did find with citations; (3) at the end list what could not be found.`;
 
@@ -100,9 +99,7 @@ export async function callFinalAnswer(
   currentSlotStateJson: string,
   evidenceChunks: EvidenceChunk[],
 ): Promise<FinalAnswerResult> {
-  const quoteBlock = evidenceChunks
-    .map((q) => `[${q.id}]\n${q.snippet}`)
-    .join('\n\n---\n\n');
+  const quoteBlock = formatEvidenceForPrompt(evidenceChunks);
   const userContent = `Question: ${userMessage}
 
 Filled slot state (what we extracted from evidence):
@@ -144,13 +141,27 @@ Output JSON with final_answer and cited_snippets.`;
     ? obj.final_answer.trim()
     : "I couldn't find enough in the sources to answer fully.";
   const chunkIdSet = new Set(evidenceChunks.map((c) => c.id));
+  const chunkIdsByIndex = evidenceChunks.map((c) => c.id);
+  const resolveId = (rawId: string): string | null => {
+    const id = rawId.trim();
+    if (chunkIdSet.has(id)) return id;
+    const n = Number.parseInt(id, 10);
+    if (Number.isInteger(n) && n >= 1 && n <= chunkIdsByIndex.length) return chunkIdsByIndex[n - 1];
+    return null;
+  };
+
+  const resolvedFinalAnswer = final_answer.replace(/\[\[quote:([^\]]+)\]\]/g, (m, idRaw) => {
+    const resolved = typeof idRaw === 'string' ? resolveId(idRaw) : null;
+    return resolved ? `[[quote:${resolved}]]` : m;
+  });
   const cited_snippets: Record<string, string> = {};
   if (obj.cited_snippets != null && typeof obj.cited_snippets === 'object' && !Array.isArray(obj.cited_snippets)) {
     for (const [id, passage] of Object.entries(obj.cited_snippets)) {
-      if (chunkIdSet.has(id) && typeof passage === 'string' && passage.trim().length > 0) {
-        cited_snippets[id] = passage.trim();
+      const resolved = resolveId(id);
+      if (resolved && typeof passage === 'string' && passage.trim().length > 0) {
+        cited_snippets[resolved] = passage.trim();
       }
     }
   }
-  return { final_answer, cited_snippets };
+  return { final_answer: resolvedFinalAnswer, cited_snippets };
 }

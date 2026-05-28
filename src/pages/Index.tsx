@@ -41,6 +41,7 @@ const Index = () => {
     streamingMessage,
     ragStepProgress,
     liveThoughtProcess,
+    ragStreamError,
     createNewConversation,
     selectConversation,
     deleteConversation,
@@ -234,6 +235,7 @@ const Index = () => {
           streamingMessage={streamingMessage}
           ragStepProgress={ragStepProgress}
           liveThoughtProcess={liveThoughtProcess}
+          ragStreamError={ragStreamError}
           onSendMessage={handleSendMessage}
           onAddSource={handleAddSource}
           onRemoveSource={removeSourceFromConversation}

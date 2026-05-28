@@ -24,6 +24,7 @@ interface ChatAreaProps {
   streamingMessage: string;
   ragStepProgress?: Array<{ current: number; total: number; label: string }>;
   liveThoughtProcess?: ThoughtProcess | null;
+  ragStreamError?: string | null;
   onSendMessage: (message: string, options?: { unfoldMode?: 'unfold' | 'direct' }) => void;
   onAddSource: (url: string, depth: CrawlDepth, options: { sameDomainOnly: boolean; suggestionMode?: 'surface' | 'dive' }) => Promise<Source | null>;
   onRemoveSource: (sourceId: string) => void;
@@ -47,6 +48,7 @@ export const ChatArea = ({
   streamingMessage,
   ragStepProgress = [],
   liveThoughtProcess = null,
+  ragStreamError = null,
   onSendMessage,
   onAddSource,
   onRemoveSource,
@@ -261,12 +263,18 @@ export const ChatArea = ({
               {(isLoading && !streamingMessage) || addingPageSourceId ? (
                 <TypingIndicator minimal={!!addingPageSourceId} stepLabels={ragStepProgress} />
               ) : null}
-              {isLoading && liveThoughtProcess && (liveThoughtProcess.slots?.length || liveThoughtProcess.steps?.length) ? (
+              {liveThoughtProcess && (liveThoughtProcess.slots?.length || liveThoughtProcess.steps?.length) &&
+              (isLoading || ragStreamError) ? (
                 <div className="px-4 pt-2 pb-4">
-                  <div className="max-w-3xl mx-auto w-full">
+                  <div className="max-w-3xl mx-auto w-full space-y-2">
+                    {ragStreamError ? (
+                      <p className="text-sm text-destructive rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+                        {ragStreamError}
+                      </p>
+                    ) : null}
                     <ThoughtProcessView
                       thoughtProcess={liveThoughtProcess}
-                      isLive
+                      isLive={isLoading}
                       defaultOpen
                     />
                   </div>

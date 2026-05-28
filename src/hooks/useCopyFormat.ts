@@ -70,7 +70,7 @@ export function useCopyFormat() {
   };
 }
 
-/** @deprecated Use useCopyFormat */
+
 export function useCopyIncludeEvidence() {
   const { copyFormat, setCopyFormat, isLoading } = useCopyFormat();
   return {

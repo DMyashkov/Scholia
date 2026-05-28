@@ -12,11 +12,6 @@ export interface SlotCompletenessMeta {
 }
 
 
-
-
-
-
-
 export function slotCompleteness(
   slot: SlotForCompleteness,
   slotItemCountBySlotId: Map<string, number>,
@@ -35,9 +30,7 @@ export function slotCompleteness(
   if (slot.type === 'list' || slot.type === 'mapping') {
     if (meta != null) {
       if (meta.target_item_count <= 0) {
-        // For lists, target_item_count=0 means "open ended": any non-empty list is considered complete.
-        // For mappings, target_item_count=0 should not collapse completeness to 1; it indicates "no required coverage".
-        return slot.type === 'list' ? (count >= 1 ? 1 : 0) : 0;
+                        return slot.type === 'list' ? (count >= 1 ? 1 : 0) : 0;
       }
       return Math.min(1, count / meta.target_item_count);
     }
@@ -50,9 +43,6 @@ export function slotCompleteness(
   }
   return 0;
 }
-
-
-
 
 
 export function overallCompleteness(

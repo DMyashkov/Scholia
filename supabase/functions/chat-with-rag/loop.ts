@@ -1,9 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ExtractClaim, ExtractResult, ExtractSubquery } from './types.ts';
+import type { EvidenceChunk, ExtractClaim, ExtractResult, ExtractSubquery } from './types.ts';
+import { formatEvidenceForPrompt } from './evidenceFormat.ts';
 import type { SuggestedPage } from './expand.ts';
 import { OPENAI_CHAT_MODEL } from './config.ts';
 import { EXTRACT_SYSTEM } from './prompts.ts';
-import { normalizeSlotEntityString, slotValueDedupKey } from './utils.ts';
+import { normalizeSlotEntityString, slotValueDedupKey, splitListEntityValues } from './utils.ts';
+import type { CorpusLanguage } from './language.ts';
+import { formatCorpusLanguageLine } from './language.ts';
 
 export interface SlotRow {
   id: string;
@@ -11,15 +14,12 @@ export interface SlotRow {
   type: string;
   description?: string | null;
   depends_on_slot_id?: string | null;
-  
+
   target_item_count?: number;
   items_per_key?: number | null;
 }
 
-export interface EvidenceChunk {
-  id: string;
-  snippet: string;
-}
+export type { EvidenceChunk } from './types.ts';
 
 export async function callExtractAndDecide(
   apiKey: string,
@@ -27,17 +27,16 @@ export async function callExtractAndDecide(
   evidenceChunks: EvidenceChunk[],
   currentSlotStateJson: string,
   userMessage: string,
+  corpusLanguage?: CorpusLanguage,
   suggestExpandWhenNoEvidence = false,
   topSuggestedPages: SuggestedPage[] | null = null,
   previousAttemptsBySlot?: string,
-  
+
   broadSlotNamesThisStep: string[] = [],
-  
   finishedQueryingSlotNames: string[] = [],
+  queryGuidanceBlock?: string,
 ): Promise<ExtractResult> {
-  const quoteBlock = evidenceChunks
-    .map((q) => `[${q.id}]\n${q.snippet}`)
-    .join('\n\n---\n\n');
+  const quoteBlock = formatEvidenceForPrompt(evidenceChunks);
   const slotBlock = slots
     .map((s) => {
       const targetStr = s.target_item_count != null && (s.type === 'list' || s.type === 'mapping') ? ` target=${s.target_item_count}` : '';
@@ -76,11 +75,18 @@ expand_corpus: set suggested_page_index (1–${topSuggestedPages.length}) or omi
 
   const finishedBlock =
     finishedQueryingSlotNames.length > 0
+      ? `${finishedQueryingSlotNames.join(', ')}. Do not suggest new subqueries for these slots.`
+      : 'none';
+
+  const guidanceBlock =
+    queryGuidanceBlock && queryGuidanceBlock.trim().length > 0
       ? `
- ${finishedQueryingSlotNames.join(', ')}. Do not suggest new subqueries for these slots this step.`
+
+${queryGuidanceBlock}`
       : '';
 
-  const userContent = `Question: ${userMessage}
+  const langLine = corpusLanguage ? `${formatCorpusLanguageLine(corpusLanguage)}\n` : '';
+  const userContent = `${langLine}Question: ${userMessage}
 
 Slots to fill:
 ${slotBlock}
@@ -90,14 +96,15 @@ ${finishedBlock}
 
 Current slot state (JSON — existing keys per slot; for mapping, which keys are allowed):
 ${currentSlotStateJson || '{}'}
+${guidanceBlock}
 ${previousAttemptsBlock}
 
-Evidence (use exact UUIDs in each claim's chunkIds):
+Evidence (each block: chunk id, page URL when known, retrieval subquery + slot; use chunk indices 1..N or UUIDs in chunkIds):
 ---
 ${quoteBlock}
 ---${dynamicBlock}${broadBlock}
 
-Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_page_index if expand_corpus; broad_query_completed_slot_fully for BROAD slots needing no more retrieval.`;
+Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_page_index if expand_corpus; broad_query_completed_slot_fully only when appropriate per guidance.`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -140,7 +147,13 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
       if (slot.length === 0) return null;
       if (query === '__map__') {
         const map_description = typeof q.map_description === 'string' ? q.map_description.trim() || undefined : undefined;
-        return { slot, query: '__map__' as const, ...(map_description ? { map_description } : {}) };
+        const key_connector = typeof q.key_connector === 'string' ? q.key_connector.trim() || undefined : undefined;
+        return {
+          slot,
+          query: '__map__' as const,
+          ...(map_description ? { map_description } : {}),
+          ...(key_connector ? { key_connector } : {}),
+        };
       }
       if (typeof query === 'string' && query.length > 0) return { slot, query };
       return null;
@@ -151,20 +164,29 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
   const claimsRaw = Array.isArray(obj.claims) ? obj.claims : [];
   const chunkIdSet = new Set(evidenceChunks.map((q) => q.id));
   const chunkIdsByIndex = evidenceChunks.map((q) => q.id);
-  let droppedNoValidChunkIds = 0;
   const claims: ExtractClaim[] = claimsRaw
     .filter((c): c is Record<string, unknown> => c != null && typeof c === 'object')
     .map((c) => {
       const cRecord = c as Record<string, unknown>;
       const rawIds = Array.isArray(cRecord.chunkIds) ? (cRecord.chunkIds as unknown[]) : [];
-      let chunkIds = rawIds.filter((id): id is string => typeof id === 'string' && chunkIdSet.has(id)) as string[];
-      if (chunkIds.length === 0 && rawIds.length > 0) {
-        const byIndex = rawIds
-          .map((id) => (typeof id === 'number' ? id : typeof id === 'string' ? parseInt(id, 10) : NaN))
-          .filter((i) => Number.isInteger(i) && i >= 1 && i <= chunkIdsByIndex.length)
-          .map((i) => chunkIdsByIndex[i - 1]);
-        if (byIndex.length > 0) chunkIds = byIndex;
-        else droppedNoValidChunkIds++;
+      const chunkIds: string[] = [];
+      const seen = new Set<string>();
+      for (const id of rawIds) {
+        if (typeof id === 'string' && chunkIdSet.has(id)) {
+          if (!seen.has(id)) {
+            seen.add(id);
+            chunkIds.push(id);
+          }
+          continue;
+        }
+        const idx = typeof id === 'number' ? id : typeof id === 'string' ? parseInt(id, 10) : NaN;
+        if (Number.isInteger(idx) && idx >= 1 && idx <= chunkIdsByIndex.length) {
+          const cid = chunkIdsByIndex[idx - 1];
+          if (!seen.has(cid)) {
+            seen.add(cid);
+            chunkIds.push(cid);
+          }
+        }
       }
       return {
         slot: String(c.slot ?? ''),
@@ -175,7 +197,6 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
       };
     })
     .filter((c) => c.slot && c.chunkIds.length > 0);
-  
 
   let suggested_page_index: number | undefined;
   if (next_action === 'expand_corpus' && typeof obj.suggested_page_index === 'number') {
@@ -203,10 +224,11 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
   };
 }
 
-
-
-
-
+function claimSortOrder(type: string | undefined): number {
+  if (type === 'list') return 0;
+  if (type === 'mapping') return 1;
+  return 2;
+}
 
 export async function insertClaims(
   supabase: SupabaseClient,
@@ -217,29 +239,109 @@ export async function insertClaims(
     ownerId: string;
     allowedKeysByMappingSlotId?: Map<string, Set<string>>;
   },
-): Promise<{ insertedSlotItemIds: string[] }> {
+): Promise<{
+  insertedSlotItemIds: string[];
+  droppedClaims: { slot: string; key?: string; value?: string; chunkIds?: string[]; reason: string }[];
+}> {
   const { slotIdByName, slots, claims, ownerId, allowedKeysByMappingSlotId } = params;
   const inserted: string[] = [];
   const batchDedup = new Map<string, string>();
+  const droppedClaims: { slot: string; key?: string; value?: string; chunkIds?: string[]; reason: string }[] = [];
+  const slotById = new Map(slots.map((s) => [s.id, s]));
+  const batchParentKeysBySlotId = new Map<string, Set<string>>();
 
-  for (const claim of claims) {
-    const slotId = slotIdByName.get(claim.slot);
-    if (!slotId) continue;
+  const normalizeForTokenCompare = (s: string): string =>
+    normalizeSlotEntityString(s).replace(/_/g, ' ').toLowerCase();
+  const tokenize = (s: string): string[] =>
+    normalizeForTokenCompare(s)
+      .split(/[^0-9\p{L}]+/gu)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2);
+  const looksGenericListLabel = (slotLabel: string, value: string): boolean => {
+    const v = normalizeSlotEntityString(value);
+    if (!v) return true;
+    const hasUpper = /\p{Lu}/u.test(v);
+    const words = tokenize(v);
+    if (!hasUpper && words.length >= 2) {
+      const slotTokens = new Set(tokenize(slotLabel));
+      const overlap = words.filter((w) => slotTokens.has(w)).length;
+      if (overlap >= Math.max(1, Math.floor(words.length * 0.6))) return true;
+    }
+    return false;
+  };
 
-    const slot = slots.find((s) => s.id === slotId);
-    const key =
-      claim.key != null
-        ? normalizeSlotEntityString(typeof claim.key === 'string' ? claim.key : String(claim.key))
-        : null;
+  const ordered = [...claims].sort((a, b) => {
+    const sa = slots.find((s) => s.id === slotIdByName.get(a.slot));
+    const sb = slots.find((s) => s.id === slotIdByName.get(b.slot));
+    return claimSortOrder(sa?.type) - claimSortOrder(sb?.type);
+  });
 
-    if (slot?.type === 'mapping' && allowedKeysByMappingSlotId?.has(slotId)) {
-      const allowed = allowedKeysByMappingSlotId.get(slotId)!;
-      if (key == null || !allowed.has(key)) continue;
+  const insertOne = async (
+    claim: ExtractClaim,
+    slotId: string,
+    slot: { id: string; type: string; depends_on_slot_id?: string | null },
+    key: string | null,
+    valueJson: unknown,
+  ): Promise<void> => {
+    if (valueJson == null || (typeof valueJson === 'string' && valueJson.trim().length === 0)) {
+      droppedClaims.push({
+        slot: claim.slot,
+        ...(key != null ? { key } : {}),
+        reason: 'Empty claim value.',
+      });
+      return;
     }
 
-    const rawValue = typeof claim.value === 'object' && claim.value !== null ? claim.value : claim.value;
-    const valueJson =
-      typeof rawValue === 'string' ? normalizeSlotEntityString(rawValue) : rawValue;
+    if (slot.type === 'mapping') {
+      if (key == null) {
+        droppedClaims.push({
+          slot: claim.slot,
+          reason: 'Missing mapping key.',
+        });
+        return;
+      }
+      if (key.trim() === '-' || key.trim() === '—' || key.trim() === '–') {
+        droppedClaims.push({
+          slot: claim.slot,
+          key,
+          reason: 'Invalid mapping key placeholder.',
+        });
+        return;
+      }
+    }
+
+    if (slot.type === 'list' && typeof valueJson === 'string') {
+      if (looksGenericListLabel(claim.slot, valueJson)) {
+        droppedClaims.push({
+          slot: claim.slot,
+          value: valueJson,
+          ...(claim.chunkIds?.length ? { chunkIds: claim.chunkIds } : {}),
+          reason: 'List value looks like a generic category label, not an entity.',
+        });
+        return;
+      }
+    }
+
+    if (slot.type === 'mapping') {
+      const allowed = allowedKeysByMappingSlotId?.get(slotId);
+      const batchParent = slot.depends_on_slot_id
+        ? batchParentKeysBySlotId.get(slot.depends_on_slot_id)
+        : undefined;
+      const keyDedup = key != null ? slotValueDedupKey(key) : null;
+      const inAllowed = keyDedup != null && allowed?.has(keyDedup);
+      const inBatch = keyDedup != null && batchParent?.has(keyDedup);
+      if (allowed?.size && keyDedup != null && !inAllowed && !inBatch) {
+        droppedClaims.push({
+          slot: claim.slot,
+          ...(key != null ? { key } : {}),
+          ...(typeof claim.value === 'string' ? { value: claim.value } : {}),
+          ...(claim.chunkIds?.length ? { chunkIds: claim.chunkIds } : {}),
+          reason: 'Mapping key not in dependency slot state.',
+        });
+        return;
+      }
+    }
+
     const dedupKey = slotValueDedupKey(valueJson);
     const batchKey = `${slotId}\0${key ?? ''}\0${dedupKey}`;
     const batchHit = batchDedup.get(batchKey);
@@ -250,10 +352,9 @@ export async function insertClaims(
           { onConflict: 'slot_item_id,chunk_id', ignoreDuplicates: true },
         );
       }
-      continue;
+      return;
     }
 
-    // PostgREST: .eq('key', null) does not match NULL keys — use .is() for list slots.
     let existingQuery = supabase
       .from('slot_items')
       .select('id, value_json')
@@ -281,12 +382,23 @@ export async function insertClaims(
         })
         .select('id')
         .single();
-      if (insertErr || !insertedRow?.id) continue;
+      if (insertErr || !insertedRow?.id) return;
       slotItemId = insertedRow.id;
       inserted.push(slotItemId);
     }
 
     batchDedup.set(batchKey, slotItemId);
+
+    if (slot.type === 'list' && typeof valueJson === 'string') {
+      let batchSet = batchParentKeysBySlotId.get(slotId);
+      if (!batchSet) {
+        batchSet = new Set();
+        batchParentKeysBySlotId.set(slotId, batchSet);
+      }
+      for (const part of splitListEntityValues(valueJson)) {
+        batchSet.add(slotValueDedupKey(part));
+      }
+    }
 
     for (const chunkId of claim.chunkIds) {
       await supabase.from('claim_evidence').upsert(
@@ -294,7 +406,35 @@ export async function insertClaims(
         { onConflict: 'slot_item_id,chunk_id', ignoreDuplicates: true },
       );
     }
+  };
+
+  for (const claim of ordered) {
+    const slotId = slotIdByName.get(claim.slot);
+    if (!slotId) continue;
+    const slot = slotById.get(slotId);
+    if (!slot) continue;
+
+    const key =
+      claim.key != null
+        ? normalizeSlotEntityString(typeof claim.key === 'string' ? claim.key : String(claim.key))
+        : null;
+
+    const rawValue = typeof claim.value === 'object' && claim.value !== null ? claim.value : claim.value;
+
+    if (slot.type === 'list' && typeof rawValue === 'string') {
+      const parts = splitListEntityValues(rawValue);
+      if (parts.length > 1) {
+        for (const part of parts) {
+          await insertOne(claim, slotId, slot, null, part);
+        }
+        continue;
+      }
+    }
+
+    const valueJson =
+      typeof rawValue === 'string' ? normalizeSlotEntityString(rawValue) : rawValue;
+    await insertOne(claim, slotId, slot, key, valueJson);
   }
 
-  return { insertedSlotItemIds: inserted };
+  return { insertedSlotItemIds: inserted, droppedClaims };
 }

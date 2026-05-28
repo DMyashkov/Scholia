@@ -2,12 +2,18 @@ import type { PlanResult, PlanSlot, PlanSubquery, SlotType } from './types.ts';
 import { OPENAI_CHAT_MODEL } from './config.ts';
 import { buildPlanUserMessage } from './corpusContext.ts';
 import { PLAN_SYSTEM } from './prompts.ts';
+import type { CorpusLanguage } from './language.ts';
+import { formatCorpusLanguageLine, looksLikeLanguageMismatch } from './language.ts';
 
 export async function callPlan(
   apiKey: string,
   userMessage: string,
   corpusContext = '',
+  corpusLanguage?: CorpusLanguage,
+  _didRetryForLanguage = false,
 ): Promise<PlanResult> {
+  const langLine = corpusLanguage ? `${formatCorpusLanguageLine(corpusLanguage)}\n` : '';
+  const userPrompt = `${langLine}${buildPlanUserMessage(userMessage, corpusContext)}`;
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -15,7 +21,7 @@ export async function callPlan(
       model: OPENAI_CHAT_MODEL,
       messages: [
         { role: 'system', content: PLAN_SYSTEM },
-        { role: 'user', content: buildPlanUserMessage(userMessage, corpusContext) },
+        { role: 'user', content: userPrompt },
       ],
       response_format: { type: 'json_object' },
     }),
@@ -56,7 +62,22 @@ export async function callPlan(
     }))
     .filter((q) => q.query.length > 0 && slotNamesWithNoDeps.has(q.slot));
 
-  return { action, why, slots: slots.length > 0 ? slots : [{ name: 'answer', type: 'scalar' }], subqueries };
+  const result: PlanResult = { action, why, slots: slots.length > 0 ? slots : [{ name: 'answer', type: 'scalar' }], subqueries };
+
+      if (corpusLanguage && corpusLanguage.code !== 'und' && !_didRetryForLanguage) {
+    const allStrings = [
+      ...result.slots.map((s) => s.name),
+      ...result.slots.map((s) => s.description ?? ''),
+      ...result.subqueries.map((q) => q.query),
+    ].filter(Boolean);
+    const mismatchCount = allStrings.filter((s) => looksLikeLanguageMismatch(s, corpusLanguage)).length;
+    if (mismatchCount >= Math.max(2, Math.floor(allStrings.length * 0.5))) {
+      const retry = await callPlan(apiKey, userMessage, corpusContext, corpusLanguage, true);
+      return retry;
+    }
+  }
+
+  return result;
 }
 
 function fallbackPlan(userMessage: string): PlanResult {

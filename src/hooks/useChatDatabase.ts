@@ -30,6 +30,11 @@ import { deriveTitleFromUrl } from '@/lib/utils';
 import { isAddPagePipelineComplete } from '@/lib/crawlJobProgress';
 import { generateTitle } from '@/data/mockResponses';
 import { generateQuotesForMessage, generateSourcedResponse } from '@/data/mockSourceContent';
+import { consumeRagStream } from '@/lib/consumeRagStream';
+import { toast } from 'sonner';
+
+const RAG_INCOMPLETE_MSG =
+  'This project runs on Supabase with a per-request time limit for Edge Functions (wall-clock cap on how long one invocation may run). Your question needed more retrieval steps than that limit allows, so the stream closed before the assistant finished. Any partial progress may still be saved—try a narrower question or run again.';
 
 
 const dbConversationToUI = (db: DBConversation & { dynamic_mode?: boolean }, messages: DBMessage[], sources: Source[]): Conversation => ({
@@ -107,6 +112,7 @@ export const useChatDatabase = () => {
   const [streamingMessage, setStreamingMessage] = useState<string>('');
   const [ragStepProgress, setRagStepProgress] = useState<Array<{ current: number; total: number; label: string }>>([]);
   const [liveThoughtProcess, setLiveThoughtProcess] = useState<ThoughtProcess | null>(null);
+  const [ragStreamError, setRagStreamError] = useState<string | null>(null);
 
   const { data: dbConversations = [], isLoading: conversationsLoading } = useConversations();
   const createConversationMutation = useCreateConversation();
@@ -388,6 +394,7 @@ export const useChatDatabase = () => {
     setStreamingMessage('');
     setRagStepProgress([]);
     setLiveThoughtProcess(null);
+    setRagStreamError(null);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -408,71 +415,30 @@ export const useChatDatabase = () => {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
       }
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      if (reader) {
-        const steps: { current: number; total: number; label: string }[] = [];
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const event = JSON.parse(line) as Record<string, unknown>;
-              if (event.thoughtProcess != null && typeof event.thoughtProcess === 'object') {
-                setLiveThoughtProcess(event.thoughtProcess as ThoughtProcess);
-              } else if (event.plan != null && typeof event.plan === 'object') {
-                const plan = event.plan as { slots?: ThoughtProcess['slots']; subqueries?: unknown[] };
-                if (Array.isArray(plan.slots)) {
-                  setLiveThoughtProcess((prev) => ({ ...prev, slots: plan.slots, steps: prev?.steps ?? [] }));
-                }
-              }
-              if (event.step != null && event.label && event.totalSteps != null) {
-                const current = Number(event.step);
-                const total = Number(event.totalSteps);
-                const label = String(event.label);
-                const idx = steps.findIndex((s) => s.current === current);
-                if (idx >= 0) {
-                  steps[idx] = { current, total, label };
-                } else {
-                  steps.push({ current, total, label });
-                  steps.sort((a, b) => a.current - b.current);
-                }
-                setRagStepProgress([...steps]);
-              }
-              if (event.done === true) {
-                setLiveThoughtProcess(null);
-                queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-                return;
-              }
-              if (event.error) {
-                setLiveThoughtProcess(null);
-                throw new Error(String(event.error));
-              }
-            } catch (e) {
-              if (e instanceof SyntaxError) continue;
-              throw e;
-            }
-          }
-        }
-        if (buffer.trim()) {
-          const event = JSON.parse(buffer) as Record<string, unknown>;
-          if (event.done === true) {
-            setLiveThoughtProcess(null);
-            queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-            return;
-          }
-          if (event.error) {
-            setLiveThoughtProcess(null);
-            throw new Error(String(event.error));
-          }
-        }
-        setLiveThoughtProcess(null);
+      const outcome = await consumeRagStream(res.body, {
+        onThoughtProcess: setLiveThoughtProcess,
+        onPlan: (slots) => setLiveThoughtProcess((prev) => ({ ...prev, slots, steps: prev?.steps ?? [] })),
+        onStepProgress: setRagStepProgress,
+        onDone: () => {
+          setLiveThoughtProcess(null);
+          setRagStreamError(null);
+          queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+        },
+        onError: (msg) => {
+          throw new Error(msg);
+        },
+      });
+      if (outcome === 'incomplete') {
+        setRagStreamError(RAG_INCOMPLETE_MSG);
+        toast.error('Assistant stopped early', { description: RAG_INCOMPLETE_MSG });
+        queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+      } else if (outcome === 'done') {
+        queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
       }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Request failed';
+      setRagStreamError(msg);
+      toast.error('Assistant error', { description: msg });
       queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
     } finally {
       setIsLoading(false);
@@ -510,6 +476,7 @@ export const useChatDatabase = () => {
     setStreamingMessage('');
     setRagStepProgress([]);
     setLiveThoughtProcess(null);
+    setRagStreamError(null);
 
     const readySources = conversationSources.filter(s => s.status === 'ready');
     const crawlingSources = conversationSources.filter(s => s.status === 'crawling');
@@ -543,86 +510,39 @@ export const useChatDatabase = () => {
           }
           console.error('[chat-with-rag]', res.status, ragError);
         } else {
-          const reader = res.body?.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-          const steps: { current: number; total: number; label: string }[] = [];
-          if (reader) {
-            try {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() ?? '';
-                for (const line of lines) {
-                  if (!line.trim()) continue;
-                  const event = JSON.parse(line) as Record<string, unknown>;
-                  if (event.thoughtProcess != null && typeof event.thoughtProcess === 'object') {
-                    setLiveThoughtProcess(event.thoughtProcess as ThoughtProcess);
-                  } else if (event.plan != null && typeof event.plan === 'object') {
-                    const plan = event.plan as { slots?: ThoughtProcess['slots']; subqueries?: unknown[] };
-                    if (Array.isArray(plan.slots)) {
-                      setLiveThoughtProcess({ slots: plan.slots, steps: [] });
-                    }
-                  }
-                  if (event.step != null && event.label && event.totalSteps != null) {
-                    const current = Number(event.step);
-                    const total = Number(event.totalSteps);
-                    const label = String(event.label);
-                    const idx = steps.findIndex(s => s.current === current);
-                    if (idx >= 0) {
-                      steps[idx] = { current, total, label };
-                    } else {
-                      steps.push({ current, total, label });
-                      steps.sort((a, b) => a.current - b.current);
-                    }
-                    setRagStepProgress([...steps]);
-                  }
-                  if (event.done === true && event.message) {
-                    const ev = event as { suggestedTitle?: string };
-                    setLiveThoughtProcess(null);
-                    queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-                    if (ev.suggestedTitle) {
-                      queryClient.invalidateQueries({ queryKey: ['conversations'] });
-                    }
-                    setIsLoading(false);
-                    return;
-                  }
-                  if (event.error) {
-                    setLiveThoughtProcess(null);
-                    ragFailed = true;
-                    ragError = String(event.error);
-                    break;
-                  }
-                }
+          const outcome = await consumeRagStream(res.body, {
+            onThoughtProcess: setLiveThoughtProcess,
+            onPlan: (slots) => setLiveThoughtProcess({ slots, steps: [] }),
+            onStepProgress: setRagStepProgress,
+            onDone: (event) => {
+              setLiveThoughtProcess(null);
+              setRagStreamError(null);
+              queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+              if (typeof event.suggestedTitle === 'string') {
+                queryClient.invalidateQueries({ queryKey: ['conversations'] });
               }
-              if (buffer.trim()) {
-                const event = JSON.parse(buffer) as Record<string, unknown> & { suggestedTitle?: string };
-                if (event.done === true && event.message) {
-                  setLiveThoughtProcess(null);
-                  queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-                  if (event.suggestedTitle) {
-                    queryClient.invalidateQueries({ queryKey: ['conversations'] });
-                  }
-                  setIsLoading(false);
-                  return;
-                }
-                if (event.error) {
-                  setLiveThoughtProcess(null);
-                  ragFailed = true;
-                  ragError = String(event.error);
-                }
-              }
-            } finally {
-              void 0;
-            }
-          } else {
+            },
+            onError: (msg) => {
+              ragFailed = true;
+              ragError = msg;
+            },
+          });
+          if (outcome === 'done') {
+            setIsLoading(false);
+            return;
+          }
+          if (outcome === 'incomplete') {
+            ragFailed = true;
+            ragError = RAG_INCOMPLETE_MSG;
+            setRagStreamError(RAG_INCOMPLETE_MSG);
+            toast.error('Assistant stopped early', { description: RAG_INCOMPLETE_MSG });
+            queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+          } else if (outcome === 'error' && ragError) {
+            setRagStreamError(ragError);
+            toast.error('Assistant error', { description: ragError });
             queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
           }
-          if (ragFailed && ragError) {
-            void 0;
-          } else {
+          if (!ragFailed) {
             setIsLoading(false);
             return;
           }
@@ -630,25 +550,38 @@ export const useChatDatabase = () => {
       } catch (e) {
         ragFailed = true;
         ragError = e instanceof Error ? e.message : 'Network or request failed';
+        setRagStreamError(ragError);
+        toast.error('Assistant error', { description: ragError });
         console.error('[chat-with-rag]', ragError);
       }
     }
 
-    
-    const fullResponse = ragFailed && hasSources
-      ? (ragError
-          ? `The assistant couldn't answer: **${ragError}** — Check that the crawl finished, chunks are indexed, and the Edge Function has the \`OPENAI_API_KEY\` secret set.`
-          : "The assistant couldn't answer right now. Make sure the crawl has finished and chunks are indexed (check the source drawer), then try again.")
-      : generateSourcedResponse(
-          content,
-          readySources.length > 0,
-          crawlingSources.length > 0
-        );
+    if (ragFailed && hasSources) {
+      const errText = ragError
+        ? `The assistant couldn't finish: **${ragError}**`
+        : "The assistant couldn't finish. Make sure the crawl has finished and chunks are indexed, then try again.";
+      await createMessageMutation.mutateAsync({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: errText,
+        was_multi_step: false,
+      });
+      queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+      setStreamingMessage('');
+      setIsLoading(false);
+      return;
+    }
+
+    const fullResponse = generateSourcedResponse(
+      content,
+      readySources.length > 0,
+      crawlingSources.length > 0,
+    );
 
     const words = fullResponse.split(' ');
     for (let i = 0; i < words.length; i++) {
       await new Promise(resolve => setTimeout(resolve, 30 + Math.random() * 20));
-      setStreamingMessage(prev => prev + (i === 0 ? '' : ' ') + words[i]);
+      setStreamingMessage((prev) => prev + (i === 0 ? '' : ' ') + words[i]);
     }
 
     await createMessageMutation.mutateAsync({
@@ -678,6 +611,7 @@ export const useChatDatabase = () => {
     streamingMessage,
     ragStepProgress,
     liveThoughtProcess,
+    ragStreamError,
     createNewConversation,
     selectConversation,
     deleteConversation,

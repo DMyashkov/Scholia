@@ -140,7 +140,13 @@ export function buildThoughtProcessSection(tp: ThoughtProcess | null | undefined
       if (step.subqueries?.length) {
         lines.push('- Subqueries:');
         for (const sq of step.subqueries) {
-          lines.push(`  - [${sq.slot || '?'}] "${sq.query}"`);
+          const strat =
+            sq.strategy === 'broad' || sq.strategy === 'targeted'
+              ? ` (${sq.strategy})`
+              : sq.query.includes(' for ')
+                ? ' (targeted)'
+                : '';
+          lines.push(`  - [${sq.slot || '?'}]${strat} "${sq.query}"`);
         }
       }
       if (step.statements?.length) {

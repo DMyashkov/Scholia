@@ -53,6 +53,8 @@ export interface MapSubquery {
   slot: string;
   query: '__map__';
   map_description?: string;
+  
+  key_connector?: string;
 }
 
 export type ExtractSubquery = NormalSubquery | MapSubquery;
@@ -99,9 +101,24 @@ export type ChunkRow = {
   content: string;
   page_title: string;
   page_path: string;
+  page_url?: string;
   source_domain: string;
   distance?: number;
 };
+
+
+export interface EvidenceChunkProvenance {
+  slot: string;
+  query: string;
+}
+
+export interface EvidenceChunk {
+  id: string;
+  snippet: string;
+  pageUrl?: string;
+  pageTitle?: string;
+  retrievedBy?: EvidenceChunkProvenance[];
+}
 
 export type PageRow = { id: string; source_id: string; title: string | null; path: string; url: string };
 export type SourceRow = { id: string; domain: string };

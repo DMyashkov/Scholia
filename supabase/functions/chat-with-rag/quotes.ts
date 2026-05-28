@@ -44,9 +44,83 @@ export async function createQuoteFromChunk(
 
 const QUOTE_PLACEHOLDER_REGEX = /\[\[quote:([^\]]+)\]\]/g;
 
+export function normalizeForQuoteMatch(s: string): string {
+  return s.trim().replace(/\s+/g, ' ').replace(/\u00a0/g, ' ').toLowerCase();
+}
 
+export function citedSnippetVerifiedInChunk(chunkText: string, snippet: string): boolean {
+  const snippetTrim = snippet.trim();
+  if (!snippetTrim) return false;
+  const chunkNorm = normalizeForQuoteMatch(chunkText);
+  const snippetNorm = normalizeForQuoteMatch(snippetTrim);
+  return chunkNorm.includes(snippetNorm);
+}
 
+export function extractCitedChunkIds(finalAnswer: string, validQuoteIds: Set<string>): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  QUOTE_PLACEHOLDER_REGEX.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = QUOTE_PLACEHOLDER_REGEX.exec(finalAnswer)) !== null) {
+    const id = m[1].trim();
+    if (!validQuoteIds.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
 
+export function replaceAndVerifyCitationPlaceholders(
+  finalAnswer: string,
+  validQuoteIds: Set<string>,
+  citedSnippets: Record<string, string>,
+  chunkTextById: Map<string, string>,
+): { content: string; quoteIdsOrdered: string[]; droppedQuoteIds: string[] } {
+  const verifiedIds = new Set<string>();
+  const droppedQuoteIds: string[] = [];
+  const seen = new Set<string>();
+
+  QUOTE_PLACEHOLDER_REGEX.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = QUOTE_PLACEHOLDER_REGEX.exec(finalAnswer)) !== null) {
+    const id = m[1].trim();
+    if (seen.has(id)) continue;
+    seen.add(id);
+
+    if (!validQuoteIds.has(id)) {
+      droppedQuoteIds.push(id);
+      continue;
+    }
+    const chunkText = chunkTextById.get(id);
+    const snippet = citedSnippets[id];
+    if (
+      !chunkText ||
+      typeof snippet !== 'string' ||
+      !citedSnippetVerifiedInChunk(chunkText, snippet)
+    ) {
+      droppedQuoteIds.push(id);
+      continue;
+    }
+    verifiedIds.add(id);
+  }
+
+  const quoteIdsOrdered: string[] = [];
+  seen.clear();
+  QUOTE_PLACEHOLDER_REGEX.lastIndex = 0;
+  while ((m = QUOTE_PLACEHOLDER_REGEX.exec(finalAnswer)) !== null) {
+    const id = m[1].trim();
+    if (!verifiedIds.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    quoteIdsOrdered.push(id);
+  }
+
+  let content = finalAnswer;
+  for (let n = 0; n < quoteIdsOrdered.length; n++) {
+    content = content.split(`[[quote:${quoteIdsOrdered[n]}]]`).join(`[${n + 1}]`);
+  }
+  content = content.replace(QUOTE_PLACEHOLDER_REGEX, '');
+  return { content, quoteIdsOrdered, droppedQuoteIds };
+}
 
 export function replaceCitationPlaceholders(
   finalAnswer: string,

@@ -11,14 +11,16 @@ import {
   MAX_ITERATIONS,
   MAX_SUBQUERIES_PER_ITER,
   MAX_TOTAL_SUBQUERIES,
+  MAX_MAPPING_SUBQUERIES_PER_ITER,
   MAX_EXPANSIONS,
-  STAGNATION_THRESHOLD,
   INCLUDE_FILL_STATUS_BY_SLOT,
 } from './config.ts';
 import type { PageRow, SourceRow } from './types.ts';
 import { callPlan } from './plan.ts';
 import { callExtractAndDecide, insertClaims } from './loop.ts';
-import type { SlotRow, EvidenceChunk } from './loop.ts';
+import type { SlotRow } from './loop.ts';
+import type { EvidenceChunk } from './types.ts';
+import { upsertEvidenceChunk } from './evidenceFormat.ts';
 import { doRetrieve } from './retrieve.ts';
 import { getEvidenceChunksForFinalAnswer, callFinalAnswer } from './finalAnswer.ts';
 import { slotCompleteness, overallCompleteness } from './completeness.ts';
@@ -26,7 +28,30 @@ import type { SlotForCompleteness, SlotCompletenessMeta } from './completeness.t
 import { doExpandCorpus, getTopSuggestedPages, type SuggestedPage } from './expand.ts';
 import { getLastMessages } from './chat.ts';
 import { buildCorpusContextBlock } from './corpusContext.ts';
-import { slotValueDedupKey } from './utils.ts';
+import { slotValueDedupKey, splitListEntityValues } from './utils.ts';
+import { inferCorpusLanguage } from './language.ts';
+import {
+  buildQueryGuidance,
+  computeSlotFillState,
+  countFilledBySlotId,
+  anySlotHasGuidedWork,
+  buildRecoverySubqueries,
+  createSlotStagnationTrack,
+  getEffectiveTarget,
+  groupItemsBySlotId,
+  inferSubqueryStrategy,
+  prepareRunnableSubqueries,
+  slotHasGuidedWorkRemaining,
+  slotShouldBeFinishedQuerying,
+  updateSlotStagnationTrack,
+  type SlotQueryStrategy,
+  type SlotStagnationTrack,
+  updateParentFingerprints,
+  type SlotFillStatus,
+  type SlotItemRow,
+} from './slotFillState.ts';
+
+type FillMap = Map<string, SlotFillStatus>;
 
 export type Emit = (obj: unknown) => Promise<void>;
 export type Log = (phase: string, detail?: Record<string, unknown>) => void;
@@ -73,26 +98,18 @@ function buildThoughtSlots(slots: SlotDb[], planSlots?: PlanSlot[]): ThoughtSlot
   });
 }
 
-function getEffectiveTarget(slot: SlotDb, counts: Map<string, number>): number {
-  if (slot.type === 'list') return slot.target_item_count ?? 0;
-  if (slot.type === 'mapping' && slot.depends_on_slot_id) {
-    const parentCount = counts.get(slot.depends_on_slot_id) ?? 0;
-    const perKey = slot.items_per_key ?? 0;
-    return perKey >= 1 ? parentCount * perKey : parentCount;
-  }
-  return 0;
-}
-
 function buildSlotFillSummary(
   slots: SlotDb[],
   slotItemCountBySlotId: Map<string, number>,
+  slotsById?: Map<string, SlotDb>,
 ): SlotFillRow[] {
+  const byId = slotsById ?? new Map(slots.map((s) => [s.id, s]));
   return slots.map((slot) => {
     const filled = slotItemCountBySlotId.get(slot.id) ?? 0;
     if (slot.type === 'scalar') {
       return { name: slot.name, type: slot.type, target: 1, filled: Math.min(filled, 1) };
     }
-    const eff = getEffectiveTarget(slot, slotItemCountBySlotId);
+    const eff = getEffectiveTarget(slot, slotItemCountBySlotId, byId);
     const planTarget = slot.target_item_count ?? 0;
     const target = eff > 0 ? eff : (slot.type === 'list' && planTarget > 0 ? planTarget : null);
     return { name: slot.name, type: slot.type, target, filled };
@@ -180,7 +197,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       sourceById,
       leadChunks: leadList,
     });
-    planResult = await callPlan(openaiKey, userMsg, corpusContext);
+    const corpusLanguage = inferCorpusLanguage(corpusContext);
+    planResult = await callPlan(openaiKey, userMsg, corpusContext, corpusLanguage);
     log('plan-result', { action: planResult.action, slotCount: planResult.slots.length, subqueryCount: planResult.subqueries.length });
     const { data: stepRow, error: stepErr } = await supabase
       .from('reasoning_steps')
@@ -224,13 +242,38 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     for (const q of planResult.subqueries) {
       const sid = slotIdByName.get(q.slot);
       if (sid) {
+        const slot = slots.find((s) => s.id === sid);
+        const isBroad =
+          slot?.type === 'list' ||
+          slot?.type === 'mapping' ||
+          Boolean(slot?.depends_on_slot_id);
         await supabase.from('reasoning_subqueries').insert({
           reasoning_step_id: stepId,
           slot_id: sid,
           owner_id: ownerId,
           query_text: q.query,
+          ...(isBroad ? { strategy: 'broad' } : {}),
         });
       }
+    }
+
+            const { data: existingStepSubq } = await supabase
+      .from('reasoning_subqueries')
+      .select('slot_id')
+      .eq('reasoning_step_id', stepId);
+    const hasSubqForSlot = new Set((existingStepSubq ?? []).map((r: { slot_id: string }) => r.slot_id));
+    for (const slot of slots) {
+      if (!slot.depends_on_slot_id) continue;
+      if (hasSubqForSlot.has(slot.id)) continue;
+      const q = (slot.description ?? '').trim() || slot.name;
+      await supabase.from('reasoning_subqueries').insert({
+        reasoning_step_id: stepId,
+        slot_id: slot.id,
+        owner_id: ownerId,
+        query_text: q,
+        strategy: 'broad',
+      });
+      hasSubqForSlot.add(slot.id);
     }
     await emit({ plan: { action: planResult.action, why: planResult.why, slots: planResult.slots, subqueries: planResult.subqueries } });
     const initialThoughtSlots = buildThoughtSlots(slots, planResult.slots);
@@ -248,7 +291,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     iter: number;
     action: string;
     why?: string;
-    subqueries?: { slot: string; query: string }[];
+    subqueries?: { slot: string; query: string; strategy?: 'broad' | 'targeted' }[];
     chunksPerSubquery?: number[];
     quotesFound?: number;
     claims?: unknown[];
@@ -257,7 +300,12 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     statements?: string[];
     nextAction?: string;
     slotSnapshot?: SlotSnapshotState;
+    queryGuidance?: string;
+    droppedClaims?: { slot: string; key?: string; value?: string; chunkIds?: string[]; reason: string }[];
+    droppedSubqueries?: { slot: string; query: string; reason: string }[];
+    listSlotState?: Record<string, { attempts: number; count: number; strategy: string; finished_querying: boolean }>;
   };
+  let droppedSubqueriesPreparedThisIter: { slot: string; query: string; reason: string }[] = [];
   const thoughtProcess: {
     slots: ThoughtSlotUi[];
     slotFillSummary?: SlotFillRow[];
@@ -275,56 +323,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     slotFillSummary: buildSlotFillSummary(slots, new Map(slots.map((s) => [s.id, 0]))),
     planReason: appendId ? 'Same question, with the new page in the corpus.' : (planResult?.why ?? undefined),
     steps: [],
-  };
-
-  const getSlotItemCountBySlotId = async (): Promise<Map<string, number>> => {
-    const slotById = new Map(slots.map((s) => [s.id, s]));
-    const countBySlot = new Map<string, number>();
-    for (const s of slots) countBySlot.set(s.id, 0);
-
-    const distinctKeysByMappingCoverageSlotId = new Map<string, Set<string>>();
-    const distinctValuesByListSlotId = new Map<string, Set<string>>();
-    const { data: items } = await supabase
-      .from('slot_items')
-      .select('slot_id, key, value_json')
-      .in('slot_id', slots.map((s) => s.id));
-
-    for (const row of (items ?? []) as { slot_id: string; key: string | null; value_json: unknown }[]) {
-      const slot = slotById.get(row.slot_id);
-      if (!slot) continue;
-
-      if (slot.type === 'list') {
-        let set = distinctValuesByListSlotId.get(row.slot_id);
-        if (!set) {
-          set = new Set<string>();
-          distinctValuesByListSlotId.set(row.slot_id, set);
-        }
-        set.add(slotValueDedupKey(row.value_json));
-        continue;
-      }
-
-      if (slot.type === 'mapping' && (slot.items_per_key ?? 0) === 0) {
-        if (row.key == null) continue;
-        let set = distinctKeysByMappingCoverageSlotId.get(row.slot_id);
-        if (!set) {
-          set = new Set<string>();
-          distinctKeysByMappingCoverageSlotId.set(row.slot_id, set);
-        }
-        set.add(String(row.key));
-        continue;
-      }
-
-      countBySlot.set(row.slot_id, (countBySlot.get(row.slot_id) ?? 0) + 1);
-    }
-
-    for (const [slotId, keys] of distinctKeysByMappingCoverageSlotId.entries()) {
-      countBySlot.set(slotId, keys.size);
-    }
-    for (const [slotId, values] of distinctValuesByListSlotId.entries()) {
-      countBySlot.set(slotId, values.size);
-    }
-
-    return countBySlot;
   };
 
   const slotsWithAttempts = slots.filter((s) => s.type === 'list' || s.type === 'mapping');
@@ -366,15 +364,24 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
   };
 
   let prevSlotItemCount = 0;
+  let stagnationThisIteration = false;
   let done = false;
   let finalAnswer: string | undefined;
   
   let validQuoteIdsForSave = new Set<string>();
   
-  const evidenceChunksById = new Map<string, string>();
+  const evidenceChunksById = new Map<string, EvidenceChunk>();
   let lastExtractResult: { next_action?: string; why?: string; final_answer?: string; subqueries?: ExtractSubquery[]; extractionGaps?: string[]; cited_snippets?: Record<string, string> } | null = null;
   const extractionGapsAccumulated: string[] = [];
   let slotItemCountBySlotId = new Map<string, number>();
+  let fillBySlotId: FillMap = new Map();
+  const lastParentFingerprintBySlotId = new Map<string, string>();
+  const broadQueriesAttemptedBySlotId = new Map<string, string[]>();
+  const failedAttemptsBySlotId = new Map<string, number>();
+  const stagnationBySlotId = new Map<string, SlotStagnationTrack>(
+    slots.map((s) => [s.id, createSlotStagnationTrack()]),
+  );
+  const slotsById = new Map(slots.map((s) => [s.id, s]));
 
   const produceFinalAnswer = async (): Promise<{ finalAnswer: string; cited_snippets: Record<string, string>; validQuoteIds: Set<string> }> => {
     const evidenceForFinal = await getEvidenceChunksForFinalAnswer(supabase, slots.map((s) => s.id), evidenceChunksById);
@@ -394,16 +401,32 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
   while (!done && iteration < MAX_ITERATIONS) {
     iteration++;
-    slotItemCountBySlotId = await getSlotItemCountBySlotId();
+    const { data: slotItemsRaw } = await supabase
+      .from('slot_items')
+      .select('slot_id, key, value_json')
+      .in('slot_id', slots.map((s) => s.id));
+    const itemsBySlotId = groupItemsBySlotId((slotItemsRaw ?? []) as SlotItemRow[]);
+    slotItemCountBySlotId = countFilledBySlotId(slots, itemsBySlotId);
+    fillBySlotId = computeSlotFillState({
+      slots,
+      itemsBySlotId,
+      counts: slotItemCountBySlotId,
+      lastParentFingerprintBySlotId,
+      broadQueriesAttemptedBySlotId,
+    });
 
-    
     for (const slot of slots) {
+      const fill = fillBySlotId.get(slot.id);
       const count = slotItemCountBySlotId.get(slot.id) ?? 0;
       if (slot.type === 'scalar') {
         if (count >= 1) slot.finished_querying = true;
+      } else if (slot.type === 'mapping' && slot.depends_on_slot_id && fill?.parentSatisfied) {
+        if (fill.unfilledKeys.length === 0 && fill.atTarget) slot.finished_querying = true;
       } else if (slot.type === 'list' || slot.type === 'mapping') {
-        const effectiveTarget = getEffectiveTarget(slot, slotItemCountBySlotId);
-        if (effectiveTarget > 0 && count >= effectiveTarget) slot.finished_querying = true;
+        const effectiveTarget = getEffectiveTarget(slot, slotItemCountBySlotId, slotsById);
+        if (effectiveTarget > 0 && count >= effectiveTarget && slot.type === 'list') {
+          slot.finished_querying = true;
+        }
       }
     }
 
@@ -414,24 +437,30 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       .order('iteration_number', { ascending: true })).data as StepDb[] ?? [];
     const retrieveStep = stepList.find((s) => s.action === 'retrieve' && s.iteration_number === iteration);
     let currentStepId: string;
-    type SubqWithSlot = { slotId: string; query: string };
+    type SubqWithSlot = { slotId: string; query: string; strategy?: 'broad' | 'targeted' };
     let subqueriesWithSlot: SubqWithSlot[] = [];
 
     if (retrieveStep) {
       
       currentStepId = retrieveStep.id;
-      const { data: sq } = await supabase.from('reasoning_subqueries').select('query_text, slot_id').eq('reasoning_step_id', currentStepId);
-      const sqRows = (sq ?? []) as { query_text: string; slot_id: string }[];
+      const { data: sq } = await supabase
+        .from('reasoning_subqueries')
+        .select('query_text, slot_id, strategy')
+        .eq('reasoning_step_id', currentStepId);
+      const sqRows = (sq ?? []) as { query_text: string; slot_id: string; strategy: string | null }[];
       subqueriesWithSlot = sqRows
         .filter((r) => r.query_text && r.slot_id)
-        .map((r) => ({ slotId: r.slot_id, query: r.query_text }))
+        .map((r): SubqWithSlot => ({
+          slotId: r.slot_id,
+          query: r.query_text,
+          ...(r.strategy === 'broad' || r.strategy === 'targeted' ? { strategy: r.strategy } : {}),
+        }))
         .filter((sq) => {
           const slot = slots.find((s) => s.id === sq.slotId);
           if (!slot || slot.finished_querying) return false;
           const count = slotItemCountBySlotId.get(slot.id) ?? 0;
           if (slot.type === 'scalar' && count >= 1) return false;
-          if (!slot.depends_on_slot_id) return true;
-          return (slotItemCountBySlotId.get(slot.depends_on_slot_id) ?? 0) >= 1;
+          return true;
         });
     } else {
       
@@ -453,51 +482,34 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         : [{ slot: 'answer', query: userMsg.slice(0, 200) }];
       
       const currentSlotStateForExpand = await getCurrentSlotItemsState();
-      const nextSubs: { slot: string; query: string }[] = [];
-      for (const q of subsInput) {
-        if (q.query !== '__map__') {
-          nextSubs.push({ slot: q.slot, query: q.query });
-          continue;
-        }
-        const sid = slotIdByName.get(q.slot);
-        const slot = sid ? slots.find((s) => s.id === sid) : null;
-        const mapDesc = (q as { map_description?: string }).map_description;
-        if (!slot || slot.type !== 'mapping' || !slot.depends_on_slot_id) {
-          nextSubs.push({ slot: q.slot, query: mapDesc || slot?.description || q.slot });
-          continue;
-        }
-        const depSlot = slots.find((s) => s.id === slot.depends_on_slot_id);
-        const depItems = depSlot ? (currentSlotStateForExpand[depSlot.name]?.items ?? []) : [];
-        const keys = depItems.map((item) =>
-          typeof item.value === 'string' ? item.value : (item.key != null ? String(item.key) : JSON.stringify(item.value))
-        );
-        if (keys.length === 0) {
-          nextSubs.push({ slot: q.slot, query: mapDesc || slot.description || q.slot });
-          continue;
-        }
-        const phrase = mapDesc || slot.description || q.slot;
-        for (const key of keys) {
-          nextSubs.push({ slot: q.slot, query: `${phrase} for ${key}` });
-        }
-      }
-      
-      const nextSubsFiltered = nextSubs.filter((q) => {
-        const sid = slotIdByName.get(q.slot);
-        if (!sid) return false;
-        const slot = slots.find((s) => s.id === sid);
-        if (!slot || slot.finished_querying) return false;
-        const count = slotItemCountBySlotId.get(slot.id) ?? 0;
-        if (slot.type === 'scalar' && count >= 1) return false;
-        if (!slot.depends_on_slot_id) return true;
-        return (slotItemCountBySlotId.get(slot.depends_on_slot_id) ?? 0) >= 1;
+      const subsForPrepare = subsInput.map((q) => ({
+        slot: q.slot,
+        query: q.query,
+        ...((q as { map_description?: string }).map_description
+          ? { map_description: (q as { map_description?: string }).map_description }
+          : {}),
+        ...((q as { key_connector?: string }).key_connector
+          ? { key_connector: (q as { key_connector?: string }).key_connector }
+          : {}),
+      }));
+      const prepared = prepareRunnableSubqueries({
+        subsInput: subsForPrepare,
+        slots,
+        slotIdByName,
+        fillBySlotId,
+        stagnationBySlotId,
+        slotItemCountBySlotId,
+        getParentItems: (depSlotName) => currentSlotStateForExpand[depSlotName]?.items ?? [],
+        maxMappingPerIter: MAX_MAPPING_SUBQUERIES_PER_ITER,
+        maxPerIter: MAX_SUBQUERIES_PER_ITER,
       });
-      const capped = nextSubsFiltered.slice(0, MAX_SUBQUERIES_PER_ITER);
-      for (const q of capped) {
+      droppedSubqueriesPreparedThisIter = prepared.dropped;
+      for (const q of prepared.runnable) {
         const sid = slotIdByName.get(q.slot);
         if (!sid) continue;
         const slot = slots.find((s) => s.id === sid);
-        const strategy: 'broad' | 'targeted' | null =
-          slot && (slot.type === 'list' || slot.type === 'mapping') ? (slot.attempt_count > 0 ? 'targeted' : 'broad') : null;
+        const fill = fillBySlotId.get(sid);
+        const strategy = inferSubqueryStrategy(slot, fill, q.query);
         await supabase.from('reasoning_subqueries').insert({
           reasoning_step_id: currentStepId,
           slot_id: sid,
@@ -505,10 +517,24 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
           query_text: q.query,
           ...(strategy ? { strategy } : {}),
         });
+        if (strategy === 'broad') {
+          const arr = broadQueriesAttemptedBySlotId.get(sid) ?? [];
+          if (!arr.includes(q.query)) arr.push(q.query);
+          broadQueriesAttemptedBySlotId.set(sid, arr);
+        }
       }
-      const { data: sq } = await supabase.from('reasoning_subqueries').select('query_text, slot_id').eq('reasoning_step_id', currentStepId);
-      const sqRows = (sq ?? []) as { query_text: string; slot_id: string }[];
-      subqueriesWithSlot = sqRows.filter((r) => r.query_text && r.slot_id).map((r) => ({ slotId: r.slot_id, query: r.query_text }));
+      const { data: sq } = await supabase
+        .from('reasoning_subqueries')
+        .select('query_text, slot_id, strategy')
+        .eq('reasoning_step_id', currentStepId);
+      const sqRows = (sq ?? []) as { query_text: string; slot_id: string; strategy: string | null }[];
+      subqueriesWithSlot = sqRows
+        .filter((r) => r.query_text && r.slot_id)
+        .map((r) => ({
+          slotId: r.slot_id,
+          query: r.query_text,
+          ...(r.strategy === 'broad' || r.strategy === 'targeted' ? { strategy: r.strategy } : {}),
+        }));
     }
 
     
@@ -524,37 +550,100 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       }
     }
 
-    const subqueriesToRun = subqueriesWithSlot
-      .filter((sq) => sq.query && !seen.has(`${sq.slotId}::${sq.query}`))
-      .slice(0, Math.min(MAX_SUBQUERIES_PER_ITER, MAX_TOTAL_SUBQUERIES - totalSubqueriesRun))
-      .map((sq) => sq.query);
-    if (subqueriesToRun.length === 0) {
+    const seenDedupKey = (slotId: string, query: string) => `${slotId}\0${query}`;
+    let runnable = subqueriesWithSlot.filter(
+      (sq) => sq.query && !seen.has(`${sq.slotId}::${sq.query}`),
+    );
+
+    if (runnable.length === 0) {
+      const seenForRecovery = new Set<string>();
+      for (const key of seen) {
+        const sep = key.indexOf('::');
+        if (sep >= 0) seenForRecovery.add(`${key.slice(0, sep)}\0${key.slice(sep + 2)}`);
+      }
+      for (const sq of subqueriesWithSlot) {
+        if (sq.query) seenForRecovery.add(seenDedupKey(sq.slotId, sq.query));
+      }
+      const recovery = buildRecoverySubqueries(slots, fillBySlotId, seenForRecovery);
+      if (recovery.length > 0) {
+        log('recovery-subqueries', { iteration, count: recovery.length });
+        const currentSlotStateForRecovery = await getCurrentSlotItemsState();
+        const recoveryPrepared = prepareRunnableSubqueries({
+          subsInput: recovery.map((q) => {
+            const slot = slots.find((s) => s.name === q.slot);
+            return {
+              slot: q.slot,
+              query: q.query,
+              ...(q.query === '__map__' && slot?.description ? { map_description: slot.description } : {}),
+            };
+          }),
+          slots,
+          slotIdByName,
+          fillBySlotId,
+          stagnationBySlotId,
+          slotItemCountBySlotId,
+          getParentItems: (depSlotName) => currentSlotStateForRecovery[depSlotName]?.items ?? [],
+          maxMappingPerIter: MAX_MAPPING_SUBQUERIES_PER_ITER,
+          maxPerIter: MAX_SUBQUERIES_PER_ITER,
+        });
+        droppedSubqueriesPreparedThisIter = [...(droppedSubqueriesPreparedThisIter ?? []), ...recoveryPrepared.dropped];
+        for (const q of recoveryPrepared.runnable) {
+          const sid = slotIdByName.get(q.slot);
+          if (!sid || seen.has(`${sid}::${q.query}`)) continue;
+          await supabase.from('reasoning_subqueries').insert({
+            reasoning_step_id: currentStepId,
+            slot_id: sid,
+            owner_id: ownerId,
+            query_text: q.query,
+            strategy: inferSubqueryStrategy(slots.find((s) => s.id === sid), fillBySlotId.get(sid), q.query) ?? undefined,
+          });
+          runnable.push({
+            slotId: sid,
+            query: q.query,
+            ...(inferSubqueryStrategy(slots.find((s) => s.id === sid), fillBySlotId.get(sid), q.query)
+              ? { strategy: inferSubqueryStrategy(slots.find((s) => s.id === sid), fillBySlotId.get(sid), q.query)! }
+              : {}),
+          });
+        }
+      }
+    }
+
+    const runnableForRetrieve = runnable.slice(
+      0,
+      Math.min(MAX_SUBQUERIES_PER_ITER, MAX_TOTAL_SUBQUERIES - totalSubqueriesRun),
+    );
+    const retrieveSubqueries = runnableForRetrieve.map((sq) => {
+      const slot = slots.find((s) => s.id === sq.slotId);
+      return { slot: slot?.name ?? '', query: sq.query };
+    });
+    if (retrieveSubqueries.length === 0) {
       log('break-no-subqueries', { iteration, subqueriesWithSlotCount: subqueriesWithSlot.length });
       break;
     }
 
-    totalSubqueriesRun += subqueriesToRun.length;
+    totalSubqueriesRun += retrieveSubqueries.length;
 
-    log('retrieve-start', { iteration, subqueryCount: subqueriesToRun.length });
-    const { chunks: retrievedChunks, chunksPerSubquery } = await doRetrieve(
+    log('retrieve-start', { iteration, subqueryCount: retrieveSubqueries.length });
+    const { chunks: retrievedChunks, chunksPerSubquery, provenanceByChunkId } = await doRetrieve(
       supabase,
       openaiKey,
       pageIds,
-      subqueriesToRun,
+      retrieveSubqueries,
     );
     log('retrieve-done', { chunksRetrieved: retrievedChunks.length, chunksPerSubquery });
 
-    
     for (const chunk of retrievedChunks) {
-      const snippet = (chunk.content ?? '').trim();
-      if (!snippet) continue;
-      evidenceChunksById.set(chunk.id, snippet);
+      const prov = provenanceByChunkId.get(chunk.id) ?? [];
+      upsertEvidenceChunk(evidenceChunksById, {
+        id: chunk.id,
+        snippet: (chunk.content ?? '').trim(),
+        pageUrl: chunk.page_url,
+        pageTitle: chunk.page_title,
+        retrievedBy: prov,
+      });
     }
 
-    const evidenceChunksForExtract: EvidenceChunk[] = Array.from(evidenceChunksById.entries()).map(([id, snippet]) => ({
-      id,
-      snippet,
-    }));
+    const evidenceChunksForExtract: EvidenceChunk[] = Array.from(evidenceChunksById.values());
 
     const currentSlotState = await getCurrentSlotItemsState();
     const currentSlotStateJson = Object.keys(currentSlotState).length > 0 ? JSON.stringify(currentSlotState, null, 2) : '';
@@ -570,17 +659,40 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       }
       return lines.length > 0 ? lines.join('\n') : undefined;
     })();
-    const broadSlotNamesThisStep = [...new Set(subqueriesWithSlot.map((sq) => slots.find((s) => s.id === sq.slotId)).filter((s): s is NonNullable<typeof s> => !!s && (s.type === 'list' || s.type === 'mapping') && s.attempt_count === 0).map((s) => s.name))];
+    const { data: stepSubqRows } = await supabase
+      .from('reasoning_subqueries')
+      .select('slot_id, query_text, strategy')
+      .eq('reasoning_step_id', currentStepId);
+    const broadSlotIdsThisStep = new Set<string>();
+    for (const row of (stepSubqRows ?? []) as { slot_id: string; query_text: string; strategy: string | null }[]) {
+      if (row.strategy === 'broad' && row.query_text) {
+        broadSlotIdsThisStep.add(row.slot_id);
+        const arr = broadQueriesAttemptedBySlotId.get(row.slot_id) ?? [];
+        if (!arr.includes(row.query_text)) arr.push(row.query_text);
+        broadQueriesAttemptedBySlotId.set(row.slot_id, arr);
+      }
+    }
+    fillBySlotId = computeSlotFillState({
+      slots,
+      itemsBySlotId,
+      counts: slotItemCountBySlotId,
+      lastParentFingerprintBySlotId,
+      broadQueriesAttemptedBySlotId,
+    });
+    const broadSlotNamesThisStep = [
+      ...new Set(slots.filter((s) => broadSlotIdsThisStep.has(s.id)).map((s) => s.name)),
+    ];
+    const queryGuidanceBlock = buildQueryGuidance(slots, fillBySlotId, stagnationBySlotId);
     const finishedQueryingSlotNames = slots.filter((s) => s.finished_querying).map((s) => s.name);
     const topSuggestedPages: SuggestedPage[] | null =
       dynamicMode && sourceIds.length > 0
-        ? await getTopSuggestedPages(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun, suggestedPageCandidates)
+        ? await getTopSuggestedPages(supabase, openaiKey, sourceIds, userMsg, retrieveSubqueries.map((s) => s.query), suggestedPageCandidates)
         : null;
     log('extract-call', { iteration, chunkCount: evidenceChunksForExtract.length, topSuggestedCount: topSuggestedPages?.length ?? 0 });
     const snippetPreviews = evidenceChunksForExtract.map((q) => (q.snippet ?? '').slice(0, 120));
     log('extract-evidence-preview', { iteration, snippetPreviews });
     const slotRowsForExtract: SlotRow[] = slots.map((s) => {
-      const target = getEffectiveTarget(s, slotItemCountBySlotId);
+      const target = getEffectiveTarget(s, slotItemCountBySlotId, slotsById);
       return {
         id: s.id,
         name: s.name,
@@ -597,11 +709,13 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       evidenceChunksForExtract,
       currentSlotStateJson,
       userMsg,
+      inferCorpusLanguage(buildCorpusContextBlock({ pages, sourceById, leadChunks: leadList })),
       dynamicMode,
       topSuggestedPages,
       previousAttemptsBySlot,
       broadSlotNamesThisStep,
       finishedQueryingSlotNames,
+      queryGuidanceBlock,
     );
     lastExtractResult = extractResult;
     if (extractResult.extractionGaps?.length) {
@@ -627,13 +741,15 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         .in('slot_id', parentIds);
       const keysByParentId = new Map<string, Set<string>>();
       for (const row of (parentItems ?? []) as { slot_id: string; value_json: unknown }[]) {
-        const key = slotValueDedupKey(row.value_json);
+        const label = typeof row.value_json === 'string' ? row.value_json : String(row.value_json ?? '');
         let set = keysByParentId.get(row.slot_id);
         if (!set) {
           set = new Set();
           keysByParentId.set(row.slot_id, set);
         }
-        set.add(key);
+        for (const part of splitListEntityValues(label)) {
+          set.add(slotValueDedupKey(part));
+        }
       }
       for (const slot of mappingSlots) {
         const keys = keysByParentId.get(slot.depends_on_slot_id!);
@@ -641,15 +757,34 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       }
       return map;
     })();
-    await insertClaims(supabase, {
+    const beforeCounts = new Map(slotItemCountBySlotId);
+    const beforeFill = new Map(fillBySlotId);
+    const { droppedClaims } = await insertClaims(supabase, {
       slotIdByName,
       slots,
       claims: extractResult.claims,
       ownerId,
       allowedKeysByMappingSlotId,
     });
+    if (droppedClaims.length > 0) {
+      extractionGapsAccumulated.push(
+        ...droppedClaims.slice(0, 25).map((d) => `Dropped unsupported claim for ${d.slot}${d.key ? `/${d.key}` : ''}: ${d.reason}`),
+      );
+    }
 
-    slotItemCountBySlotId = await getSlotItemCountBySlotId();
+    const { data: slotItemsAfter } = await supabase
+      .from('slot_items')
+      .select('slot_id, key, value_json')
+      .in('slot_id', slots.map((s) => s.id));
+    const itemsAfter = groupItemsBySlotId((slotItemsAfter ?? []) as SlotItemRow[]);
+    slotItemCountBySlotId = countFilledBySlotId(slots, itemsAfter);
+    fillBySlotId = computeSlotFillState({
+      slots,
+      itemsBySlotId: itemsAfter,
+      counts: slotItemCountBySlotId,
+      lastParentFingerprintBySlotId,
+      broadQueriesAttemptedBySlotId,
+    });
     const thisStepQueriesBySlotId = new Map<string, string[]>();
     for (const { slotId, query } of subqueriesWithSlot) {
       const arr = thisStepQueriesBySlotId.get(slotId) ?? [];
@@ -657,28 +792,46 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       thisStepQueriesBySlotId.set(slotId, arr);
     }
     const prevItemCountBySlotId = new Map(slotsWithAttempts.map((s) => [s.id, s.current_item_count]));
+    stagnationThisIteration = false;
     for (const slot of slotsWithAttempts) {
       const currentCount = slotItemCountBySlotId.get(slot.id) ?? 0;
       const hadSubqueriesThisStep = thisStepQueriesBySlotId.has(slot.id);
       slot.current_item_count = currentCount;
-      
-      const effectiveTarget = getEffectiveTarget(slot, slotItemCountBySlotId);
-      if (effectiveTarget > 0 && currentCount >= effectiveTarget) {
-        slot.finished_querying = true;
+
+      const fill = fillBySlotId.get(slot.id);
+      const effectiveTarget = getEffectiveTarget(slot, slotItemCountBySlotId, slotsById);
+      const track = stagnationBySlotId.get(slot.id) ?? createSlotStagnationTrack();
+      stagnationBySlotId.set(slot.id, track);
+
+      const strategiesRun = new Set<SlotQueryStrategy>();
+      for (const q of thisStepQueriesBySlotId.get(slot.id) ?? []) {
+        const s = inferSubqueryStrategy(slot, fill, q);
+        if (s) strategiesRun.add(s);
       }
+
+      const itemCountBefore = beforeCounts.get(slot.id) ?? prevItemCountBySlotId.get(slot.id) ?? 0;
+      const { awakened, finishedByStagnation } = updateSlotStagnationTrack({
+        slot,
+        fill,
+        track,
+        hadSubqueriesThisStep,
+        strategiesRun,
+        itemCountBefore,
+        itemCountAfter: currentCount,
+      });
+      if (awakened) slot.finished_querying = false;
+      if (finishedByStagnation) stagnationThisIteration = true;
+
       if (hadSubqueriesThisStep) {
         slot.attempt_count += 1;
         slot.last_queries = thisStepQueriesBySlotId.get(slot.id) ?? slot.last_queries ?? [];
         if ((extractResult.broad_query_completed_slot_fully ?? []).includes(slot.name)) {
-          // Only allow "broad query done" to finalize a slot if the effective target is already met.
           if (effectiveTarget <= 0 || currentCount >= effectiveTarget) slot.finished_querying = true;
         }
-        const prevCount = prevItemCountBySlotId.get(slot.id) ?? 0;
-        if (currentCount === prevCount) {
-          // Avoid marking a slot "finished" just because we didn't find new items this step.
-          // For list/mapping with a known target, we only finish early when the target is already satisfied.
-          if (effectiveTarget <= 0 || currentCount >= effectiveTarget) slot.finished_querying = true;
-        }
+      }
+
+      if (slotShouldBeFinishedQuerying(slot, fill, track, currentCount)) {
+        slot.finished_querying = true;
       }
     }
     
@@ -686,8 +839,20 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       if (slot.type !== 'scalar') continue;
       const count = slotItemCountBySlotId.get(slot.id) ?? 0;
       if (count >= 1) continue;
-      if (thisStepQueriesBySlotId.has(slot.id)) slot.finished_querying = true;
+            if (thisStepQueriesBySlotId.has(slot.id)) {
+        const priorFails = failedAttemptsBySlotId.get(slot.id) ?? 0;
+        const prevFilled = beforeCounts.get(slot.id) ?? 0;
+        const progressed = count > prevFilled;
+        const nextFails = progressed ? 0 : priorFails + 1;
+        failedAttemptsBySlotId.set(slot.id, nextFails);
+        if (nextFails >= 2) slot.finished_querying = true;
+      }
     }
+    const currentSlotItemCount = Array.from(slotItemCountBySlotId.values()).reduce((a, b) => a + b, 0);
+    if (stagnationThisIteration) {
+      log('stagnation-mark-finished', { iteration, currentSlotItemCount, prevSlotItemCount });
+    }
+
     for (const slot of slots) {
       const payload: { finished_querying: boolean; current_item_count?: number; attempt_count?: number; last_queries?: string[] } = { finished_querying: slot.finished_querying };
       if (slot.type === 'list' || slot.type === 'mapping') {
@@ -697,14 +862,18 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       }
       await supabase.from('slots').update(payload).eq('id', slot.id);
     }
-    
-    
+    prevSlotItemCount = currentSlotItemCount;
+
+    for (const [slotId, fp] of updateParentFingerprints(fillBySlotId, slots).entries()) {
+      lastParentFingerprintBySlotId.set(slotId, fp);
+    }
+
     const nowFinishedNames = new Set(slots.filter((s) => s.finished_querying).map((s) => s.name));
     if (lastExtractResult?.subqueries?.length && nowFinishedNames.size > 0) {
       lastExtractResult.subqueries = lastExtractResult.subqueries.filter((q) => !nowFinishedNames.has(q.slot));
     }
     const slotMetaBySlotId = new Map<string, SlotCompletenessMeta>(
-      slots.map((s) => [s.id, { target_item_count: getEffectiveTarget(s, slotItemCountBySlotId), finished_querying: s.finished_querying }]),
+      slots.map((s) => [s.id, { target_item_count: getEffectiveTarget(s, slotItemCountBySlotId, slotsById), finished_querying: s.finished_querying }]),
     );
     const slotsForCompleteness: SlotForCompleteness[] = slots.map((s) => ({
       id: s.id,
@@ -713,12 +882,43 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     }));
     const completeness = overallCompleteness(slotsForCompleteness, slotItemCountBySlotId, slotMetaBySlotId);
     const allFinished = slots.every((s) => s.finished_querying);
-    const effectiveNextAction =
+    let effectiveNextAction =
       extractResult.next_action === 'answer' && !allFinished
         ? 'retrieve'
         : (extractResult.next_action === 'retrieve' && allFinished)
           ? 'answer'
           : extractResult.next_action;
+
+            if (effectiveNextAction === 'answer') {
+      const pending = slots.filter((s) => {
+        if (s.finished_querying) return false;
+        const track = stagnationBySlotId.get(s.id);
+        return slotHasGuidedWorkRemaining(fillBySlotId.get(s.id), track, s);
+      });
+      if (pending.length > 0) {
+        effectiveNextAction = 'retrieve';
+        const fallbackInput = pending.map((s) => ({
+          slot: s.name,
+          query: s.type === 'mapping' ? ('__map__' as const) : ((s.description ?? '').trim() || s.name),
+          ...(s.type === 'mapping' && s.description ? { map_description: s.description } : {}),
+        }));
+        lastExtractResult = { ...extractResult, next_action: 'retrieve', subqueries: fallbackInput as ExtractSubquery[] };
+      }
+    }
+
+    if (effectiveNextAction === 'expand_corpus' && anySlotHasGuidedWork(slots, fillBySlotId, stagnationBySlotId)) {
+      effectiveNextAction = 'retrieve';
+      log('expand_corpus-override-guided-work', { why: extractResult.why });
+      const fallbackInput = slots
+        .filter((s) => !s.finished_querying && slotHasGuidedWorkRemaining(fillBySlotId.get(s.id), stagnationBySlotId.get(s.id), s))
+        .map((s) => ({
+          slot: s.name,
+          query: s.type === 'mapping' ? ('__map__' as const) : ((s.description ?? '').trim() || s.name),
+          ...(s.type === 'mapping' && s.description ? { map_description: s.description } : {}),
+        }));
+      lastExtractResult = { ...extractResult, next_action: 'retrieve', subqueries: fallbackInput as ExtractSubquery[] };
+      (extractResult as { next_action: string }).next_action = 'retrieve';
+    }
 
     await supabase
       .from('reasoning_steps')
@@ -729,19 +929,40 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     if (INCLUDE_FILL_STATUS_BY_SLOT) {
       fillStatusBySlot = {};
       for (const slot of slots) {
-        const score = slotCompleteness(
-          { id: slot.id, type: slot.type as SlotForCompleteness['type'], depends_on_slot_id: slot.depends_on_slot_id ?? null },
-          slotItemCountBySlotId,
-          slotMetaBySlotId,
-        );
+        const fill = fillBySlotId.get(slot.id);
         const count = slotItemCountBySlotId.get(slot.id) ?? 0;
-        fillStatusBySlot[slot.name] = score >= 1 ? 'filled' : count > 0 ? 'partial' : 'missing';
+        if (slot.type === 'mapping' && fill) {
+          const keysDone = fill.filledKeys.length;
+          const keysTotal = fill.filledKeys.length + fill.unfilledKeys.length;
+          fillStatusBySlot[slot.name] =
+            fill.atTarget && fill.unfilledKeys.length === 0
+              ? 'filled'
+              : keysDone > 0
+                ? 'partial'
+                : 'missing';
+        } else if (fill?.atTarget) {
+          fillStatusBySlot[slot.name] = 'filled';
+        } else {
+          fillStatusBySlot[slot.name] = count > 0 ? 'partial' : 'missing';
+        }
       }
     }
 
     const subqueriesForStep = subqueriesWithSlot.length
-      ? subqueriesWithSlot.map((sq) => ({ slot: slots.find((s) => s.id === sq.slotId)?.name ?? '', query: sq.query }))
-      : subqueriesToRun.map((q) => ({ slot: '', query: q }));
+      ? subqueriesWithSlot.map((sq) => {
+          const slot = slots.find((s) => s.id === sq.slotId);
+          const fill = fillBySlotId.get(sq.slotId);
+          const strategy =
+            sq.strategy ??
+            inferSubqueryStrategy(slot, fill, sq.query) ??
+            undefined;
+          return {
+            slot: slot?.name ?? '',
+            query: sq.query,
+            ...(strategy ? { strategy } : {}),
+          };
+        })
+      : retrieveSubqueries.map((q) => ({ slot: q.slot, query: q.query }));
     const stepStatements: string[] = [];
     stepStatements.push(`Retrieved ${retrievedChunks.length} chunks from this step.`);
     stepStatements.push(extractResult.why ?? 'Extract');
@@ -761,7 +982,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     }
 
     const slotSnapshot = await getCurrentSlotItemsState();
-    thoughtProcess.slotFillSummary = buildSlotFillSummary(slots, slotItemCountBySlotId);
+    thoughtProcess.slotFillSummary = buildSlotFillSummary(slots, slotItemCountBySlotId, slotsById);
     thoughtProcess.completeness = completeness;
 
     const stepEntry: ThoughtStep = {
@@ -777,6 +998,9 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       statements: stepStatements,
       nextAction: effectiveNextAction,
       slotSnapshot,
+      queryGuidance: queryGuidanceBlock,
+      ...(droppedClaims.length ? { droppedClaims } : {}),
+      ...(droppedSubqueriesPreparedThisIter.length ? { droppedSubqueries: droppedSubqueriesPreparedThisIter.slice(0, 50) } : {}),
       ...(Object.keys(listSlotDebug).length > 0 ? { listSlotState: listSlotDebug } : {}),
     };
     thoughtProcess.steps.push(stepEntry);
@@ -798,10 +1022,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       fillStatusBySlot: INCLUDE_FILL_STATUS_BY_SLOT ? fillStatusBySlot : undefined,
     });
 
-    const currentSlotItemCount = Array.from(slotItemCountBySlotId.values()).reduce((a, b) => a + b, 0);
-    const stagnation = iteration > 1 && (currentSlotItemCount - prevSlotItemCount) <= STAGNATION_THRESHOLD;
     const zeroCompletenessGiveUp = completeness === 0 && iteration >= 1;
-    prevSlotItemCount = currentSlotItemCount;
 
     if (effectiveNextAction === 'answer') {
       const finalResult = await produceFinalAnswer();
@@ -833,30 +1054,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       return;
     }
 
-    if (extractResult.next_action === 'expand_corpus') {
-      const dependentSlotsToFill = slots.filter((s) => {
-        if (!s.depends_on_slot_id) return false;
-        const parentCount = slotItemCountBySlotId.get(s.depends_on_slot_id) ?? 0;
-        const myCount = slotItemCountBySlotId.get(s.id) ?? 0;
-        if (parentCount === 0) return false;
-        if (s.type === 'mapping') {
-          const expected = getEffectiveTarget(s, slotItemCountBySlotId);
-          return expected > 0 ? myCount < expected : false;
-        }
-        return myCount < 1;
-      });
-      if (dependentSlotsToFill.length > 0) {
-        const fallbackSubqueries = dependentSlotsToFill.map((s) => ({
-          slot: s.name,
-          query: (s.description ?? '').trim() || `${s.name} from evidence`,
-        }));
-        lastExtractResult = { ...extractResult, next_action: 'retrieve', subqueries: fallbackSubqueries };
-        (extractResult as { next_action: string; subqueries?: { slot: string; query: string }[] }).next_action = 'retrieve';
-        (extractResult as { next_action: string; subqueries?: { slot: string; query: string }[] }).subqueries = fallbackSubqueries;
-        log('expand_corpus-override-retrieve', { reason: 'dependent_slots_not_filled', slots: dependentSlotsToFill.map((s) => s.name) });
-      }
-    }
-    if (extractResult.next_action === 'expand_corpus') {
+    if (effectiveNextAction === 'expand_corpus') {
       log('expand_corpus', { why: extractResult.why, expansionCount });
       if (expansionCount >= MAX_EXPANSIONS) {
         thoughtProcess.hardStopReason = `Max expansions (${MAX_EXPANSIONS}) reached`;
@@ -883,7 +1081,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
           const oneBased = typeof idx === 'number' && idx >= 1 && idx <= topSuggestedPages.length ? idx : 1;
           suggestedPage = topSuggestedPages[oneBased - 1];
         } else {
-          suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun);
+          suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, retrieveSubqueries.map((s) => s.query));
         }
         if (suggestedPage) log('expand-suggested', { url: suggestedPage.url });
       }
@@ -910,8 +1108,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       return;
     }
 
-    if (extractResult.next_action === 'retrieve') {
-      if (totalSubqueriesRun >= MAX_TOTAL_SUBQUERIES || stagnation || zeroCompletenessGiveUp) {
+    if (effectiveNextAction === 'retrieve') {
+      if (totalSubqueriesRun >= MAX_TOTAL_SUBQUERIES || stagnationThisIteration || zeroCompletenessGiveUp) {
         thoughtProcess.hardStopReason = totalSubqueriesRun >= MAX_TOTAL_SUBQUERIES
           ? `Max total subqueries (${MAX_TOTAL_SUBQUERIES})`
           : zeroCompletenessGiveUp
@@ -933,7 +1131,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
             ? 'Suggesting a page to add.'
             : thoughtProcess.hardStopReason + '; suggesting a page to add.';
           await emit({ thoughtProcess: { ...thoughtProcess } });
-          const suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, subqueriesToRun);
+          const suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, retrieveSubqueries.map((s) => s.query));
           if (suggestedPage) log('expand-suggested-on-stagnation', { url: suggestedPage.url });
           const stagnationModelMessage = (lastExtractResult?.why ?? '').trim();
           const stubContent = stagnationModelMessage.length > 0
@@ -1031,6 +1229,16 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         ...(thoughtProcess.partialAnswerNote ? { partialAnswerNote: thoughtProcess.partialAnswerNote } : {}),
       },
       ...(suggestedTitle ? { suggestedTitle } : {}),
+    });
+  } else {
+    log('no-final-answer', { iteration, finalAnswerLen: finalAnswer?.length ?? 0 });
+    await emit({
+      error: 'No answer was produced. Try again or check function logs.',
+      thoughtProcess: {
+        ...thoughtProcess,
+        iterationCount: iteration,
+        ...(extractionGapsAccumulated.length > 0 ? { extractionGaps: extractionGapsAccumulated } : {}),
+      },
     });
   }
   } catch (err) {

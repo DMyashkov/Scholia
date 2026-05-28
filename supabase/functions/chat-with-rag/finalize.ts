@@ -4,7 +4,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PageRow, SourceRow } from './types.ts';
 import type { QuoteOut } from './types.ts';
-import { replaceCitationPlaceholders, buildQuotesOut, updateQuoteContextFromPage } from './quotes.ts';
+import {
+  extractCitedChunkIds,
+  replaceAndVerifyCitationPlaceholders,
+  buildQuotesOut,
+  updateQuoteContextFromPage,
+} from './quotes.ts';
 import { getLastMessages } from './chat.ts';
 
 export interface SaveAnswerParams {
@@ -45,7 +50,32 @@ export async function saveAssistantMessageWithQuotes(params: SaveAnswerParams): 
     sourceById,
   } = params;
 
-  const { content, quoteIdsOrdered } = replaceCitationPlaceholders(finalAnswer, validQuoteIds);
+  const citedSnippets = lastExtractResult?.cited_snippets ?? {};
+  const placeholderMatches = [...finalAnswer.matchAll(/\[\[quote:([^\]]+)\]\]/g)].map((m) => (m[1] ?? '').trim()).filter(Boolean);
+  const placeholderUnique = [...new Set(placeholderMatches)];
+  const preliminaryIds = extractCitedChunkIds(finalAnswer, validQuoteIds);
+  const chunkTextById = new Map<string, string>();
+  if (preliminaryIds.length > 0) {
+    const { data: prelimChunks = [] } = await supabase
+      .from('chunks')
+      .select('id, content')
+      .in('id', preliminaryIds);
+    for (const c of prelimChunks as { id: string; content: string | null }[]) {
+      chunkTextById.set(c.id, (c.content ?? '').trim());
+    }
+  }
+  const { content, quoteIdsOrdered, droppedQuoteIds } = replaceAndVerifyCitationPlaceholders(
+    finalAnswer,
+    validQuoteIds,
+    citedSnippets,
+    chunkTextById,
+  );
+  const dropped = droppedQuoteIds.map((id) => {
+    if (!validQuoteIds.has(id)) return { id, reason: 'invalid_id (not in provided evidence set)' };
+    if (!chunkTextById.get(id)) return { id, reason: 'missing_chunk_text (chunk content not loaded)' };
+    if (typeof citedSnippets[id] !== 'string' || !citedSnippets[id].trim()) return { id, reason: 'missing_cited_snippet (model did not supply verbatim quote)' };
+    return { id, reason: 'snippet_not_found_in_chunk (verbatim mismatch)' };
+  });
 
   const { data: assistantRow, error: msgErr } = await supabase
     .from('messages')
@@ -65,6 +95,13 @@ export async function saveAssistantMessageWithQuotes(params: SaveAnswerParams): 
           : undefined,
         ...(extractionGapsAccumulated.length > 0 ? { extractionGaps: extractionGapsAccumulated } : {}),
         ...(thoughtProcess.partialAnswerNote ? { partialAnswerNote: thoughtProcess.partialAnswerNote } : {}),
+        ...(droppedQuoteIds.length > 0 ? { droppedQuotes: droppedQuoteIds } : {}),
+        quoteDiagnostics: {
+          placeholdersFound: placeholderMatches.length,
+          placeholdersUnique: placeholderUnique.length,
+          verifiedQuotes: quoteIdsOrdered.length,
+          ...(dropped.length > 0 ? { dropped: dropped.slice(0, 50) } : {}),
+        },
       },
     })
     .select('*')
@@ -85,7 +122,6 @@ export async function saveAssistantMessageWithQuotes(params: SaveAnswerParams): 
       .select('id, page_id, content')
       .in('id', quoteIdsOrdered);
     const chunkById = new Map((chunkRows as { id: string; page_id: string; content: string | null }[]).map((c) => [c.id, c]));
-    const citedSnippets = lastExtractResult?.cited_snippets ?? {};
 
     for (let i = 0; i < quoteIdsOrdered.length; i++) {
       const chunkId = quoteIdsOrdered[i];
@@ -106,15 +142,15 @@ export async function saveAssistantMessageWithQuotes(params: SaveAnswerParams): 
       }
       if (!domain) domain = source?.domain ?? '';
 
-      const rawSnippet = typeof citedSnippets[chunkId] === 'string' && citedSnippets[chunkId].trim().length > 0
-        ? citedSnippets[chunkId].trim()
-        : (chunk.content ?? '').trim();
+      const modelSnippet =
+        typeof citedSnippets[chunkId] === 'string' ? citedSnippets[chunkId].trim() : '';
+      if (!modelSnippet) continue;
 
       await supabase.from('quotes').insert({
         message_id: assistantRow.id,
         page_id: chunk.page_id,
         chunk_id: chunk.id,
-        snippet: rawSnippet,
+        snippet: modelSnippet,
         page_title: page.title ?? '',
         page_path: page.path ?? '',
         domain,

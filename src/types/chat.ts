@@ -21,6 +21,26 @@ export interface ThoughtProcessSlot {
   itemsPerKey?: number;
 }
 
+export interface ThoughtProcessSubquery {
+  slot: string;
+  query: string;
+  strategy?: 'broad' | 'targeted';
+}
+
+export interface DroppedClaimInfo {
+  slot: string;
+  key?: string;
+  value?: string;
+  chunkIds?: string[];
+  reason: string;
+}
+
+export interface DroppedSubqueryInfo {
+  slot: string;
+  query: string;
+  reason: string;
+}
+
 export interface SlotFillSummaryRow {
   name: string;
   type: string;
@@ -41,7 +61,7 @@ export interface ThoughtProcess {
     iter: number;
     action: string;
     why?: string;
-    subqueries?: { slot: string; query: string }[];
+    subqueries?: ThoughtProcessSubquery[];
     chunksPerSubquery?: number[];
     quotesFound?: number;
     claims?: unknown[];
@@ -50,6 +70,9 @@ export interface ThoughtProcess {
     statements?: string[];
     nextAction?: string;
     slotSnapshot?: Record<string, SlotSnapshotEntry>;
+    queryGuidance?: string;
+    droppedClaims?: DroppedClaimInfo[];
+    droppedSubqueries?: DroppedSubqueryInfo[];
   }[];
   iterationCount?: number;
   completeness?: number;
@@ -58,6 +81,13 @@ export interface ThoughtProcess {
   expandCorpusReason?: string;
   extractionGaps?: string[];
   partialAnswerNote?: string;
+  droppedQuotes?: string[];
+  quoteDiagnostics?: {
+    placeholdersFound?: number;
+    placeholdersUnique?: number;
+    verifiedQuotes?: number;
+    dropped?: { id: string; reason: string }[];
+  };
 }
 
 export interface Message {

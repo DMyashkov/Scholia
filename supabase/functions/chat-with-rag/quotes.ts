@@ -53,7 +53,10 @@ export function citedSnippetVerifiedInChunk(chunkText: string, snippet: string):
   if (!snippetTrim) return false;
   const chunkNorm = normalizeForQuoteMatch(chunkText);
   const snippetNorm = normalizeForQuoteMatch(snippetTrim);
-  return chunkNorm.includes(snippetNorm);
+  // Use fuzzy matching: exact substring → ellipsis segments → 80/60/40-char prefix.
+  // The LLM often paraphrases slightly or copies from slot state; the prefix check
+  // rescues quotes that start verbatim but were truncated by the LLM.
+  return findSnippetInText(chunkNorm, snippetNorm) !== null;
 }
 
 export function extractCitedChunkIds(finalAnswer: string, validQuoteIds: Set<string>): string[] {

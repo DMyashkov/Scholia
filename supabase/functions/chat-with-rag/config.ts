@@ -5,8 +5,10 @@ export const corsHeaders = {
 
 export const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 export const OPENAI_CHAT_MODEL = 'gpt-4o-mini';
-export const MATCH_CHUNKS_PER_QUERY = 5;
-export const MATCH_CHUNKS_MERGED_CAP = 45;
+export const MATCH_CHUNKS_PER_QUERY = 6;
+// 8 subqueries × 6 chunks = 48 potential chunks; raise cap to 64 so the merged pool
+// covers all queries before EXTRACT_CHUNKS_CAP (45) trims it for the LLM.
+export const MATCH_CHUNKS_MERGED_CAP = 64;
 export const LAST_MESSAGES_COUNT = 10;
 export const PAGE_CONTEXT_CHARS = 350;
 

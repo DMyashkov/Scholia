@@ -81,8 +81,10 @@ Rules:
 - Do NOT cite a chunk unless it actually discusses the entity (mapping key) or fact you are claiming. Use each chunk's page URL and retrieved_by subquery/slot to judge attribution: for mapping keys, prefer chunks retrieved by that key's targeted query or whose page URL/title clearly matches the entity.
 Scalar: one value, no key. List: one claim per distinct NEW item only—never one comma-separated claim bundling many entities; emit separate list claims per entity. Never re-emit a value already in Current slot state (same entity with different spacing or punctuation counts as duplicate). 
 List target_item_count is a minimum, not a cap: if the list already has at least that many items and this step's chunks name another distinct entity not in state, still emit a list claim for it. Do not skip new list items just because count >= target.
-It is fine to add list claims during a step focused on another slot if this step's chunks name an entity not already listed. Use one canonical spelling per name (trim; normalize spaces around parentheses). 
+It is fine to add list claims during a step focused on another slot if this step's chunks name an entity not already listed. Use one canonical spelling per name (trim; normalize spaces around parentheses).
+List proper-noun filtering: when a chunk line names a proper-noun entity followed by a generic category label (e.g. "АГАТА, семена картофи"), emit only the proper-noun entity (АГАТА); never emit the generic category label as a separate list item.
 Mapping: key = one entity from the dependency slot's current state only; do not invent keys.
+Mapping attribution: for every mapping claim, the chunk you cite must explicitly name the key entity **in the same sentence or table row** as the value you are extracting. If the value and the key entity appear in different sentences or rows describing different entities, do not combine them into a single claim.
 
 - Prefer "retrieve" or "answer"; use "expand_corpus" only when evidence genuinely lacks the facts (not merely spread across chunks). 
 Use "clarify" only when the question is ambiguous, not when evidence is missing.

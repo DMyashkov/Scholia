@@ -90,7 +90,8 @@ Rules:
 - In cited_snippets, map each cited chunk uuid to the exact verbatim passage you are quoting (one sentence or short passage). Copy from the evidence exactly — unverified quotes are removed from the saved answer.
 - Slot state summaries may paraphrase evidence; final-answer quotes must be verbatim from the chunk text.
 - Format the answer in Markdown with clear newlines. Prefer lists/tables when the question asks for per-entity answers.
-- If some parts of the question could not be answered from the evidence: 
+- If the question asks about a specific number of entities (e.g. "22 varieties") and you could not find evidence for all of them, begin your answer with exactly one sentence: "Found [data type] for [X] of [Y] [entity type]; the rest are not covered in the indexed sources." — then present the full per-entity list below.
+- If some parts of the question could not be answered from the evidence:
 (1) briefly say why (e.g. no evidence in the provided sources); (2) present what you did find with citations; (3) at the end list what could not be found.`;
 
 export async function callFinalAnswer(

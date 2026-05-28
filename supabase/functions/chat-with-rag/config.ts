@@ -11,7 +11,7 @@ export const LAST_MESSAGES_COUNT = 10;
 export const PAGE_CONTEXT_CHARS = 350;
 
 
-export const MAX_ITERATIONS = 6;
+export const MAX_ITERATIONS = 5;
 // Keep individual steps fast enough to avoid edge-function timeouts.
 // 8 subqueries/step × ~1s each + LLM extraction ≈ 15-25s, well within limits.
 // Mapping slots with many keys are automatically batched across multiple iterations.
@@ -29,7 +29,7 @@ export const INCLUDE_FILL_STATUS_BY_SLOT = true;
 // Without this the context grows unboundedly as chunks accumulate across steps.
 export const EXTRACT_CHUNKS_CAP = 45;
 
-export const FINAL_ANSWER_CHUNKS_CAP = 80;
+export const FINAL_ANSWER_CHUNKS_CAP = 45;
 
 export const SUGGESTION_MATCH_COUNT_MIN = 2;
 export const SUGGESTION_MATCH_COUNT_MAX = 10;

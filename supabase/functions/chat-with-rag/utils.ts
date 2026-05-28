@@ -22,7 +22,8 @@ export function splitListEntityValues(raw: string): string[] {
 
 
 export function slotValueDedupKey(valueJson: unknown): string {
-  if (typeof valueJson === 'string') return normalizeSlotEntityString(valueJson);
+  // Lowercase so "Фонтане" and "ФОНТАНЕ" deduplicate to the same key.
+  if (typeof valueJson === 'string') return normalizeSlotEntityString(valueJson).toLowerCase();
   if (typeof valueJson === 'number' || typeof valueJson === 'boolean') return String(valueJson);
   return JSON.stringify(valueJson);
 }

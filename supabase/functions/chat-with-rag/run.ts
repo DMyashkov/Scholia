@@ -541,29 +541,32 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     
     const previousStepIds = stepList.filter((s) => s.iteration_number < iteration).map((s) => s.id);
     const seen = new Set<string>();
+    // Normalize query text to lowercase so "Информация за X" and "информация за X" are the same key.
+    const seenKey = (slotId: string, query: string) => `${slotId}::${query.trim().toLowerCase()}`;
     if (previousStepIds.length > 0) {
       const { data: allPrevSubq } = await supabase
         .from('reasoning_subqueries')
         .select('slot_id, query_text')
         .in('reasoning_step_id', previousStepIds);
       for (const row of (allPrevSubq ?? []) as { slot_id: string; query_text: string }[]) {
-        seen.add(`${row.slot_id}::${row.query_text}`);
+        seen.add(seenKey(row.slot_id, row.query_text));
       }
     }
 
     const seenDedupKey = (slotId: string, query: string) => `${slotId}\0${query}`;
     let runnable = subqueriesWithSlot.filter(
-      (sq) => sq.query && !seen.has(`${sq.slotId}::${sq.query}`),
+      (sq) => sq.query && !seen.has(seenKey(sq.slotId, sq.query)),
     );
 
     if (runnable.length === 0) {
       const seenForRecovery = new Set<string>();
       for (const key of seen) {
+        // seen keys are "slotId::queryNormalized"; convert to "slotId\0queryNormalized" for recovery
         const sep = key.indexOf('::');
         if (sep >= 0) seenForRecovery.add(`${key.slice(0, sep)}\0${key.slice(sep + 2)}`);
       }
       for (const sq of subqueriesWithSlot) {
-        if (sq.query) seenForRecovery.add(seenDedupKey(sq.slotId, sq.query));
+        if (sq.query) seenForRecovery.add(seenDedupKey(sq.slotId, sq.query.trim().toLowerCase()));
       }
       const recovery = buildRecoverySubqueries(slots, fillBySlotId, seenForRecovery);
       if (recovery.length > 0) {
@@ -590,7 +593,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         droppedSubqueriesPreparedThisIter = [...(droppedSubqueriesPreparedThisIter ?? []), ...recoveryPrepared.dropped];
         for (const q of recoveryPrepared.runnable) {
           const sid = slotIdByName.get(q.slot);
-          if (!sid || seen.has(`${sid}::${q.query}`)) continue;
+          if (!sid || seen.has(seenKey(sid, q.query))) continue;
           await supabase.from('reasoning_subqueries').insert({
             reasoning_step_id: currentStepId,
             slot_id: sid,
@@ -633,25 +636,30 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     );
     log('retrieve-done', { chunksRetrieved: retrievedChunks.length, chunksPerSubquery });
 
+    // Only pass this step's new chunks to extraction. Old chunks have already been processed
+    // in prior iterations and their claims are in the current slot state. Keeping all accumulated
+    // chunks blows up the extraction context with each step and causes edge-function timeouts.
+    // The AI can still see what has already been found via the slot state JSON.
+    const stepChunks: EvidenceChunk[] = [];
     for (const chunk of retrievedChunks) {
       const prov = provenanceByChunkId.get(chunk.id) ?? [];
-      upsertEvidenceChunk(evidenceChunksById, {
+      const ec: EvidenceChunk = {
         id: chunk.id,
         snippet: (chunk.content ?? '').trim(),
         pageUrl: chunk.page_url,
         pageTitle: chunk.page_title,
         retrievedBy: prov,
-      });
+      };
+      upsertEvidenceChunk(evidenceChunksById, ec);
+      stepChunks.push(ec);
     }
 
-    // Cap evidence sent to the extraction LLM so context doesn't blow up across iterations.
-    // Sort by ascending distance (most relevant first) before slicing.
-    const allEvidence = Array.from(evidenceChunksById.values());
-    const evidenceChunksForExtract: EvidenceChunk[] = allEvidence.length > EXTRACT_CHUNKS_CAP
-      ? allEvidence
+    // Cap per-step evidence if needed (edge case: many queries with large results).
+    const evidenceChunksForExtract: EvidenceChunk[] = stepChunks.length > EXTRACT_CHUNKS_CAP
+      ? stepChunks
           .sort((a, b) => ((a as { distance?: number }).distance ?? 1) - ((b as { distance?: number }).distance ?? 1))
           .slice(0, EXTRACT_CHUNKS_CAP)
-      : allEvidence;
+      : stepChunks;
 
     const currentSlotState = await getCurrentSlotItemsState();
     const currentSlotStateJson = Object.keys(currentSlotState).length > 0 ? JSON.stringify(currentSlotState, null, 2) : '';

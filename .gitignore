@@ -3,8 +3,13 @@
 # dependencies
 /node_modules
 worker/node_modules
+cli/node_modules
+cli/dist
 /.pnp
 .pnp.js
+
+# cli session cache (stored in ~/.scholia-cli but added for safety)
+.scholia-cli/
 
 # testing
 /coverage

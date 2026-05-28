@@ -646,6 +646,31 @@ function PhaseContent({
                         </pre>
                       </details>
                     )}
+                    {step.extractDebug && (step.extractDebug.request || step.extractDebug.responseRaw) && (
+                      <details className="rounded-lg border border-border/40 bg-muted/10 text-[11px]">
+                        <summary className="cursor-pointer px-3 py-2 text-muted-foreground font-medium">
+                          Extract raw (request/response)
+                        </summary>
+                        <div className="px-3 pb-2.5 space-y-2">
+                          {step.extractDebug.request && (
+                            <div>
+                              <div className="text-[10px] text-muted-foreground mb-1">Request (truncated)</div>
+                              <pre className="whitespace-pre-wrap font-mono text-muted-foreground leading-snug">
+                                {step.extractDebug.request}
+                              </pre>
+                            </div>
+                          )}
+                          {step.extractDebug.responseRaw && (
+                            <div>
+                              <div className="text-[10px] text-muted-foreground mb-1">Response (truncated)</div>
+                              <pre className="whitespace-pre-wrap font-mono text-muted-foreground leading-snug">
+                                {step.extractDebug.responseRaw}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    )}
                     {step.droppedClaims && step.droppedClaims.length > 0 && (
                       <DroppedClaimsBlock dropped={step.droppedClaims} />
                     )}

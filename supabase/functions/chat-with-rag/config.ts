@@ -14,17 +14,23 @@ export const PAGE_CONTEXT_CHARS = 350;
 
 
 export const MAX_ITERATIONS = 5;
-// Keep individual steps fast enough to avoid edge-function timeouts.
-// 8 subqueries/step × ~1s each + LLM extraction ≈ 15-25s, well within limits.
-// Mapping slots with many keys are automatically batched across multiple iterations.
-export const MAX_SUBQUERIES_PER_ITER = 8;
+// All subqueries in a step share one embedBatch call (one OpenAI request) and all
+// pgvector searches fire in parallel (Promise.all). Cost per step is dominated by
+// the single LLM extraction call (~5-10 s), not by the number of subqueries.
+// Raising these limits reduces step count, which reduces total LLM calls and wall time.
+export const MAX_SUBQUERIES_PER_ITER = 24;
 export const MAX_TOTAL_SUBQUERIES = 80;
 
-// Mapping per-key queries are the most expensive (one embedding + search each).
-// Cap tightly so a 22-key slot processes ~8 keys/step across ~3 steps, not 22 at once.
-export const MAX_MAPPING_SUBQUERIES_PER_ITER = 8;
+// 22 mapping keys can now all run in one step: 1 extraction call instead of 3.
+// Set to 22 so a full 22-key mapping completes in a single targeted step.
+export const MAX_MAPPING_SUBQUERIES_PER_ITER = 22;
 export const MAX_EXPANSIONS = 2;
-export const STAGNATION_THRESHOLD = 0; 
+export const STAGNATION_THRESHOLD = 0;
+// Force answer when overall completeness is at or above this fraction and at least
+// this many retrieval iterations have already run. Prevents burning extra steps on
+// the last 5–10% of data when the edge function is near its wall-clock limit.
+export const FORCE_ANSWER_COMPLETENESS_THRESHOLD = 0.90;
+export const FORCE_ANSWER_MIN_ITERATIONS = 2;
 export const INCLUDE_FILL_STATUS_BY_SLOT = true;
 
 // Cap on evidence chunks passed to the extraction LLM each iteration.

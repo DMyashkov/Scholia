@@ -15,6 +15,8 @@ import {
   MAX_EXPANSIONS,
   INCLUDE_FILL_STATUS_BY_SLOT,
   EXTRACT_CHUNKS_CAP,
+  FORCE_ANSWER_COMPLETENESS_THRESHOLD,
+  FORCE_ANSWER_MIN_ITERATIONS,
 } from './config.ts';
 import type { PageRow, SourceRow } from './types.ts';
 import { callPlan } from './plan.ts';
@@ -955,6 +957,20 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         }));
       lastExtractResult = { ...extractResult, next_action: 'retrieve', subqueries: fallbackInput as ExtractSubquery[] };
       (extractResult as { next_action: string }).next_action = 'retrieve';
+    }
+
+    // High-completeness shortcut: stop retrieving when we already have enough evidence.
+    // Each additional step costs ~13s (one LLM extraction call) and risks hitting the
+    // 60s edge-function wall clock. Answering at ≥90% after ≥2 iterations avoids
+    // timeout while still delivering near-complete results.
+    if (
+      effectiveNextAction === 'retrieve' &&
+      completeness != null &&
+      completeness >= FORCE_ANSWER_COMPLETENESS_THRESHOLD &&
+      iteration >= FORCE_ANSWER_MIN_ITERATIONS
+    ) {
+      effectiveNextAction = 'answer';
+      log('force-answer-high-completeness', { iteration, completeness });
     }
 
     await supabase

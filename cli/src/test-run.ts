@@ -138,7 +138,12 @@ async function main() {
     try { event = JSON.parse(trimmed); }
     catch { console.log(chalk.red(`  [!] unparseable line ${lineN}: ${trimmed.slice(0, 100)}`)); return; }
 
-    if (event.ping) return; // heartbeat
+    if (event.ping) {
+      const elapsed = typeof (event as {elapsed?: number}).elapsed === 'number' ? (event as {elapsed: number}).elapsed : null;
+      const n = (event as {n?: number}).n;
+      if (elapsed != null) process.stdout.write(chalk.dim(`  ♡ ping #${n ?? '?'} (${(elapsed/1000).toFixed(1)}s elapsed)\n`));
+      return;
+    }
 
     if (event.error) {
       console.log(chalk.red.bold(`\n✗ ERROR: ${event.error}`));

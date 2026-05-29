@@ -3,11 +3,11 @@
 
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { OPENAI_CHAT_MODEL } from './config.ts';
-import { FINAL_ANSWER_CHUNKS_CAP } from './config.ts';
+import { OPENAI_CHAT_MODEL, FINAL_ANSWER_CHUNKS_CAP, fetchWithTimeout } from './config.ts';
 import { capWithFairAllocation } from './utils.ts';
 import type { EvidenceChunk } from './types.ts';
 import { formatEvidenceForPrompt } from './evidenceFormat.ts';
+
 
 export interface FinalAnswerResult {
   final_answer: string;
@@ -76,44 +76,35 @@ export async function getEvidenceChunksForFinalAnswer(
   return selected;
 }
 
-const FINAL_ANSWER_SYSTEM = `You write the final answer to the user's question using only the provided evidence (chunks). 
-Each chunk has an id in brackets; use [[quote:uuid]] in your answer for every chunk you cite (uuid = chunk id).
+const FINAL_ANSWER_SYSTEM = `You write the final answer to the user's question from extracted slot state data.
 
 Output JSON only:
-{
-  "final_answer": "your answer text with [[quote:uuid]] placeholders for each citation",
-  "cited_snippets": { "uuid-1": "exact verbatim passage from that chunk", "uuid-2": "..." }
-}
+{ "final_answer": "your formatted answer with [ref:N] citation markers from the citation table" }
 
 Rules:
-- Base the answer only on the evidence below. Cite every claim with [[quote:uuid]] using the chunk id from the evidence block.
-- In cited_snippets, map each cited chunk uuid to the exact verbatim passage you are quoting (one sentence or short passage). Copy from the evidence exactly — unverified quotes are removed from the saved answer.
-- Slot state summaries may paraphrase evidence; final-answer quotes must be verbatim from the chunk text.
+- Write from the slot state provided. Do not add facts not present in the slot state.
+- For each entity/key in a mapping slot: if the citation table lists a [ref:N] marker for that entity, append that exact marker at the end of that entity's line.
+- If no citation is listed for an entity, write it without any citation marker — never invent a [ref:N] marker.
+- Only use [ref:N] markers that appear in the citation table. Do not modify the number.
 - Format the answer in Markdown with clear newlines. Prefer lists/tables when the question asks for per-entity answers.
-- If the question asks about a specific number of entities (e.g. "22 varieties") and you could not find evidence for all of them, begin your answer with exactly one sentence: "Found [data type] for [X] of [Y] [entity type]; the rest are not covered in the indexed sources." — then present the full per-entity list below.
-- If some parts of the question could not be answered from the evidence:
-(1) briefly say why (e.g. no evidence in the provided sources); (2) present what you did find with citations; (3) at the end list what could not be found.`;
+- If the question asks about a specific number of entities (e.g. "22 varieties") and fewer appear in the slot state, begin with exactly one sentence: "Found [data type] for [X] of [Y] [entity type]; the rest are not covered in the indexed sources." — use the exact counts from the coverage note if provided.`;
 
 export async function callFinalAnswer(
   apiKey: string,
   userMessage: string,
   currentSlotStateJson: string,
-  evidenceChunks: EvidenceChunk[],
+  quoteRefTable?: string,
+  fillNote?: string,
 ): Promise<FinalAnswerResult> {
-  const quoteBlock = formatEvidenceForPrompt(evidenceChunks);
   const userContent = `Question: ${userMessage}
 
-Filled slot state (what we extracted from evidence):
+Extracted slot state:
 ${currentSlotStateJson || '{}'}
+${fillNote ? `\nCoverage (use these exact counts in your completeness sentence):\n${fillNote}\n` : ''}
+${quoteRefTable ? `\nCitation table — copy each [ref:N] marker verbatim to the matching entity's line:\n${quoteRefTable}\n` : ''}
+Output JSON with "final_answer".`;
 
-Evidence (chunks with ids — cite these with [[quote:uuid]] in your answer):
----
-${quoteBlock}
----
-
-Output JSON with final_answer and cited_snippets.`;
-
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -132,37 +123,11 @@ Output JSON with final_answer and cited_snippets.`;
   try {
     parsed = JSON.parse(content);
   } catch {
-    return {
-      final_answer: "I couldn't format the answer from the evidence. Here's what was found in the sources.",
-      cited_snippets: {},
-    };
+    return { final_answer: "I couldn't format the answer from the evidence. Here's what was found in the sources.", cited_snippets: {} };
   }
   const obj = parsed as Record<string, unknown>;
   const final_answer = typeof obj.final_answer === 'string' && obj.final_answer.trim().length > 0
     ? obj.final_answer.trim()
     : "I couldn't find enough in the sources to answer fully.";
-  const chunkIdSet = new Set(evidenceChunks.map((c) => c.id));
-  const chunkIdsByIndex = evidenceChunks.map((c) => c.id);
-  const resolveId = (rawId: string): string | null => {
-    const id = rawId.trim();
-    if (chunkIdSet.has(id)) return id;
-    const n = Number.parseInt(id, 10);
-    if (Number.isInteger(n) && n >= 1 && n <= chunkIdsByIndex.length) return chunkIdsByIndex[n - 1];
-    return null;
-  };
-
-  const resolvedFinalAnswer = final_answer.replace(/\[\[quote:([^\]]+)\]\]/g, (m, idRaw) => {
-    const resolved = typeof idRaw === 'string' ? resolveId(idRaw) : null;
-    return resolved ? `[[quote:${resolved}]]` : m;
-  });
-  const cited_snippets: Record<string, string> = {};
-  if (obj.cited_snippets != null && typeof obj.cited_snippets === 'object' && !Array.isArray(obj.cited_snippets)) {
-    for (const [id, passage] of Object.entries(obj.cited_snippets)) {
-      const resolved = resolveId(id);
-      if (resolved && typeof passage === 'string' && passage.trim().length > 0) {
-        cited_snippets[resolved] = passage.trim();
-      }
-    }
-  }
-  return { final_answer: resolvedFinalAnswer, cited_snippets };
+  return { final_answer, cited_snippets: {} };
 }

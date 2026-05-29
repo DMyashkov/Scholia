@@ -17,6 +17,9 @@ import {
   EXTRACT_CHUNKS_CAP,
   FORCE_ANSWER_COMPLETENESS_THRESHOLD,
   FORCE_ANSWER_MIN_ITERATIONS,
+  MATCH_CHUNKS_PER_QUERY,
+  NEIGHBOR_WINDOW_CHARS,
+  NEIGHBOR_MAX_PER_ANCHOR,
 } from './config.ts';
 import type { PageRow, SourceRow } from './types.ts';
 import { callPlan } from './plan.ts';
@@ -24,8 +27,9 @@ import { callExtractAndDecide, insertClaims } from './loop.ts';
 import type { SlotRow } from './loop.ts';
 import type { EvidenceChunk } from './types.ts';
 import { upsertEvidenceChunk } from './evidenceFormat.ts';
-import { doRetrieve } from './retrieve.ts';
-import { getEvidenceChunksForFinalAnswer, callFinalAnswer } from './finalAnswer.ts';
+import { doRetrieve, fetchListSlotNeighborChunks } from './retrieve.ts';
+import { callFinalAnswer } from './finalAnswer.ts';
+import { createExtractQuote } from './quotes.ts';
 import { slotCompleteness, overallCompleteness } from './completeness.ts';
 import type { SlotForCompleteness, SlotCompletenessMeta } from './completeness.ts';
 import { doExpandCorpus, getTopSuggestedPages, type SuggestedPage } from './expand.ts';
@@ -307,6 +311,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     droppedClaims?: { slot: string; key?: string; value?: string; chunkIds?: string[]; reason: string }[];
     droppedSubqueries?: { slot: string; query: string; reason: string }[];
     listSlotState?: Record<string, { attempts: number; count: number; strategy: string; finished_querying: boolean }>;
+    timingMs?: { retrieve: number; extract: number; quoteCreate: number; total: number };
   };
   let droppedSubqueriesPreparedThisIter: { slot: string; query: string; reason: string }[] = [];
   const thoughtProcess: {
@@ -386,7 +391,11 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
   let validQuoteIdsForSave = new Set<string>();
   
   const evidenceChunksById = new Map<string, EvidenceChunk>();
-  let lastExtractResult: { next_action?: string; why?: string; final_answer?: string; subqueries?: ExtractSubquery[]; extractionGaps?: string[]; cited_snippets?: Record<string, string> } | null = null;
+  const chunkPageIdMap = new Map<string, string>(); // chunkId → pageId
+  // Per-slot tracking of chunk IDs already passed to the extract model.
+  // Used to avoid re-sending the same chunk for the same slot across steps.
+  const seenChunksBySlotName = new Map<string, Set<string>>();
+  let lastExtractResult: { next_action?: string; why?: string; final_answer?: string; subqueries?: ExtractSubquery[]; extractionGaps?: string[] } | null = null;
   const extractionGapsAccumulated: string[] = [];
   let slotItemCountBySlotId = new Map<string, number>();
   let fillBySlotId: FillMap = new Map();
@@ -398,15 +407,114 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
   );
   const slotsById = new Map(slots.map((s) => [s.id, s]));
 
-  const produceFinalAnswer = async (): Promise<{ finalAnswer: string; cited_snippets: Record<string, string>; validQuoteIds: Set<string> }> => {
-    const evidenceForFinal = await getEvidenceChunksForFinalAnswer(supabase, slots.map((s) => s.id), evidenceChunksById);
+  const produceFinalAnswer = async (): Promise<{ finalAnswer: string; validQuoteIds: Set<string> }> => {
     const currentSlotState = await getCurrentSlotItemsState();
     const currentSlotStateJson = Object.keys(currentSlotState).length > 0 ? JSON.stringify(currentSlotState, null, 2) : '{}';
-    const result = await callFinalAnswer(openaiKey, userMsg, currentSlotStateJson, evidenceForFinal);
+
+    // Compute fill note for correct completeness counts in the preamble sentence.
+    const fillNoteLines: string[] = [];
+    for (const slot of slots) {
+      const stateEntry = currentSlotState[slot.name];
+      const items = stateEntry?.items ?? [];
+      if (slot.type === 'mapping' && (slot.items_per_key ?? 0) === 0 && slot.depends_on_slot_id) {
+        const parentSlot = slotsById.get(slot.depends_on_slot_id);
+        const parentItems = parentSlot ? (currentSlotState[parentSlot.name]?.items ?? []) : [];
+        const filledKeys = new Set(items.map((i) => i.key).filter(Boolean));
+        const parentTotal = Math.max(parentItems.length, parentSlot?.target_item_count ?? 0);
+        fillNoteLines.push(`"${slot.name}": ${filledKeys.size} of ${parentTotal} keys have data`);
+      } else if (slot.type === 'list') {
+        const target = slot.target_item_count ?? 0;
+        fillNoteLines.push(`"${slot.name}": ${items.length} items${target > 0 ? ` (requested: ${target})` : ''}`);
+      }
+    }
+    const fillNote = fillNoteLines.length > 0 ? fillNoteLines.join('\n') : undefined;
+
+    // Build the pre-assigned citation reference table by joining slot_items → claim_evidence → quotes.
+    // This works even on resumed runs because quotes are persisted in the DB.
+    const slotIds = slots.map((s) => s.id);
+    const { data: allSlotItemRows } = await supabase
+      .from('slot_items')
+      .select('id, slot_id, key')
+      .in('slot_id', slotIds);
+    const slotItemRows = (allSlotItemRows ?? []) as { id: string; slot_id: string; key: string | null }[];
+    const slotItemIds = slotItemRows.map((r) => r.id);
+
+    let quoteRefTable: string | undefined;
+    let validQuoteIds = new Set<string>();
+    const orderedRefEntries: { quoteId: string }[] = [];
+
+    if (slotItemIds.length > 0) {
+      const { data: evidRows } = await supabase
+        .from('claim_evidence')
+        .select('slot_item_id, chunk_id')
+        .in('slot_item_id', slotItemIds);
+      const evidList = (evidRows ?? []) as { slot_item_id: string; chunk_id: string }[];
+      const chunkIds = [...new Set(evidList.map((r) => r.chunk_id))];
+
+      if (chunkIds.length > 0) {
+        // Fetch pre-created quotes for these chunks (message_id is null = not yet attached).
+        // Filter by owner_id to avoid picking up quotes from other users' concurrent runs.
+        // Use most-recently created quote per chunk (latest step has best key verification).
+        const { data: preQuotes } = await supabase
+          .from('quotes')
+          .select('id, chunk_id')
+          .in('chunk_id', chunkIds)
+          .is('message_id', null)
+          .eq('owner_id', ownerId)
+          .order('id', { ascending: false });
+        const quoteIdByChunkId = new Map<string, string>();
+        for (const q of (preQuotes ?? []) as { id: string; chunk_id: string }[]) {
+          if (!quoteIdByChunkId.has(q.chunk_id)) quoteIdByChunkId.set(q.chunk_id, q.id);
+        }
+        validQuoteIds = new Set(quoteIdByChunkId.values());
+
+        // Map slot_item_id → quoteId (first chunk with a quote wins).
+        const quoteIdBySlotItemId = new Map<string, string>();
+        for (const ev of evidList) {
+          if (!quoteIdBySlotItemId.has(ev.slot_item_id)) {
+            const qId = quoteIdByChunkId.get(ev.chunk_id);
+            if (qId) quoteIdBySlotItemId.set(ev.slot_item_id, qId);
+          }
+        }
+
+        // Build reference table with sequential [ref:N] markers — model copies small numbers,
+        // not UUIDs, which eliminates citation mix-ups. Post-processing below maps back to UUIDs.
+        const refLines: string[] = [];
+        for (const slot of slots) {
+          if (slot.type !== 'mapping') continue;
+          const items = currentSlotState[slot.name]?.items ?? [];
+          if (items.length === 0) continue;
+          refLines.push(`Slot "${slot.name}":`);
+          for (const item of items) {
+            if (!item.key) continue;
+            const row = slotItemRows.find((r) => r.slot_id === slot.id && r.key === item.key);
+            const qId = row ? quoteIdBySlotItemId.get(row.id) : undefined;
+            if (qId) {
+              const refNum = orderedRefEntries.length + 1;
+              orderedRefEntries.push({ quoteId: qId });
+              refLines.push(`  ${item.key} → [ref:${refNum}]`);
+            } else {
+              refLines.push(`  ${item.key} → (no citation)`);
+            }
+          }
+        }
+        if (refLines.length > 0) quoteRefTable = refLines.join('\n');
+      }
+    }
+
+    const result = await callFinalAnswer(openaiKey, userMsg, currentSlotStateJson, quoteRefTable, fillNote);
+    // Replace [ref:N] markers with [[quote:uuid]] for the downstream citation pipeline.
+    let finalAnswerText = result.final_answer;
+    for (let i = 0; i < orderedRefEntries.length; i++) {
+      const refNum = i + 1;
+      finalAnswerText = finalAnswerText.replace(
+        new RegExp(`\\[ref:${refNum}\\]`, 'g'),
+        `[[quote:${orderedRefEntries[i].quoteId}]]`,
+      );
+    }
     return {
-      finalAnswer: result.final_answer,
-      cited_snippets: result.cited_snippets,
-      validQuoteIds: new Set(evidenceForFinal.map((c) => c.id)),
+      finalAnswer: finalAnswerText,
+      validQuoteIds,
     };
   };
 
@@ -416,6 +524,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
   while (!done && iteration < MAX_ITERATIONS) {
     iteration++;
+    const iterStart = Date.now();
     const { data: slotItemsRaw } = await supabase
       .from('slot_items')
       .select('slot_id, key, value_json')
@@ -651,13 +760,25 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     totalSubqueriesRun += retrieveSubqueries.length;
 
     log('retrieve-start', { iteration, subqueryCount: retrieveSubqueries.length });
+    const retrieveStart = Date.now();
     const { chunks: retrievedChunks, chunksPerSubquery, provenanceByChunkId } = await doRetrieve(
       supabase,
       openaiKey,
       pageIds,
       retrieveSubqueries,
+      MATCH_CHUNKS_PER_QUERY,
+      seenChunksBySlotName,
     );
-    log('retrieve-done', { chunksRetrieved: retrievedChunks.length, chunksPerSubquery });
+    const retrieveMs = Date.now() - retrieveStart;
+    // Record which chunks were just retrieved per slot so subsequent steps can skip them.
+    for (const [chunkId, provList] of provenanceByChunkId.entries()) {
+      for (const prov of provList) {
+        const slotSet = seenChunksBySlotName.get(prov.slot) ?? new Set<string>();
+        slotSet.add(chunkId);
+        seenChunksBySlotName.set(prov.slot, slotSet);
+      }
+    }
+    log('retrieve-done', { chunksRetrieved: retrievedChunks.length, chunksPerSubquery, retrieveMs });
 
     // Only pass this step's new chunks to extraction. Old chunks have already been processed
     // in prior iterations and their claims are in the current slot state. Keeping all accumulated
@@ -665,6 +786,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     // The AI can still see what has already been found via the slot state JSON.
     const stepChunks: EvidenceChunk[] = [];
     for (const chunk of retrievedChunks) {
+      chunkPageIdMap.set(chunk.id, chunk.page_id);
       const prov = provenanceByChunkId.get(chunk.id) ?? [];
       const ec: EvidenceChunk = {
         id: chunk.id,
@@ -675,6 +797,53 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       };
       upsertEvidenceChunk(evidenceChunksById, ec);
       stepChunks.push(ec);
+    }
+
+    // For list-slot anchors with known character positions, fetch adjacent chunks from
+    // the same page to improve coverage of listing pages where items span many chunks.
+    const listSlotNames = new Set(slots.filter((s) => s.type === 'list').map((s) => s.name));
+    const listAnchorIds: string[] = [];
+    const listAnchorMeta = new Map<string, { pageId: string; pageUrl?: string; pageTitle?: string; slotName: string }>();
+    for (const chunk of retrievedChunks) {
+      const prov = provenanceByChunkId.get(chunk.id) ?? [];
+      const listProv = prov.find((p) => listSlotNames.has(p.slot));
+      if (!listProv) continue;
+      listAnchorIds.push(chunk.id);
+      listAnchorMeta.set(chunk.id, {
+        pageId: chunk.page_id,
+        pageUrl: chunk.page_url,
+        pageTitle: chunk.page_title,
+        slotName: listProv.slot,
+      });
+    }
+    if (listAnchorIds.length > 0) {
+      const neighborExclude = new Set<string>(stepChunks.map((c) => c.id));
+      const neighbors = await fetchListSlotNeighborChunks(
+        supabase,
+        listAnchorIds,
+        listAnchorMeta,
+        NEIGHBOR_WINDOW_CHARS,
+        NEIGHBOR_MAX_PER_ANCHOR,
+        neighborExclude,
+      );
+      for (const nb of neighbors) {
+        chunkPageIdMap.set(nb.id, nb.pageId);
+        const ec: EvidenceChunk = {
+          id: nb.id,
+          snippet: nb.content.trim(),
+          pageUrl: nb.pageUrl,
+          pageTitle: nb.pageTitle,
+          retrievedBy: [{ slot: nb.slotName, query: 'adjacent' }],
+        };
+        upsertEvidenceChunk(evidenceChunksById, ec);
+        stepChunks.push(ec);
+        const slotSet = seenChunksBySlotName.get(nb.slotName) ?? new Set<string>();
+        slotSet.add(nb.id);
+        seenChunksBySlotName.set(nb.slotName, slotSet);
+      }
+      if (neighbors.length > 0) {
+        log('list-neighbors-added', { iteration, count: neighbors.length });
+      }
     }
 
     // Cap per-step evidence if needed (edge case: many queries with large results).
@@ -730,6 +899,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     log('extract-call', { iteration, chunkCount: evidenceChunksForExtract.length, topSuggestedCount: topSuggestedPages?.length ?? 0 });
     const snippetPreviews = evidenceChunksForExtract.map((q) => (q.snippet ?? '').slice(0, 120));
     log('extract-evidence-preview', { iteration, snippetPreviews });
+    const extractStart = Date.now();
     const slotRowsForExtract: SlotRow[] = slots.map((s) => {
       const target = getEffectiveTarget(s, slotItemCountBySlotId, slotsById);
       return {
@@ -756,6 +926,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       finishedQueryingSlotNames,
       queryGuidanceBlock,
     );
+    const extractMs = Date.now() - extractStart;
     lastExtractResult = extractResult;
     if (extractResult.extractionGaps?.length) {
       extractionGapsAccumulated.push(...extractResult.extractionGaps);
@@ -810,6 +981,36 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         ...droppedClaims.slice(0, 25).map((d) => `Dropped unsupported claim for ${d.slot}${d.key ? `/${d.key}` : ''}: ${d.reason}`),
       );
     }
+
+    // Create quotes for each claim immediately, while we know exactly which chunk supports which value.
+    // Use a per-step dedup map so the same chunk only produces one quote row per step.
+    const quoteCreateStart = Date.now();
+    const stepQuoteByChunkId = new Map<string, string>();
+    for (const claim of extractResult.claims) {
+      const chunkId = claim.chunkIds[0];
+      if (!chunkId || stepQuoteByChunkId.has(chunkId)) continue;
+      const chunkContent = evidenceChunksById.get(chunkId)?.snippet ?? '';
+      const pageId = chunkPageIdMap.get(chunkId);
+      const page = pageId ? pageById.get(pageId) : undefined;
+      if (!pageId || !page) continue;
+      let domain = '';
+      if (page.url) { try { domain = new URL(page.url).hostname; } catch { domain = ''; } }
+      if (!domain) domain = sourceById.get(page.source_id)?.domain ?? '';
+      const mappingKey = claim.key ?? undefined;
+      const qId = await createExtractQuote(supabase, {
+        chunkId,
+        chunkContent,
+        pageId,
+        page,
+        domain,
+        stepId: currentStepId,
+        ownerId,
+        mappingKey,
+        citedSnippet: claim.cited_snippet,
+      });
+      if (qId) stepQuoteByChunkId.set(chunkId, qId);
+    }
+    const quoteCreateMs = Date.now() - quoteCreateStart;
 
     const { data: slotItemsAfter } = await supabase
       .from('slot_items')
@@ -1038,6 +1239,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     thoughtProcess.slotFillSummary = buildSlotFillSummary(slots, slotItemCountBySlotId, slotsById);
     thoughtProcess.completeness = completeness;
 
+    const totalMs = Date.now() - iterStart;
     const stepEntry: ThoughtStep = {
       iter: iteration,
       action: 'retrieve',
@@ -1056,6 +1258,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       ...(droppedSubqueriesPreparedThisIter.length ? { droppedSubqueries: droppedSubqueriesPreparedThisIter.slice(0, 50) } : {}),
       ...(extractResult.debug ? { extractDebug: extractResult.debug } : {}),
       ...(Object.keys(listSlotDebug).length > 0 ? { listSlotState: listSlotDebug } : {}),
+      timingMs: { retrieve: retrieveMs, extract: extractMs, quoteCreate: quoteCreateMs, total: totalMs },
     };
     thoughtProcess.steps.push(stepEntry);
     if (extractionGapsAccumulated.length > 0) {
@@ -1081,7 +1284,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     if (effectiveNextAction === 'answer') {
       const finalResult = await produceFinalAnswer();
       finalAnswer = finalResult.finalAnswer;
-      lastExtractResult = { ...extractResult, cited_snippets: finalResult.cited_snippets };
       if (extractResult.next_action === 'retrieve' && allFinished) {
         (lastExtractResult as { next_action?: string }).next_action = 'answer';
       }
@@ -1123,7 +1325,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         if (extractionGapsAccumulated.length > 0) thoughtProcess.extractionGaps = [...extractionGapsAccumulated];
         const finalResult = await produceFinalAnswer();
         finalAnswer = finalResult.finalAnswer;
-        lastExtractResult = { ...extractResult, cited_snippets: finalResult.cited_snippets };
         validQuoteIdsForSave = finalResult.validQuoteIds;
         done = true;
         break;
@@ -1211,7 +1412,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         const noEvidenceMessage = "I didn't find any evidence in the current sources for that. You could try adding more sources or rephrasing.";
         const finalResult = await produceFinalAnswer();
         finalAnswer = lastCompleteness > 0 ? finalResult.finalAnswer : noEvidenceMessage;
-        lastExtractResult = { ...lastExtractResult, cited_snippets: finalResult.cited_snippets };
         validQuoteIdsForSave = finalResult.validQuoteIds;
         done = true;
         break;
@@ -1224,7 +1424,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const fallbackResult = await produceFinalAnswer();
     finalAnswer = fallbackResult.finalAnswer || "I couldn't complete retrieval for that question. Try rephrasing or adding more sources.";
     validQuoteIdsForSave = fallbackResult.validQuoteIds;
-    lastExtractResult = { ...lastExtractResult, cited_snippets: fallbackResult.cited_snippets };
     done = true;
   }
 
@@ -1247,7 +1446,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const noEvidenceMessage = "I didn't find any evidence in the current sources for that. You could try adding more sources or rephrasing.";
     const finalResult = await produceFinalAnswer();
     finalAnswer = lastCompleteness === 0 ? noEvidenceMessage : finalResult.finalAnswer;
-    lastExtractResult = { ...lastExtractResult, cited_snippets: finalResult.cited_snippets };
     validQuoteIdsForSave = finalResult.validQuoteIds;
   }
 
@@ -1257,7 +1455,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       conversationId: convId,
       ownerId,
       finalAnswer,
-      validQuoteIds: validQuoteIdsForSave.size > 0 ? validQuoteIdsForSave : new Set(evidenceChunksById.keys()),
+      validQuoteIds: validQuoteIdsForSave,
       lastExtractResult,
       thoughtProcess,
       extractionGapsAccumulated,

@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { EvidenceChunk, ExtractClaim, ExtractResult, ExtractSubquery } from './types.ts';
 import { formatEvidenceForPrompt } from './evidenceFormat.ts';
 import type { SuggestedPage } from './expand.ts';
-import { OPENAI_CHAT_MODEL } from './config.ts';
+import { OPENAI_CHAT_MODEL, fetchWithTimeout } from './config.ts';
 import { EXTRACT_SYSTEM } from './prompts.ts';
 import { normalizeSlotEntityString, slotValueDedupKey, splitListEntityValues } from './utils.ts';
 import type { CorpusLanguage } from './language.ts';
@@ -106,7 +106,7 @@ ${quoteBlock}
 
 Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_page_index if expand_corpus; broad_query_completed_slot_fully only when appropriate per guidance.`;
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -197,6 +197,7 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
         value: c.value !== undefined ? c.value : '',
         key: typeof c.key === 'string' ? c.key : undefined,
         confidence: typeof c.confidence === 'number' ? c.confidence : 1,
+        cited_snippet: typeof c.cited_snippet === 'string' && c.cited_snippet.trim().length > 0 ? c.cited_snippet.trim() : undefined,
         chunkIds,
       };
     })

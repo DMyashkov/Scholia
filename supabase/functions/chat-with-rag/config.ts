@@ -5,10 +5,14 @@ export const corsHeaders = {
 
 export const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 export const OPENAI_CHAT_MODEL = 'gpt-4o-mini';
-export const MATCH_CHUNKS_PER_QUERY = 6;
-// 8 subqueries × 6 chunks = 48 potential chunks; raise cap to 64 so the merged pool
-// covers all queries before EXTRACT_CHUNKS_CAP (45) trims it for the LLM.
+export const MATCH_CHUNKS_PER_QUERY = 8;
+// Up to 24 subqueries × 8 chunks = 192 potential raw results; merged cap of 64 keeps
+// the pool manageable before EXTRACT_CHUNKS_CAP (45) trims it for the LLM.
 export const MATCH_CHUNKS_MERGED_CAP = 64;
+// Character window around each list-slot anchor chunk when fetching positional neighbors.
+export const NEIGHBOR_WINDOW_CHARS = 3000;
+// Max neighbor chunks added per anchor chunk (prevents flooding from dense listing pages).
+export const NEIGHBOR_MAX_PER_ANCHOR = 3;
 export const LAST_MESSAGES_COUNT = 10;
 export const PAGE_CONTEXT_CHARS = 350;
 
@@ -41,3 +45,12 @@ export const FINAL_ANSWER_CHUNKS_CAP = 45;
 
 export const SUGGESTION_MATCH_COUNT_MIN = 2;
 export const SUGGESTION_MATCH_COUNT_MAX = 10;
+
+// Timeout for individual OpenAI API calls. Extraction prompts are large; 40s was too tight.
+export const OPENAI_CALL_TIMEOUT_MS = 60_000;
+
+export function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = OPENAI_CALL_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}

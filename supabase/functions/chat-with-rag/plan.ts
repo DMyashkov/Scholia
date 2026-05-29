@@ -1,5 +1,5 @@
 import type { PlanResult, PlanSlot, PlanSubquery, SlotType } from './types.ts';
-import { OPENAI_CHAT_MODEL } from './config.ts';
+import { OPENAI_CHAT_MODEL, fetchWithTimeout } from './config.ts';
 import { buildPlanUserMessage } from './corpusContext.ts';
 import { PLAN_SYSTEM } from './prompts.ts';
 import type { CorpusLanguage } from './language.ts';
@@ -14,7 +14,7 @@ export async function callPlan(
 ): Promise<PlanResult> {
   const langLine = corpusLanguage ? `${formatCorpusLanguageLine(corpusLanguage)}\n` : '';
   const userPrompt = `${langLine}${buildPlanUserMessage(userMessage, corpusContext)}`;
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({

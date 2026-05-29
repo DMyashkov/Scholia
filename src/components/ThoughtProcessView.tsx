@@ -516,7 +516,27 @@ function PhaseContent({
                       {step.completeness != null && (
                         <span className="text-[11px] text-muted-foreground">{Math.round(step.completeness * 100)}%</span>
                       )}
+                      {step.timingMs && (
+                        <span className="ml-auto text-[10px] text-muted-foreground/70 tabular-nums">
+                          {step.timingMs.total >= 1000
+                            ? `${(step.timingMs.total / 1000).toFixed(1)}s`
+                            : `${step.timingMs.total}ms`}
+                        </span>
+                      )}
                     </div>
+                    {step.timingMs && (
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground/60 tabular-nums">
+                        <span title="Retrieve (vector search)">
+                          retrieve {step.timingMs.retrieve >= 1000 ? `${(step.timingMs.retrieve / 1000).toFixed(1)}s` : `${step.timingMs.retrieve}ms`}
+                        </span>
+                        <span title="Extract & decide (LLM call)">
+                          extract {step.timingMs.extract >= 1000 ? `${(step.timingMs.extract / 1000).toFixed(1)}s` : `${step.timingMs.extract}ms`}
+                        </span>
+                        <span title="Quote creation (DB inserts)">
+                          quotes {step.timingMs.quoteCreate >= 1000 ? `${(step.timingMs.quoteCreate / 1000).toFixed(1)}s` : `${step.timingMs.quoteCreate}ms`}
+                        </span>
+                      </div>
+                    )}
                     {step.subqueries && step.subqueries.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 items-start">
                         {(() => {

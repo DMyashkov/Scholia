@@ -1,8 +1,8 @@
-import { OPENAI_EMBEDDING_MODEL } from './config.ts';
+import { OPENAI_EMBEDDING_MODEL, fetchWithTimeout } from './config.ts';
 
 export async function embedBatch(apiKey: string, texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
-  const res = await fetch('https://api.openai.com/v1/embeddings', {
+  const res = await fetchWithTimeout('https://api.openai.com/v1/embeddings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model: OPENAI_EMBEDDING_MODEL, input: texts }),

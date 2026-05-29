@@ -74,6 +74,7 @@ export interface ThoughtProcess {
     droppedClaims?: DroppedClaimInfo[];
     droppedSubqueries?: DroppedSubqueryInfo[];
     extractDebug?: { request?: string; responseRaw?: string };
+    timingMs?: { retrieve: number; extract: number; quoteCreate: number; total: number };
   }[];
   iterationCount?: number;
   completeness?: number;

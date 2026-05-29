@@ -1,5 +1,5 @@
 import type { SlotDb } from './types.ts';
-import { MAPPING_MATRIX_QUERY_RULES, SLOT_RETRIEVAL_RULES } from './prompts.ts';
+import { SLOT_RETRIEVAL_RULES } from './prompts.ts';
 import { normalizeSlotEntityString, slotValueDedupKey, splitListEntityValues } from './utils.ts';
 
 export type SlotItemRow = {
@@ -524,18 +524,9 @@ export function buildQueryGuidance(
   const lines: string[] = [
     'Query guidance (authoritative for next retrieve subqueries):',
     SLOT_RETRIEVAL_RULES,
+    '',
+    'Per slot:',
   ];
-  const mappingNeedsMatrix = slots.some((s) => {
-    if (s.type !== 'mapping' || s.finished_querying) return false;
-    const fill = fillBySlotId.get(s.id);
-    if (!fill?.parentSatisfied || fill.unfilledKeys.length === 0) return false;
-    const mode = getSlotQueryMode(s, fill);
-    return mode === 'targeted_only' || mode === 'broad_and_targeted';
-  });
-  if (mappingNeedsMatrix) {
-    lines.push('', MAPPING_MATRIX_QUERY_RULES);
-  }
-  lines.push('', 'Per slot:');
 
   for (const slot of slots) {
     const fill = fillBySlotId.get(slot.id);

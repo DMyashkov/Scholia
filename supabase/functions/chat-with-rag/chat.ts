@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ChunkRow, ChatResponse, QuotePayload } from './types.ts';
-import { OPENAI_CHAT_MODEL } from './config.ts';
-import { LAST_MESSAGES_COUNT } from './config.ts';
+import { OPENAI_CHAT_MODEL, LAST_MESSAGES_COUNT, fetchWithTimeout } from './config.ts';
 
 export async function getLastMessages(supabase: SupabaseClient, conversationId: string) {
   const { data } = await supabase
@@ -45,7 +44,7 @@ Citation rules:
     { role: 'user', content: userMessage },
   ];
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model: OPENAI_CHAT_MODEL, messages, response_format: { type: 'json_object' } }),

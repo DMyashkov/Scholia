@@ -23,11 +23,16 @@ Deno.serve(async (req) => {
     await writer.write(encoder.encode(JSON.stringify(obj) + '\n'));
   };
 
-  const log = (_phase: string, _detail?: Record<string, unknown>) => {};
+  const log = (phase: string, detail?: Record<string, unknown>) => {
+    console.log(`[RAG] ${phase}`, detail ? JSON.stringify(detail) : '');
+  };
 
+  const startTs = Date.now();
   const heartbeatMs = 12_000;
+  let pingCount = 0;
   const heartbeat = setInterval(() => {
-    void emit({ ping: Date.now() }).catch(() => {
+    pingCount++;
+    void emit({ ping: Date.now(), elapsed: Date.now() - startTs, n: pingCount }).catch(() => {
       clearInterval(heartbeat);
     });
   }, heartbeatMs);

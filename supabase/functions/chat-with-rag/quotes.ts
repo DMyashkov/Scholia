@@ -10,6 +10,68 @@ export function snippetFromChunk(c: ChunkRow): string {
   return (c.content ?? '').trim();
 }
 
+/**
+ * Creates a quote row during the extract step (before final answer).
+ * For mapping claims, verifies the key entity appears in the chunk to drop fake attributions.
+ * Returns the new quote ID, or null if attribution is invalid or DB insert fails.
+ */
+export async function createExtractQuote(
+  supabase: SupabaseClient,
+  params: {
+    chunkId: string;
+    chunkContent: string;
+    pageId: string;
+    page: PageRow;
+    domain: string;
+    stepId: string;
+    ownerId: string;
+    mappingKey?: string;
+    citedSnippet?: string;
+  },
+): Promise<string | null> {
+  const { chunkId, chunkContent, pageId, page, domain, stepId, ownerId, mappingKey, citedSnippet } = params;
+  if (!chunkContent.trim()) return null;
+
+  // Drop fake mapping citations: key entity must appear in the chunk text, OR in
+  // the page title / path (e.g. torene sections live on individual variety pages
+  // whose chunk text is "ТОРЕНЕ: ..." without repeating the variety name).
+  if (mappingKey) {
+    const keyNorm = normalizeForQuoteMatch(mappingKey);
+    const contentNorm = normalizeForQuoteMatch(chunkContent);
+    const titleNorm = normalizeForQuoteMatch(page.title ?? '');
+    const pathNorm = normalizeForQuoteMatch(page.path ?? '');
+    if (!contentNorm.includes(keyNorm) && !titleNorm.includes(keyNorm) && !pathNorm.includes(keyNorm)) {
+      return null;
+    }
+  }
+
+  // Choose snippet: use LLM-provided cited_snippet if it verifies against chunk, else chunk text.
+  let snippet = chunkContent;
+  if (citedSnippet) {
+    const verified = citedSnippetVerifiedInChunk(chunkContent, citedSnippet);
+    if (verified) snippet = citedSnippet;
+  }
+
+  const { data: row, error } = await supabase
+    .from('quotes')
+    .insert({
+      message_id: null,
+      page_id: pageId,
+      chunk_id: chunkId,
+      snippet,
+      page_title: page.title ?? '',
+      page_path: page.path ?? '',
+      domain,
+      page_url: page.url ?? null,
+      retrieved_in_reasoning_step_id: stepId,
+      owner_id: ownerId,
+    })
+    .select('id')
+    .single();
+  if (error || !row?.id) return null;
+  return row.id;
+}
+
 export async function createQuoteFromChunk(
   supabase: SupabaseClient,
   params: {
@@ -78,9 +140,12 @@ export function replaceAndVerifyCitationPlaceholders(
   validQuoteIds: Set<string>,
   citedSnippets: Record<string, string>,
   chunkTextById: Map<string, string>,
-): { content: string; quoteIdsOrdered: string[]; droppedQuoteIds: string[] } {
+): { content: string; quoteIdsOrdered: string[]; droppedQuoteIds: string[]; snippetsByQuoteId: Map<string, string> } {
   const verifiedIds = new Set<string>();
   const droppedQuoteIds: string[] = [];
+  // For each kept quote: LLM snippet when it fuzzy-matches the chunk, raw chunk text otherwise.
+  // This ensures every valid citation gets a displayable snippet even when the LLM paraphrases.
+  const snippetsByQuoteId = new Map<string, string>();
   const seen = new Set<string>();
 
   QUOTE_PLACEHOLDER_REGEX.lastIndex = 0;
@@ -94,16 +159,17 @@ export function replaceAndVerifyCitationPlaceholders(
       droppedQuoteIds.push(id);
       continue;
     }
-    const chunkText = chunkTextById.get(id);
-    const snippet = citedSnippets[id];
-    if (
-      !chunkText ||
-      typeof snippet !== 'string' ||
-      !citedSnippetVerifiedInChunk(chunkText, snippet)
-    ) {
-      droppedQuoteIds.push(id);
-      continue;
-    }
+
+    // Keep the citation regardless of snippet quality; choose the best available snippet.
+    const chunkText = chunkTextById.get(id) ?? '';
+    const modelSnippet = typeof citedSnippets[id] === 'string' ? citedSnippets[id].trim() : '';
+    const llmSnippetValid =
+      modelSnippet.length > 0 &&
+      chunkText.length > 0 &&
+      citedSnippetVerifiedInChunk(chunkText, modelSnippet);
+    const snippet = llmSnippetValid ? modelSnippet : chunkText;
+    if (snippet) snippetsByQuoteId.set(id, snippet);
+
     verifiedIds.add(id);
   }
 
@@ -122,7 +188,7 @@ export function replaceAndVerifyCitationPlaceholders(
     content = content.split(`[[quote:${quoteIdsOrdered[n]}]]`).join(`[${n + 1}]`);
   }
   content = content.replace(QUOTE_PLACEHOLDER_REGEX, '');
-  return { content, quoteIdsOrdered, droppedQuoteIds };
+  return { content, quoteIdsOrdered, droppedQuoteIds, snippetsByQuoteId };
 }
 
 export function replaceCitationPlaceholders(

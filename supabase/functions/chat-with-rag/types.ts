@@ -72,7 +72,7 @@ export interface ExtractClaim {
   value: string | number | unknown;
   key?: string;
   confidence?: number;
-  
+  cited_snippet?: string;
   chunkIds: string[];
 }
 

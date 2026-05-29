@@ -2,11 +2,12 @@
 
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { fetchWithTimeout } from './config.ts';
 import type { PageRow, SourceRow } from './types.ts';
 import type { QuoteOut } from './types.ts';
 import {
-  extractCitedChunkIds,
-  replaceAndVerifyCitationPlaceholders,
+  replaceCitationPlaceholders,
+  attachQuotesToMessage,
   buildQuotesOut,
   updateQuoteContextFromPage,
 } from './quotes.ts';
@@ -18,7 +19,7 @@ export interface SaveAnswerParams {
   ownerId: string;
   finalAnswer: string;
   validQuoteIds: Set<string>;
-  lastExtractResult: { cited_snippets?: Record<string, string> } | null;
+  lastExtractResult: Record<string, unknown> | null;
   thoughtProcess: Record<string, unknown>;
   extractionGapsAccumulated: string[];
   iteration: number;
@@ -40,7 +41,6 @@ export async function saveAssistantMessageWithQuotes(params: SaveAnswerParams): 
     ownerId,
     finalAnswer,
     validQuoteIds,
-    lastExtractResult,
     thoughtProcess,
     extractionGapsAccumulated,
     iteration,
@@ -50,32 +50,13 @@ export async function saveAssistantMessageWithQuotes(params: SaveAnswerParams): 
     sourceById,
   } = params;
 
-  const citedSnippets = lastExtractResult?.cited_snippets ?? {};
+  // Quotes are pre-created during extract steps. We just validate the IDs the LLM used,
+  // replace placeholders with [N], then attach the pre-created quote rows to this message.
   const placeholderMatches = [...finalAnswer.matchAll(/\[\[quote:([^\]]+)\]\]/g)].map((m) => (m[1] ?? '').trim()).filter(Boolean);
   const placeholderUnique = [...new Set(placeholderMatches)];
-  const preliminaryIds = extractCitedChunkIds(finalAnswer, validQuoteIds);
-  const chunkTextById = new Map<string, string>();
-  if (preliminaryIds.length > 0) {
-    const { data: prelimChunks = [] } = await supabase
-      .from('chunks')
-      .select('id, content')
-      .in('id', preliminaryIds);
-    for (const c of prelimChunks as { id: string; content: string | null }[]) {
-      chunkTextById.set(c.id, (c.content ?? '').trim());
-    }
-  }
-  const { content, quoteIdsOrdered, droppedQuoteIds } = replaceAndVerifyCitationPlaceholders(
-    finalAnswer,
-    validQuoteIds,
-    citedSnippets,
-    chunkTextById,
-  );
-  const dropped = droppedQuoteIds.map((id) => {
-    if (!validQuoteIds.has(id)) return { id, reason: 'invalid_id (not in provided evidence set)' };
-    if (!chunkTextById.get(id)) return { id, reason: 'missing_chunk_text (chunk content not loaded)' };
-    if (typeof citedSnippets[id] !== 'string' || !citedSnippets[id].trim()) return { id, reason: 'missing_cited_snippet (model did not supply verbatim quote)' };
-    return { id, reason: 'snippet_not_found_in_chunk (verbatim mismatch)' };
-  });
+  const { content, quoteIdsOrdered } = replaceCitationPlaceholders(finalAnswer, validQuoteIds);
+  const droppedQuoteIds = placeholderUnique.filter((id) => !validQuoteIds.has(id));
+  const dropped = droppedQuoteIds.map((id) => ({ id, reason: 'invalid_id (not in pre-created quote set)' }));
 
   const { data: assistantRow, error: msgErr } = await supabase
     .from('messages')
@@ -115,51 +96,9 @@ export async function saveAssistantMessageWithQuotes(params: SaveAnswerParams): 
     await supabase.from('messages').update({ suggested_page: null }).eq('id', appendToMessageId);
   }
 
-  
+  // Attach the pre-created quote rows to this message.
   if (quoteIdsOrdered.length > 0) {
-    const { data: chunkRows = [] } = await supabase
-      .from('chunks')
-      .select('id, page_id, content')
-      .in('id', quoteIdsOrdered);
-    const chunkById = new Map((chunkRows as { id: string; page_id: string; content: string | null }[]).map((c) => [c.id, c]));
-
-    for (let i = 0; i < quoteIdsOrdered.length; i++) {
-      const chunkId = quoteIdsOrdered[i];
-      const chunk = chunkById.get(chunkId);
-      if (!chunk) continue;
-      const page = pageById.get(chunk.page_id);
-      if (!page) continue;
-      const source = sourceById.get(page.source_id);
-
-      let domain = '';
-      const fullPageUrl = page.url ?? null;
-      if (fullPageUrl) {
-        try {
-          domain = new URL(fullPageUrl).hostname;
-        } catch {
-          domain = '';
-        }
-      }
-      if (!domain) domain = source?.domain ?? '';
-
-      const modelSnippet =
-        typeof citedSnippets[chunkId] === 'string' ? citedSnippets[chunkId].trim() : '';
-      if (!modelSnippet) continue;
-
-      await supabase.from('quotes').insert({
-        message_id: assistantRow.id,
-        page_id: chunk.page_id,
-        chunk_id: chunk.id,
-        snippet: modelSnippet,
-        page_title: page.title ?? '',
-        page_path: page.path ?? '',
-        domain,
-        page_url: fullPageUrl,
-        retrieved_in_reasoning_step_id: null,
-        owner_id: ownerId,
-        citation_order: i + 1,
-      });
-    }
+    await attachQuotesToMessage(supabase, assistantRow.id, quoteIdsOrdered);
   }
 
   const quotedPageIds = await (async () => {
@@ -194,7 +133,7 @@ export async function suggestConversationTitle(
   isFirstMessage: boolean,
 ): Promise<string | undefined> {
   if (!isFirstMessage) return undefined;
-  const titleRes = await fetch('https://api.openai.com/v1/chat/completions', {
+  const titleRes = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
     body: JSON.stringify({

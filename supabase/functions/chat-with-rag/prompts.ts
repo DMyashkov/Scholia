@@ -63,7 +63,7 @@ export const EXTRACT_SYSTEM = `You extract atomic claims from the provided evide
 Output JSON only:
 {
   "claims": [
-    { "slot": "slot_name", "value": <atomic value: string or number>, "key": "<only for mapping slots>", "confidence": 0.0-1.0, "chunkIds": ["chunk-uuid-1", "chunk-uuid-2"] }
+    { "slot": "slot_name", "value": <atomic value: string or number>, "key": "<REQUIRED for mapping slots — must exactly match a key in the dependency slot's current state; omit for list/scalar>", "confidence": 0.0-1.0, "cited_snippet": "<1-3 verbatim sentences from the cited chunk that directly state this value>", "chunkIds": ["chunk-uuid-1"] }
   ],
   "next_action": "retrieve" | "expand_corpus" | "clarify" | "answer",
   "why": "short reason",
@@ -81,9 +81,9 @@ Rules:
 - Do NOT cite a chunk unless it actually discusses the entity (mapping key) or fact you are claiming. Use each chunk's page URL and retrieved_by subquery/slot to judge attribution: for mapping keys, prefer chunks retrieved by that key's targeted query or whose page URL/title clearly matches the entity.
 Scalar: one value, no key. List: one claim per distinct NEW item only—never one comma-separated claim bundling many entities; emit separate list claims per entity. Never re-emit a value already in Current slot state (same entity with different spacing or punctuation counts as duplicate). 
 List target_item_count is a minimum, not a cap: if the list already has at least that many items and this step's chunks name another distinct entity not in state, still emit a list claim for it. Do not skip new list items just because count >= target.
-It is fine to add list claims during a step focused on another slot if this step's chunks name an entity not already listed. Use one canonical spelling per name (trim; normalize spaces around parentheses).
+Cross-slot discovery (REQUIRED): if a chunk in this step names an entity that belongs to a list slot but is NOT yet in that slot's current state, you MUST emit a list claim for it in addition to any mapping/scalar claim. Skipping this causes the mapping claim to be silently dropped as "key not in dependency state". Use one canonical spelling per name (trim; normalize spaces around parentheses).
 List proper-noun filtering: when a chunk line names a proper-noun entity followed by a generic category label (e.g. "АГАТА, семена картофи"), emit only the proper-noun entity (АГАТА); never emit the generic category label as a separate list item.
-Mapping: key = one entity from the dependency slot's current state only; do not invent keys.
+Mapping: the "key" field is REQUIRED for every mapping claim — omitting it causes the claim to be silently dropped. The key must exactly match (same spelling) an entity already listed in the dependency slot's current state. Do not invent keys not in the state. Do not embed the key name inside "value"; put it in "key".
 Mapping attribution: for every mapping claim, the chunk you cite must explicitly name the key entity **in the same sentence or table row** as the value you are extracting. If the value and the key entity appear in different sentences or rows describing different entities, do not combine them into a single claim.
 
 - Prefer "retrieve" or "answer"; use "expand_corpus" only when evidence genuinely lacks the facts (not merely spread across chunks). 
@@ -99,8 +99,7 @@ For mapping slots with a satisfied parent you MUST use __map__ (not one subquery
 
 ${MAPPING_MATRIX_QUERY_RULES}
 
-- Query guidance block (below) is authoritative. Same rules:
-${SLOT_RETRIEVAL_RULES}
+- Query guidance block (below) is authoritative for per-step retrieval strategy and slot progress.
 - broad_query_completed_slot_fully: only for independent list slots that need no more discovery (not for dependent slots while parent may still grow).
 
 - Candidate suggested pages: prefer "expand_corpus" only when evidence genuinely lacks info AND a candidate is clearly relevant; 

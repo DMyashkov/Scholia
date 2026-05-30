@@ -83,8 +83,11 @@ Output JSON only:
 
 Rules:
 - Write from the slot state provided. Do not add facts not present in the slot state.
-- For each entity/key in a mapping slot: if the citation table lists a [ref:N] marker for that entity, append that exact marker at the end of that entity's line.
-- If no citation is listed for an entity, write it without any citation marker — never invent a [ref:N] marker.
+- The citation table may list [ref:N] markers for scalar slots, list items, and mapping keys. Use every listed marker exactly once in the position that naturally supports the corresponding claim.
+- For scalar slot values: append the [ref:N] marker immediately after stating the value (e.g. "Yes [ref:1]" or "The museum opened in 1989 [ref:1]").
+- For list items: append the [ref:N] marker at the end of each item's line.
+- For mapping keys: append the [ref:N] marker at the end of that entity's line.
+- If no citation is listed for a value or entity, write it without any citation marker — never invent a [ref:N] marker.
 - Only use [ref:N] markers that appear in the citation table. Do not modify the number.
 - Format the answer in Markdown with clear newlines. Prefer lists/tables when the question asks for per-entity answers.
 - If the question asks about a specific number of entities (e.g. "22 varieties") and fewer appear in the slot state, begin with exactly one sentence: "Found [data type] for [X] of [Y] [entity type]; the rest are not covered in the indexed sources." — use the exact counts from the coverage note if provided.`;

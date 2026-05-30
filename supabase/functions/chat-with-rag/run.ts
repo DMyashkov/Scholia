@@ -434,9 +434,9 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const slotIds = slots.map((s) => s.id);
     const { data: allSlotItemRows } = await supabase
       .from('slot_items')
-      .select('id, slot_id, key')
+      .select('id, slot_id, key, value_json')
       .in('slot_id', slotIds);
-    const slotItemRows = (allSlotItemRows ?? []) as { id: string; slot_id: string; key: string | null }[];
+    const slotItemRows = (allSlotItemRows ?? []) as { id: string; slot_id: string; key: string | null; value_json: unknown }[];
     const slotItemIds = slotItemRows.map((r) => r.id);
 
     let quoteRefTable: string | undefined;
@@ -480,21 +480,50 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         // Build reference table with sequential [ref:N] markers — model copies small numbers,
         // not UUIDs, which eliminates citation mix-ups. Post-processing below maps back to UUIDs.
         const refLines: string[] = [];
+        const slotValueStr = (v: unknown): string =>
+          typeof v === 'string' ? v : JSON.stringify(v ?? '');
         for (const slot of slots) {
-          if (slot.type !== 'mapping') continue;
           const items = currentSlotState[slot.name]?.items ?? [];
           if (items.length === 0) continue;
-          refLines.push(`Slot "${slot.name}":`);
-          for (const item of items) {
-            if (!item.key) continue;
-            const row = slotItemRows.find((r) => r.slot_id === slot.id && r.key === item.key);
+          if (slot.type === 'mapping') {
+            refLines.push(`Slot "${slot.name}":`);
+            for (const item of items) {
+              if (!item.key) continue;
+              const row = slotItemRows.find((r) => r.slot_id === slot.id && r.key === item.key);
+              const qId = row ? quoteIdBySlotItemId.get(row.id) : undefined;
+              if (qId) {
+                const refNum = orderedRefEntries.length + 1;
+                orderedRefEntries.push({ quoteId: qId });
+                refLines.push(`  ${item.key} → [ref:${refNum}]`);
+              } else {
+                refLines.push(`  ${item.key} → (no citation)`);
+              }
+            }
+          } else if (slot.type === 'scalar') {
+            // One item per scalar slot — cite it if a quote exists.
+            const row = slotItemRows.find((r) => r.slot_id === slot.id);
             const qId = row ? quoteIdBySlotItemId.get(row.id) : undefined;
             if (qId) {
               const refNum = orderedRefEntries.length + 1;
               orderedRefEntries.push({ quoteId: qId });
-              refLines.push(`  ${item.key} → [ref:${refNum}]`);
-            } else {
-              refLines.push(`  ${item.key} → (no citation)`);
+              refLines.push(`Slot "${slot.name}": ${slotValueStr(items[0]?.value)} → [ref:${refNum}]`);
+            }
+          } else if (slot.type === 'list') {
+            // One row per list item — match by value_json for correct ordering.
+            refLines.push(`Slot "${slot.name}":`);
+            for (const item of items) {
+              const itemStr = slotValueStr(item.value);
+              const row = slotItemRows.find(
+                (r) => r.slot_id === slot.id && slotValueStr(r.value_json) === itemStr,
+              );
+              const qId = row ? quoteIdBySlotItemId.get(row.id) : undefined;
+              if (qId) {
+                const refNum = orderedRefEntries.length + 1;
+                orderedRefEntries.push({ quoteId: qId });
+                refLines.push(`  - ${itemStr} → [ref:${refNum}]`);
+              } else {
+                refLines.push(`  - ${itemStr} → (no citation)`);
+              }
             }
           }
         }

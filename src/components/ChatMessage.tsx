@@ -266,7 +266,14 @@ export const ChatMessage = ({
                     </Tooltip>
                   )}
                 </div>
-                <CopyMessageButton message={followUp} className="h-8 w-8 shrink-0 opacity-70 hover:opacity-100" />
+                <CopyMessageButton
+                  message={followUp}
+                  phases={[
+                    ...(tp && (tp.slots?.length || tp.steps?.length) ? [tp] : []),
+                    ...(followUp.thoughtProcess ? [followUp.thoughtProcess] : []),
+                  ]}
+                  className="h-8 w-8 shrink-0 opacity-70 hover:opacity-100"
+                />
               </div>
               <div className="space-y-2">
                 <div className="prose prose-invert prose-sm max-w-none">

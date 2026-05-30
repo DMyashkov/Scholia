@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Brain, CheckCircle2, AlertCircle, Info, Sear
 import type {
   SlotFillSummaryRow,
   SlotSnapshotEntry,
+  StepClaim,
   ThoughtProcess,
   ThoughtProcessSlot,
   ThoughtProcessSubquery,
@@ -270,13 +271,32 @@ function SlotFillSummaryTable({ rows }: { rows: SlotFillSummaryRow[] }) {
   );
 }
 
+function buildClaimSnippetLookup(claims: StepClaim[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const c of claims) {
+    if (!c.cited_snippet) continue;
+    const valStr = c.value == null ? '' : typeof c.value === 'string' ? c.value : JSON.stringify(c.value);
+    const key = `${c.slot}\0${c.key ?? ''}\0${valStr}`;
+    if (!map.has(key)) map.set(key, c.cited_snippet);
+  }
+  return map;
+}
+
+function claimSnippet(lookup: Map<string, string>, slotName: string, value: unknown, key?: string | null): string | undefined {
+  const valStr = value == null ? '' : typeof value === 'string' ? value : JSON.stringify(value);
+  return lookup.get(`${slotName}\0${key ?? ''}\0${valStr}`);
+}
+
 function SlotSnapshotBlock({
   snapshot,
   slots = [],
+  claims = [],
 }: {
   snapshot: Record<string, SlotSnapshotEntry>;
   slots?: ThoughtProcessSlot[];
+  claims?: StepClaim[];
 }) {
+  const snippetLookup = buildClaimSnippetLookup(claims);
   const [open, setOpen] = useState(false);
   const entries = Object.entries(snapshot);
   if (entries.length === 0) return null;
@@ -299,24 +319,43 @@ function SlotSnapshotBlock({
               <span className="text-[10px] font-medium tabular-nums text-primary/90">{fillLabel}</span>
             </p>
             {entry.type === 'scalar' && (
-              <p className="text-muted-foreground pl-2 border-l-2 border-border/60">
+              <div className="pl-2 border-l-2 border-border/60 text-muted-foreground">
                 {entry.items.length === 0 ? (
                   <span className="italic">empty</span>
-                ) : (
-                  formatSlotValue(entry.items[0]?.value)
-                )}
-              </p>
+                ) : (() => {
+                  const item = entry.items[0];
+                  const snippet = claimSnippet(snippetLookup, name, item?.value);
+                  return (
+                    <div className="space-y-0.5">
+                      <span>{formatSlotValue(item?.value)}</span>
+                      {snippet && (
+                        <p className="text-[10px] text-muted-foreground/70 italic leading-snug border-l border-border/40 pl-1.5 ml-0.5">
+                          &ldquo;{snippet.length > 120 ? snippet.slice(0, 120) + '…' : snippet}&rdquo;
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
             )}
             {entry.type === 'list' && (
-              <ul className="pl-2 border-l-2 border-border/60 space-y-0.5 text-muted-foreground">
+              <ul className="pl-2 border-l-2 border-border/60 space-y-1 text-muted-foreground">
                 {entry.items.length === 0 ? (
                   <li className="italic">no items</li>
                 ) : (
-                  entry.items.map((item, i) => (
-                    <li key={i} className="leading-snug">
-                      {formatSlotValue(item.value)}
-                    </li>
-                  ))
+                  entry.items.map((item, i) => {
+                    const snippet = claimSnippet(snippetLookup, name, item.value);
+                    return (
+                      <li key={i} className="leading-snug space-y-0.5">
+                        <span>{formatSlotValue(item.value)}</span>
+                        {snippet && (
+                          <p className="text-[10px] text-muted-foreground/70 italic leading-snug border-l border-border/40 pl-1.5">
+                            &ldquo;{snippet.length > 120 ? snippet.slice(0, 120) + '…' : snippet}&rdquo;
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })
                 )}
               </ul>
             )}
@@ -339,9 +378,19 @@ function SlotSnapshotBlock({
                           <span className="text-foreground/75">{key}:</span>
                         </div>
                         <ul className="pl-4 list-disc space-y-0.5">
-                          {values.map((v, i) => (
-                            <li key={i}>{formatSlotValue(v)}</li>
-                          ))}
+                          {values.map((v, i) => {
+                            const snippet = claimSnippet(snippetLookup, name, v, key);
+                            return (
+                              <li key={i} className="space-y-0.5">
+                                <span>{formatSlotValue(v)}</span>
+                                {snippet && (
+                                  <p className="text-[10px] text-muted-foreground/70 italic leading-snug border-l border-border/40 pl-1.5">
+                                    &ldquo;{snippet.length > 120 ? snippet.slice(0, 120) + '…' : snippet}&rdquo;
+                                  </p>
+                                )}
+                              </li>
+                            );
+                          })}
                         </ul>
                       </div>
                     ));
@@ -698,7 +747,7 @@ function PhaseContent({
                       <DroppedSubqueriesBlock dropped={step.droppedSubqueries} />
                     )}
                     {step.slotSnapshot && Object.keys(step.slotSnapshot).length > 0 && (
-                      <SlotSnapshotBlock snapshot={step.slotSnapshot} slots={tp.slots ?? []} />
+                      <SlotSnapshotBlock snapshot={step.slotSnapshot} slots={tp.slots ?? []} claims={step.claims ?? []} />
                     )}
                     {step.nextAction && (
                       <div className="pt-1.5">

@@ -53,6 +53,14 @@ export interface SlotSnapshotEntry {
   items: { key?: string | null; value: unknown }[];
 }
 
+export interface StepClaim {
+  slot: string;
+  value: unknown;
+  key?: string;
+  cited_snippet?: string;
+  chunkIds?: string[];
+}
+
 export interface ThoughtProcess {
   slots?: ThoughtProcessSlot[];
   slotFillSummary?: SlotFillSummaryRow[];
@@ -64,7 +72,7 @@ export interface ThoughtProcess {
     subqueries?: ThoughtProcessSubquery[];
     chunksPerSubquery?: number[];
     quotesFound?: number;
-    claims?: unknown[];
+    claims?: StepClaim[];
     completeness?: number;
     fillStatusBySlot?: Record<string, string>;
     statements?: string[];

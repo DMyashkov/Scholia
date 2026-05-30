@@ -199,6 +199,7 @@ export function buildThoughtProcessSection(tp: ThoughtProcess | null | undefined
 export function buildMessageCopyText(
   message: Pick<Message, 'content' | 'quotes' | 'thoughtProcess'>,
   format: CopyFormat,
+  phases?: ThoughtProcess[],
 ): string {
   const quotes = message.quotes ?? [];
   const base =
@@ -208,9 +209,24 @@ export function buildMessageCopyText(
 
   if (format !== 'debug') return base;
 
-  const reasoning = buildThoughtProcessSection(message.thoughtProcess);
-  if (!reasoning) {
+  const effectivePhases = phases && phases.length > 0 ? phases : [message.thoughtProcess];
+  const hasAny = effectivePhases.some(Boolean);
+  if (!hasAny) {
     return `${base}\n\n---\n\n## Reasoning (debug)\n\n(No thought process stored for this message.)`;
   }
-  return base + reasoning;
+
+  const reasoningParts = effectivePhases
+    .filter(Boolean)
+    .map((tp, i) => {
+      const section = buildThoughtProcessSection(tp);
+      if (!section) return null;
+      if (effectivePhases.filter(Boolean).length === 1) return section;
+      return `\n\n## Phase ${i + 1}${section}`;
+    })
+    .filter(Boolean);
+
+  if (reasoningParts.length === 0) {
+    return `${base}\n\n---\n\n## Reasoning (debug)\n\n(No thought process stored for this message.)`;
+  }
+  return base + reasoningParts.join('');
 }

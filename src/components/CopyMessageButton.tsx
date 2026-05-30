@@ -7,7 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Message } from '@/types/chat';
+import { Message, ThoughtProcess } from '@/types/chat';
 import { useCopyFormat } from '@/hooks/useCopyFormat';
 import { buildMessageCopyText, type CopyFormat } from '@/lib/copyMessageText';
 
@@ -16,9 +16,10 @@ const COPIED_DURATION_MS = 2000;
 interface CopyMessageButtonProps {
   message: Message;
   className?: string;
+  phases?: ThoughtProcess[];
 }
 
-export const CopyMessageButton = ({ message, className }: CopyMessageButtonProps) => {
+export const CopyMessageButton = ({ message, className, phases }: CopyMessageButtonProps) => {
   const [justCopied, setJustCopied] = useState(false);
   const { copyFormat, setCopyFormat } = useCopyFormat();
 
@@ -32,7 +33,7 @@ export const CopyMessageButton = ({ message, className }: CopyMessageButtonProps
 
   const doCopy = () => {
     const format: CopyFormat = isUser ? 'plain' : copyFormat;
-    const text = buildMessageCopyText(message, format);
+    const text = buildMessageCopyText(message, format, phases);
     navigator.clipboard.writeText(text).then(
       () => setJustCopied(true),
       () => {},

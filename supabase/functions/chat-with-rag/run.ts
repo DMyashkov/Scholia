@@ -1110,11 +1110,12 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       }
       return lines.length > 0 ? lines.join('\n') : undefined;
     })();
+    const allSlotsFinished = slots.every((s) => s.finished_querying);
     const topSuggestedPages: SuggestedPage[] | null =
-      dynamicMode && sourceIds.length > 0
+      dynamicMode && sourceIds.length > 0 && !allSlotsFinished
         ? await getTopSuggestedPages(supabase, openaiKey, sourceIds, userMsg, retrieveSubqueries.map((s) => s.query), suggestedPageCandidates)
         : null;
-    log('route-call', { iteration, topSuggestedCount: topSuggestedPages?.length ?? 0 });
+    log('route-call', { iteration, topSuggestedCount: topSuggestedPages?.length ?? 0, allSlotsFinished });
     const routeStart = Date.now();
     const routeResult = await callRoute(
       openaiKey,

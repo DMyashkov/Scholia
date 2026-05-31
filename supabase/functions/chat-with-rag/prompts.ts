@@ -24,10 +24,10 @@ Output JSON only with this shape:
 - slots: array of slot objects. Fields: name, type, description?, dependsOn?, target_item_count? (list), items_per_key? (mapping only).
   - type is one of: "scalar" (one value), "list" (set of items), "mapping" (key→value: each key is one value from dependsOn, each value is what you extract for that key)
 
-  - dependsOn: optional name of another slot whose filled values this slot needs (keys for mapping, or context for list/scalar). Any type may depend on any other type when the question requires it. Use dependsOn only when retrieval/extraction cannot proceed meaningfully without the parent slot’s values.
+  - dependsOn: optional name of another slot whose filled values this slot needs (keys for mapping, or context for list/scalar). Any type may depend on any other type when the question requires it. Use dependsOn only when retrieval/extraction cannot proceed meaningfully without the parent slot's values.
 
   - description: one short sentence for what this slot represents (helps extraction and UI)
-  
+
   - target_item_count: for list slots only. Desired number of distinct items to find when the user specifies a count; set to 0 if not specified. Omit or 0 for scalar/mapping.
 
   - items_per_key: (mapping only) Values per key when the user asks for multiple values per key; use 0 for key-coverage mode (at least one value per dependency key).
@@ -52,7 +52,7 @@ Typical shapes (use the minimum that fits the question):
 
 - Subqueries for step 1:
   - Slots with no dependsOn: 1–2 BROAD discovery queries appropriate to the slot description.
-  - Slots with dependsOn: exactly one exploratory BROAD query per such slot — corpus-level discovery for that slot’s topic, without embedding parent key values, without per-key queries, without __map__ (matrix comes in later extract steps).
+  - Slots with dependsOn: exactly one exploratory BROAD query per such slot — corpus-level discovery for that slot's topic, without embedding parent key values, without per-key queries, without __map__ (matrix comes in later extract steps).
   - IMPORTANT: subqueries are semantic similarity queries against indexed document chunks — NOT web searches. Do not use site: operators, boolean syntax, or any other web-search notation. Write natural-language phrases as a human would type them in a document search field.
 - Later steps use the extract phase; slot definitions here stay the same.
 - Descriptions should be concrete. For mapping slots, say what the key is and what the value is.
@@ -63,7 +63,7 @@ export const EXTRACT_SYSTEM = `You extract atomic claims from the provided evide
 Output JSON only:
 {
   "claims": [
-    { "slot": "slot_name", "value": <atomic value: string or number>, "key": "<REQUIRED for mapping slots — must exactly match a key in the dependency slot’s current state; omit for list/scalar>", "confidence": 0.0-1.0, "cited_snippet": "<1-3 verbatim sentences from the cited chunk that directly state this value>", "chunkIds": [3] }
+    { "slot": "slot_name", "value": <atomic value: string or number>, "key": "<REQUIRED for mapping slots — must exactly match a key in the dependency slot's current state; omit for list/scalar>", "confidence": 0.0-1.0, "cited_snippet": "<1-3 verbatim sentences from the cited chunk that directly state this value>", "chunkIds": [3] }
   ]
 }
 
@@ -72,12 +72,12 @@ Rules:
 - Claims: each claim must cite at least one chunkId. Use the integer index shown in parentheses next to each evidence block, e.g. "chunkIds": [3]. Do NOT copy UUIDs; the backend maps indices to chunk IDs.
 - Slot values must reflect what the cited chunks directly state. You may rephrase for conciseness (e.g. extract a number or name from prose) but must not infer, generalize, or add context that is not explicitly present in the cited chunk text.
 - Do NOT invent facts, conclusions, or "standard practice" generalizations that are not supported by the cited chunks for that slot/key.
-- Do NOT cite a chunk unless it actually discusses the entity (mapping key) or fact you are claiming. For mapping attribution: the chunk’s page URL/title is the primary signal — a chunk whose URL contains the entity name is authoritative even if retrieved_by lists other slots. The retrieved_by list is retrieval metadata, not attribution ground truth. When a chunk was retrieved_by many queries, treat it as a broad match and rely on the page URL/title + snippet content to decide which key it supports.
+- Do NOT cite a chunk unless it actually discusses the entity (mapping key) or fact you are claiming. For mapping attribution: the chunk's page URL/title is the primary signal — a chunk whose URL contains the entity name is authoritative even if retrieved_by lists other slots. The retrieved_by list is retrieval metadata, not attribution ground truth. When a chunk was retrieved_by many queries, treat it as a broad match and rely on the page URL/title + snippet content to decide which key it supports.
 Scalar: one value, no key. List: one claim per distinct NEW item only—never one comma-separated claim bundling many entities; emit separate list claims per entity. Never re-emit a value already in Current slot state — this applies to all slot types: if a list item, mapping key→value, or scalar value is already present in Current slot state, do NOT emit a claim for it again. Emitting duplicates wastes budget and is not allowed.
-List target_item_count is a minimum, not a cap: if the list already has at least that many items and this step’s chunks name another distinct entity not in state, still emit a list claim for it. Do not skip new list items just because count >= target.
-Cross-slot discovery (REQUIRED): if a chunk in this step names an entity that belongs to a list slot but is NOT yet in that slot’s current state, you MUST emit a list claim for it in addition to any mapping/scalar claim. Skipping this causes the mapping claim to be silently dropped as "key not in dependency state". Use one canonical spelling per name (trim; normalize spaces around parentheses).
+List target_item_count is a minimum, not a cap: if the list already has at least that many items and this step's chunks name another distinct entity not in state, still emit a list claim for it. Do not skip new list items just because count >= target.
+Cross-slot discovery (REQUIRED): if a chunk in this step names an entity that belongs to a list slot but is NOT yet in that slot's current state, you MUST emit a list claim for it in addition to any mapping/scalar claim. Skipping this causes the mapping claim to be silently dropped as "key not in dependency state". Use one canonical spelling per name (trim; normalize spaces around parentheses).
 List proper-noun filtering: when a chunk line names a proper-noun entity followed by a generic category label (e.g. "АГАТА, семена картофи"), emit only the proper-noun entity (АГАТА); never emit the generic category label as a separate list item.
-Mapping: the "key" field is REQUIRED for every mapping claim — omitting it causes the claim to be silently dropped. The key must exactly match (same spelling) an entity already listed in the dependency slot’s current state. Do not invent keys not in the state. Do not embed the key name inside "value"; put it in "key".
+Mapping: the "key" field is REQUIRED for every mapping claim — omitting it causes the claim to be silently dropped. The key must exactly match (same spelling) an entity already listed in the dependency slot's current state. Do not invent keys not in the state. Do not embed the key name inside "value"; put it in "key".
 Mapping attribution: for every mapping claim, the chunk you cite must explicitly name the key entity **in the same sentence or table row** as the value you are extracting. If the value and the key entity appear in different sentences or rows describing different entities, do not combine them into a single claim.
 - Language: Write any text in the corpus language.`;
 
@@ -106,7 +106,7 @@ Output JSON only:
 Rules:
 - "answer": all slots that matter are filled / at target, or retrieval has clearly stagnated. Backend runs the final-answer step; do not write answer text here.
 - "retrieve": more queries are needed per the query guidance. Always include subqueries when choosing retrieve.${expandCorpusRule}
-- "clarify": only when the question itself is ambiguous, not when evidence is missing.`;
+- "clarify": only when the question itself is ambiguous, not when evidence is missing.
 
 Subquery rules:
 - Omit subqueries for slots that have finished querying (listed below) or scalar slots already filled.

@@ -113,10 +113,10 @@ function buildSlotFillSummary(
   const byId = slotsById ?? new Map(slots.map((s) => [s.id, s]));
   return slots.map((slot) => {
     const filled = slotItemCountBySlotId.get(slot.id) ?? 0;
-    if (slot.type === 'scalar') {
-      return { name: slot.name, type: slot.type, target: 1, filled: Math.min(filled, 1) };
-    }
     const eff = getEffectiveTarget(slot, slotItemCountBySlotId, byId);
+    if (slot.type === 'scalar') {
+      return { name: slot.name, type: slot.type, target: eff, filled: Math.min(filled, eff) };
+    }
     const planTarget = slot.target_item_count ?? 0;
     const target = eff > 0 ? eff : (slot.type === 'list' && planTarget > 0 ? planTarget : null);
     return { name: slot.name, type: slot.type, target, filled };
@@ -1495,8 +1495,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       sourceById,
     });
 
-    const isFirstMessage = !appendId && (await getLastMessages(supabase, convId)).length <= 1;
-    const suggestedTitle = await suggestConversationTitle(openaiKey, supabase, convId, userMsg, isFirstMessage);
+    const isFirstMessage = !appendId && (await getLastMessages(supabase, convId)).length <= 2;
+    const suggestedTitle = await suggestConversationTitle(openaiKey, supabase, convId, userMsg, isFirstMessage, finalAnswer);
 
     log('answer-done', { iteration, completeness: thoughtProcess.completeness });
     await emit({

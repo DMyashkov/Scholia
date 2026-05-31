@@ -150,11 +150,18 @@ var textSplitter = new RecursiveCharacterTextSplitter({
 var DISCOVERED_PROGRESS_INTERVAL_MS = 1200;
 var DEFAULT_LINK_SNIPPET = "Link from page";
 var OPENAI_EMBEDDINGS_URL = "https://api.openai.com/v1/embeddings";
+function buildPagePrefix(title, url) {
+  const parts = [];
+  if (title) parts.push(title);
+  if (url) parts.push(url);
+  return parts.length > 0 ? `Page: ${parts.join(" | ")}
+` : "";
+}
 async function embedAndInsertChunks(chunkSpecs, apiKey, options) {
   let inserted = 0;
   for (let i = 0; i < chunkSpecs.length; i += EMBED_BATCH_SIZE) {
     const batchSpecs = chunkSpecs.slice(i, i + EMBED_BATCH_SIZE);
-    const texts = batchSpecs.map((c) => c.content);
+    const texts = batchSpecs.map((c) => c.embed_text ?? c.content);
     const embeddings = await embedBatch(apiKey, texts);
     if (embeddings.length !== batchSpecs.length) {
       break;
@@ -209,11 +216,13 @@ async function buildChunkSpecsFromPages(pages) {
   for (const page of pages) {
     const text = (page.content || "").trim();
     if (!text) continue;
+    const prefix = buildPagePrefix(page.title ?? void 0, page.url ?? void 0);
     const pageChunks = await textSplitter.splitText(text);
     for (const content of pageChunks) {
       chunkSpecs.push({
         page_id: page.id,
         content,
+        ...prefix ? { embed_text: prefix + content } : {},
         start_index: null,
         end_index: null,
         owner_id: page.owner_id
@@ -222,13 +231,15 @@ async function buildChunkSpecsFromPages(pages) {
   }
   return chunkSpecs;
 }
-async function buildChunkSpecsFromSinglePage(pageId, content, ownerId) {
+async function buildChunkSpecsFromSinglePage(pageId, content, ownerId, title, url) {
   const text = (content || "").trim();
   if (!text) return [];
+  const prefix = buildPagePrefix(title, url);
   const pageChunks = await textSplitter.splitText(text);
   return pageChunks.map((c) => ({
     page_id: pageId,
     content: c,
+    ...prefix ? { embed_text: prefix + c } : {},
     start_index: null,
     end_index: null,
     owner_id: ownerId
@@ -239,7 +250,7 @@ async function indexSourceForRag(sourceId, crawlJobId, conversationId) {
   if (!apiKey) {
     return { chunksCreated: 0 };
   }
-  const { data: pages, error: pagesError } = await supabase.from("pages").select("id, content, owner_id").eq("source_id", sourceId).eq("status", "indexed").not("content", "is", null);
+  const { data: pages, error: pagesError } = await supabase.from("pages").select("id, content, owner_id, title, url").eq("source_id", sourceId).eq("status", "indexed").not("content", "is", null);
   if (pagesError) {
     return { chunksCreated: 0 };
   }
@@ -255,30 +266,17 @@ async function indexSourceForRag(sourceId, crawlJobId, conversationId) {
     logLabel: `(source ${sourceId.slice(0, 8)})`
   });
 }
-async function indexSinglePageForRag(pageId, content, ownerId, crawlJobId) {
+async function indexSinglePageForRag(pageId, content, ownerId, crawlJobId, title, url) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return { chunksCreated: 0 };
   }
-  const chunkSpecs = await buildChunkSpecsFromSinglePage(pageId, content, ownerId);
+  const chunkSpecs = await buildChunkSpecsFromSinglePage(pageId, content, ownerId, title, url);
   return indexChunkSpecsForRag(chunkSpecs, apiKey, {
     crawlJobId,
     addPageStyle: true,
     pageCount: 1
   });
-}
-async function countDiscoveredLinksToEmbedForPage(pageId) {
-  const indexedUrls = await getIndexedPageUrlsForPage(pageId);
-  const { data: edgeRows } = await supabase.from("page_edges").select("id, to_url").eq("from_page_id", pageId);
-  const edgeIds = (edgeRows ?? []).map((r) => r.id);
-  if (edgeIds.length === 0) return 0;
-  const { data: links, error: fetchError } = await supabase.from("encoded_discovered").select("id, page_edge_id").in("page_edge_id", edgeIds).is("embedding", null);
-  if (fetchError || !links?.length) return 0;
-  const edgeIdToUrl = new Map((edgeRows ?? []).map((r) => [r.id, r.to_url]));
-  return links.filter((l) => {
-    const url = edgeIdToUrl.get(l.page_edge_id) || "";
-    return !indexedUrls.has(normalizeUrlForCompare(url));
-  }).length;
 }
 async function embedDiscoveredLinksForPage(conversationId, pageId, apiKey, crawlJobId, ownerId) {
   const indexedUrls = await getIndexedPageUrlsForPage(pageId);
@@ -1276,13 +1274,7 @@ async function processAddPageJob(job) {
     } else {
       console.log("[add-page] no newLinks to insert", { linksUrlOnly: linksUrlOnly.length, linksWithContext: linksWithContext.length });
     }
-    const discoveredToEmbed = await countDiscoveredLinksToEmbedForPage(newPage.id);
-    await updateCrawlJob(jobId, {
-      status: "encoding",
-      encoding_discovered_total: discoveredToEmbed,
-      encoding_discovered_done: 0
-    });
-    await indexSinglePageForRag(newPage.id, content, ownerId, jobId);
+    await indexSinglePageForRag(newPage.id, content, ownerId, jobId, title, normalizedUrl);
     const apiKey = process.env.OPENAI_API_KEY;
     const conversationId = source.conversation_id;
     if (!apiKey) {

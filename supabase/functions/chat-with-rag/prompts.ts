@@ -63,7 +63,7 @@ export const EXTRACT_SYSTEM = `You extract atomic claims from the provided evide
 Output JSON only:
 {
   "claims": [
-    { "slot": "slot_name", "value": <atomic value: string or number>, "key": "<REQUIRED for mapping slots — must exactly match a key in the dependency slot's current state; omit for list/scalar>", "confidence": 0.0-1.0, "cited_snippet": "<1-3 verbatim sentences from the cited chunk that directly state this value>", "chunkIds": ["chunk-uuid-1"] }
+    { "slot": "slot_name", "value": <atomic value: string or number>, "key": "<REQUIRED for mapping slots — must exactly match a key in the dependency slot's current state; omit for list/scalar>", "confidence": 0.0-1.0, "cited_snippet": "<1-3 verbatim sentences from the cited chunk that directly state this value>", "chunkIds": [3] }
   ],
   "next_action": "retrieve" | "expand_corpus" | "clarify" | "answer",
   "why": "short reason",
@@ -75,11 +75,11 @@ Output JSON only:
 
 Rules:
 - Only fill slots listed under "Slots to fill". Do not treat other topics as required even if they appear on the same website pages.
-- Claims: each claim must cite at least one chunkId from the Evidence list (prefer chunk indices 1..N or UUIDs in chunkIds).
+- Claims: each claim must cite at least one chunkId. Use the integer index shown in parentheses next to each evidence block, e.g. "chunkIds": [3]. Do NOT copy UUIDs; the backend maps indices to chunk IDs.
 - Slot values must reflect what the cited chunks directly state. You may rephrase for conciseness (e.g. extract a number or name from prose) but must not infer, generalize, or add context that is not explicitly present in the cited chunk text.
 - Do NOT invent facts, conclusions, or "standard practice" generalizations that are not supported by the cited chunks for that slot/key.
-- Do NOT cite a chunk unless it actually discusses the entity (mapping key) or fact you are claiming. Use each chunk's page URL and retrieved_by subquery/slot to judge attribution: for mapping keys, prefer chunks retrieved by that key's targeted query or whose page URL/title clearly matches the entity.
-Scalar: one value, no key. List: one claim per distinct NEW item only—never one comma-separated claim bundling many entities; emit separate list claims per entity. Never re-emit a value already in Current slot state (same entity with different spacing or punctuation counts as duplicate). 
+- Do NOT cite a chunk unless it actually discusses the entity (mapping key) or fact you are claiming. For mapping attribution: the chunk's page URL/title is the primary signal — a chunk whose URL contains the entity name is authoritative even if retrieved_by lists other slots. The retrieved_by list is retrieval metadata, not attribution ground truth. When a chunk was retrieved_by many queries, treat it as a broad match and rely on the page URL/title + snippet content to decide which key it supports.
+Scalar: one value, no key. List: one claim per distinct NEW item only—never one comma-separated claim bundling many entities; emit separate list claims per entity. Never re-emit a value already in Current slot state — this applies to all slot types: if a list item, mapping key→value, or scalar value is already present in Current slot state, do NOT emit a claim for it again. Emitting duplicates wastes budget and is not allowed.
 List target_item_count is a minimum, not a cap: if the list already has at least that many items and this step's chunks name another distinct entity not in state, still emit a list claim for it. Do not skip new list items just because count >= target.
 Cross-slot discovery (REQUIRED): if a chunk in this step names an entity that belongs to a list slot but is NOT yet in that slot's current state, you MUST emit a list claim for it in addition to any mapping/scalar claim. Skipping this causes the mapping claim to be silently dropped as "key not in dependency state". Use one canonical spelling per name (trim; normalize spaces around parentheses).
 List proper-noun filtering: when a chunk line names a proper-noun entity followed by a generic category label (e.g. "АГАТА, семена картофи"), emit only the proper-noun entity (АГАТА); never emit the generic category label as a separate list item.

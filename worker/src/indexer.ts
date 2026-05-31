@@ -23,10 +23,18 @@ const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings';
 type ChunkSpec = {
   page_id: string;
   content: string;
+  embed_text?: string; // text sent to the embedding API; stored content is unchanged
   start_index: number | null;
   end_index: number | null;
   owner_id: string;
 };
+
+function buildPagePrefix(title: string | undefined, url: string | undefined): string {
+  const parts: string[] = [];
+  if (title) parts.push(title);
+  if (url) parts.push(url);
+  return parts.length > 0 ? `Page: ${parts.join(' | ')}\n` : '';
+}
 
 
 async function embedAndInsertChunks(
@@ -37,7 +45,7 @@ async function embedAndInsertChunks(
   let inserted = 0;
   for (let i = 0; i < chunkSpecs.length; i += EMBED_BATCH_SIZE) {
     const batchSpecs = chunkSpecs.slice(i, i + EMBED_BATCH_SIZE);
-    const texts = batchSpecs.map((c) => c.content);
+    const texts = batchSpecs.map((c) => c.embed_text ?? c.content);
     const embeddings = await embedBatch(apiKey, texts);
     if (embeddings.length !== batchSpecs.length) {
       break;
@@ -117,17 +125,19 @@ async function indexChunkSpecsForRag(
 }
 
 async function buildChunkSpecsFromPages(
-  pages: { id: string; content: string | null; owner_id: string }[]
+  pages: { id: string; content: string | null; owner_id: string; title?: string | null; url?: string | null }[]
 ): Promise<ChunkSpec[]> {
   const chunkSpecs: ChunkSpec[] = [];
   for (const page of pages) {
     const text = (page.content || '').trim();
     if (!text) continue;
+    const prefix = buildPagePrefix(page.title ?? undefined, page.url ?? undefined);
     const pageChunks = await textSplitter.splitText(text);
     for (const content of pageChunks) {
       chunkSpecs.push({
         page_id: page.id,
         content,
+        ...(prefix ? { embed_text: prefix + content } : {}),
         start_index: null,
         end_index: null,
         owner_id: page.owner_id,
@@ -140,14 +150,18 @@ async function buildChunkSpecsFromPages(
 async function buildChunkSpecsFromSinglePage(
   pageId: string,
   content: string,
-  ownerId: string
+  ownerId: string,
+  title?: string,
+  url?: string,
 ): Promise<ChunkSpec[]> {
   const text = (content || '').trim();
   if (!text) return [];
+  const prefix = buildPagePrefix(title, url);
   const pageChunks = await textSplitter.splitText(text);
   return pageChunks.map((c) => ({
     page_id: pageId,
     content: c,
+    ...(prefix ? { embed_text: prefix + c } : {}),
     start_index: null as number | null,
     end_index: null as number | null,
     owner_id: ownerId,
@@ -165,7 +179,7 @@ export async function indexSourceForRag(
   }
   const { data: pages, error: pagesError } = await supabase
     .from('pages')
-    .select('id, content, owner_id')
+    .select('id, content, owner_id, title, url')
     .eq('source_id', sourceId)
     .eq('status', 'indexed')
     .not('content', 'is', null);
@@ -204,7 +218,7 @@ export async function indexConversationForRag(
 
   const { data: pages, error: pagesError } = await supabase
     .from('pages')
-    .select('id, content, owner_id')
+    .select('id, content, owner_id, title, url')
     .in('source_id', sourceIds)
     .eq('status', 'indexed')
     .not('content', 'is', null);
@@ -227,13 +241,15 @@ export async function indexSinglePageForRag(
   pageId: string,
   content: string,
   ownerId: string,
-  crawlJobId: string
+  crawlJobId: string,
+  title?: string,
+  url?: string,
 ): Promise<{ chunksCreated: number }> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return { chunksCreated: 0 };
   }
-  const chunkSpecs = await buildChunkSpecsFromSinglePage(pageId, content, ownerId);
+  const chunkSpecs = await buildChunkSpecsFromSinglePage(pageId, content, ownerId, title, url);
   return indexChunkSpecsForRag(chunkSpecs, apiKey, {
     crawlJobId,
     addPageStyle: true,

@@ -99,7 +99,7 @@ ${currentSlotStateJson || '{}'}
 ${guidanceBlock}
 ${previousAttemptsBlock}
 
-Evidence (each block: chunk id, page URL when known, retrieval subquery + slot; use chunk indices 1..N or UUIDs in chunkIds):
+Evidence (each block starts with "(evidence N)" — use N as the integer index in chunkIds; page URL/title is the primary attribution signal for mapping):
 ---
 ${quoteBlock}
 ---${dynamicBlock}${broadBlock}

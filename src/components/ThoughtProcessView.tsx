@@ -160,6 +160,7 @@ function formatTargetLabel(target: number | null, type: string): string {
 
 
 function targetPillLabelForSlot(slot: ThoughtProcessSlot): string | null {
+  if (slot.type === 'scalar') return 'target 1';
   if (slot.type === 'list') {
     const n = slot.targetItemCount ?? 0;
     return n > 0 ? `target ${n}` : 'open target';
@@ -173,6 +174,7 @@ function targetPillLabelForSlot(slot: ThoughtProcessSlot): string | null {
 
 
 function targetTooltipLineForSlot(slot: ThoughtProcessSlot): string | null {
+  if (slot.type === 'scalar') return 'Target: 1';
   if (slot.type === 'list') {
     const n = slot.targetItemCount ?? 0;
     return n > 0 ? `Target: ${n}` : 'Target: open (no fixed count)';
@@ -508,7 +510,7 @@ function PhaseContent({
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-muted/40 text-muted-foreground border border-border/50 max-w-full">
                   <span className="font-medium text-foreground/80 shrink-0">{s.name}</span>
                   <span className="text-[10px] opacity-80 shrink-0">· {s.type}</span>
-                  {s.type === 'list' && targetPill && (
+                  {(s.type === 'list' || s.type === 'scalar') && targetPill && (
                     <span className="text-[10px] shrink-0 text-primary/90 font-medium">{targetPill}</span>
                   )}
                   {s.dependsOn && (
@@ -675,8 +677,10 @@ function PhaseContent({
                     {step.fillStatusBySlot && Object.keys(step.fillStatusBySlot).length > 0 && tp.slots && (
                       <div className="flex flex-wrap gap-1.5 items-center pt-1">
                         {Object.entries(step.fillStatusBySlot).map(([slotName, status]) => {
-                          const filled = status === 'filled';
                           const slotMeta = tp.slots!.find((s) => s.name === slotName);
+                          const filled =
+                            status === 'filled' ||
+                            (slotMeta?.type === 'scalar' && status === 'partial');
                           const typeStr = slotMeta?.type ?? '';
                           const dependsOn = slotMeta?.dependsOn;
                           return (

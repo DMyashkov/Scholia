@@ -33,6 +33,7 @@ export function getEffectiveTarget(
   counts: Map<string, number>,
   slotsById?: Map<string, SlotDb>,
 ): number {
+  if (slot.type === 'scalar') return 1;
   if (slot.type === 'list') return slot.target_item_count ?? 0;
   if (slot.type === 'mapping' && slot.depends_on_slot_id) {
     const parentCount = counts.get(slot.depends_on_slot_id) ?? 0;

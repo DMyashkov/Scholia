@@ -132,15 +132,13 @@ export function formatEvidenceForPrompt(chunks: EvidenceChunk[]): string {
   const trimmed = trimEvidenceChunksForPrompt(chunks);
   return trimmed
     .map((q, i) => {
-      const lines: string[] = [`[${q.id}] (evidence ${i + 1})`];
-      if (q.pageUrl) lines.push(`page: ${q.pageUrl}`);
-      else if (q.pageTitle) lines.push(`page_title: ${q.pageTitle}`);
+      const lines: string[] = [`(evidence ${i + 1})`];
+      if (q.pageTitle) lines.push(`page_title: ${q.pageTitle}`);
+      if (q.pageUrl) lines.push(`page_url: ${q.pageUrl}`);
       const by = q.retrievedBy ?? [];
       if (by.length > 0) {
-        lines.push(
-          'retrieved_by:',
-          ...by.map((p) => `  - slot "${p.slot}": ${p.query}`),
-        );
+        const uniqueSlots = [...new Set(by.map((p) => p.slot))];
+        lines.push(`retrieved_by: ${uniqueSlots.map((s) => `"${s}"`).join(', ')}`);
       }
       lines.push(q.snippet);
       return lines.join('\n');

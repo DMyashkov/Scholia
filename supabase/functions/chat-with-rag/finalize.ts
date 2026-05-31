@@ -131,15 +131,17 @@ export async function suggestConversationTitle(
   conversationId: string,
   userMessage: string,
   isFirstMessage: boolean,
+  assistantAnswer?: string,
 ): Promise<string | undefined> {
   if (!isFirstMessage) return undefined;
+  const answerSnippet = assistantAnswer ? `\n\nAssistant: ${assistantAnswer.slice(0, 300)}` : '';
   const titleRes = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
     body: JSON.stringify({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'user', content: `Suggest a 3-6 word title for this conversation. Reply with only the title, no quotes.\n\nUser: ${userMessage.slice(0, 200)}` },
+        { role: 'user', content: `Suggest a 3-6 word title for this conversation. Reply with only the title, no quotes.\n\nUser: ${userMessage.slice(0, 200)}${answerSnippet}` },
       ],
       max_tokens: 20,
     }),

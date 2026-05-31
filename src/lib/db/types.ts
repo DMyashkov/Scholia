@@ -10,11 +10,12 @@ export interface Conversation {
 export interface MessageQuote {
   id: string;
   sourceId: string;
-  pageId: string;
+  pageId: string | null;
   snippet: string;
   pageTitle: string;
   pagePath: string;
   domain: string;
+  pageUrl?: string;
   contextBefore?: string;
   contextAfter?: string;
 }

@@ -28,7 +28,7 @@ export interface Source {
 export interface Quote {
   id: string;
   sourceId: string;
-  pageId: string;
+  pageId: string | null;
   snippet: string;
   pageTitle: string;
   pagePath: string;

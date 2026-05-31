@@ -12,8 +12,9 @@ interface CitedPagesProps {
 function getUniquePages(quotes: Quote[]): Quote[] {
   const seen = new Set<string>();
   return quotes.filter((q) => {
-    if (seen.has(q.pageId)) return false;
-    seen.add(q.pageId);
+    const key = q.pageId ?? q.pageUrl ?? q.snippet;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
@@ -30,7 +31,7 @@ export const CitedPages = ({ quotes, onQuoteClick }: CitedPagesProps) => {
       <div className="flex flex-wrap gap-1.5 min-w-0 flex-1">
         {pages.map((quote) => (
           <button
-            key={quote.pageId}
+            key={quote.pageId ?? quote.pageUrl ?? quote.snippet}
             onClick={() => onQuoteClick(quote)}
             className={cn(
               'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md max-w-full',

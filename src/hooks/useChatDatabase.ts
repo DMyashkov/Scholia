@@ -49,7 +49,8 @@ const dbConversationToUI = (db: DBConversation & { dynamic_mode?: boolean }, mes
 
 type DbQuoteRow = {
   id: string;
-  page_id: string;
+  page_id: string | null;
+  page_url?: string | null;
   snippet: string;
   page_title: string;
   page_path: string;
@@ -75,7 +76,8 @@ function sortQuotesByCitationOrder(quotes: DbQuoteRow[]): DbQuoteRow[] {
 const mapQuoteDbToUI = (q: DbQuoteRow): MessageQuote => ({
   id: q.id,
   sourceId: q.pages?.source_id ?? '',
-  pageId: q.page_id,
+  pageId: q.page_id ?? null,
+  pageUrl: q.page_url ?? undefined,
   snippet: q.snippet,
   pageTitle: q.page_title ?? '',
   pagePath: q.page_path ?? '',
@@ -587,6 +589,7 @@ export const useChatDatabase = () => {
         role: 'assistant',
         content: `__error__:${friendlyError}`,
         was_multi_step: false,
+        ...(liveThoughtProcess ? { thought_process: liveThoughtProcess as unknown as Record<string, unknown> } : {}),
       });
       queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
       setStreamingMessage('');

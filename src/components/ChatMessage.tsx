@@ -243,7 +243,7 @@ export const ChatMessage = ({
           )}
 
           {}
-          {!isUser && !isStreaming && !isErrorMessage && !followUp && tp && (tp.slots?.length || tp.steps?.length) ? (
+          {!isUser && !isStreaming && !followUp && tp && (tp.slots?.length || tp.steps?.length) ? (
             <ThoughtProcessView thoughtProcess={tp} suggestedPage={message.suggestedPage} isLive={false} defaultOpen={false} />
           ) : null}
 

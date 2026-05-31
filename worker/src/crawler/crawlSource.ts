@@ -7,7 +7,7 @@ import { MAX_LINKS_PER_PAGE_DYNAMIC, MAX_PAGES } from './constants';
 import { crawlPage } from './crawlPage';
 import { extractLinks, extractLinksWithContext } from './links';
 import { updateJobStatus } from './job';
-import { normalizeUrlForCrawl } from './urlUtils';
+import { normalizeUrlForCrawl, urlDedupKey } from './urlUtils';
 import { updateCrawlJob } from './job';
 
 export async function crawlSource(job: CrawlJob, source: Source): Promise<void> {
@@ -73,12 +73,12 @@ async function crawlSourceWithConversationId(
   if (convSourceIds.length > 0) {
     const { data: existingPages } = await supabase.from('pages').select('id, url').in('source_id', convSourceIds);
     (existingPages ?? []).forEach((p: { id: string; url: string }) => {
-      const norm = normalizeUrlForCrawl(p.url);
+      const norm = urlDedupKey(p.url);
       existingInConversation.add(norm);
       existingPageIdByUrl.set(norm, p.id);
     });
   }
-  const seedNorm = seedUrls[0] ? normalizeUrlForCrawl(seedUrls[0]) : '';
+  const seedNorm = seedUrls[0] ? urlDedupKey(seedUrls[0]) : '';
   const seedInSet = seedNorm && existingInConversation.has(seedNorm);
   const seedPageId = seedNorm ? existingPageIdByUrl.get(seedNorm) ?? null : null;
 
@@ -114,18 +114,19 @@ async function crawlSourceWithConversationId(
 
     const url = queue.shift()!;
 
-    const urlObj = new URL(url);
-    urlObj.hash = '';
-    urlObj.search = '';
-    if (urlObj.pathname === '/' || urlObj.pathname === '') {
-      urlObj.pathname = '/';
-    } else if (urlObj.pathname.endsWith('/')) {
-      urlObj.pathname = urlObj.pathname.slice(0, -1);
-    }
-    const normalizedUrl = urlObj.toString();
-    const urlNormForLookup = normalizeUrlForCrawl(normalizedUrl);
+    const normalizedUrl = normalizeUrlForCrawl(url);
+    const urlNormForLookup = urlDedupKey(normalizedUrl);
 
     if (robotsParser && !robotsParser.isAllowed(normalizedUrl, 'ScholiaCrawler')) {
+      const isSeedUrl = seedUrls.some((s) => urlDedupKey(s) === urlNormForLookup);
+      if (isSeedUrl) {
+        await updateCrawlJob(job.id, {
+          status: 'completed',
+          error_message: `This page is blocked by the site's robots.txt and cannot be crawled. The site owner has restricted automated access to this URL.`,
+          completed_at: new Date().toISOString(),
+        });
+        return;
+      }
       continue;
     }
 
@@ -141,7 +142,7 @@ async function crawlSourceWithConversationId(
       visited.add(normalizedUrl);
       if (inserted && page) {
         newPagesCount++;
-        const norm = normalizeUrlForCrawl(normalizedUrl);
+        const norm = urlDedupKey(normalizedUrl);
         existingInConversation.add(norm);
         existingPageIdByUrl.set(norm, page.id);
       }

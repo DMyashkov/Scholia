@@ -14,7 +14,7 @@ import {
   ENCODED_COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION,
 } from '@/lib/queryKeys';
 import { useQuery } from '@tanstack/react-query';
-import { Zap, Waves, Anchor } from 'lucide-react';
+import { Zap, Waves, Anchor, AlertTriangle } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
@@ -388,7 +388,18 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
     }, 0)
   );
   const activeDisplayName = activeSource ? getSourceDisplayLabel(activeSource) : null;
-  const activeDomain = activeSource?.domain; 
+  const activeDomain = activeSource?.domain;
+
+  const crawlWarnings = useMemo(() => {
+    const msgs: { sourceLabel: string; message: string }[] = [];
+    for (const source of displaySources) {
+      const job = crawlJobMap.get(source.id) as CrawlJob | undefined;
+      if (job?.error_message) {
+        msgs.push({ sourceLabel: getSourceDisplayLabel(source), message: job.error_message });
+      }
+    }
+    return msgs;
+  }, [displaySources, crawlJobMap]);
 
   if (!hasAnySources) return null;
 
@@ -487,8 +498,19 @@ export const SidebarCrawlPanel = ({ sources, className, conversationId, addingPa
             ) : null}
           </div>
 
+          {crawlWarnings.length > 0 && (
+            <div className="px-3 pb-2 space-y-1.5">
+              {crawlWarnings.map((w, i) => (
+                <div key={i} className="flex items-start gap-2 rounded-md bg-amber-500/10 border border-amber-500/30 px-2.5 py-2 text-[11px] text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span>{displaySources.length > 1 ? <strong>{w.sourceLabel}: </strong> : null}{w.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="px-3 pb-3">
-            <ForceGraph 
+            <ForceGraph
               pages={displayPagesForGraph}
               pagesIndexed={connectedPagesCount}
               domain={activeDomain}

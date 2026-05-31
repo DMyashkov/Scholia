@@ -536,7 +536,7 @@ import * as cheerio2 from "cheerio";
 import fetch3 from "node-fetch";
 
 // src/crawler/urlUtils.ts
-function normalizeUrlForCrawl(input) {
+function stripFragmentAndQuery(input) {
   let s = (input || "").trim();
   const hashIdx = s.indexOf("#");
   if (hashIdx >= 0) s = s.slice(0, hashIdx);
@@ -545,6 +545,21 @@ function normalizeUrlForCrawl(input) {
   s = s.trim();
   s = s.replace(/^(https?:\/\/)+/i, "");
   if (!/^https?:\/\//i.test(s)) s = "https://" + s;
+  return s;
+}
+function normalizeUrlForCrawl(input) {
+  const s = stripFragmentAndQuery(input);
+  try {
+    const u = new URL(s);
+    u.hash = "";
+    u.search = "";
+    return u.toString();
+  } catch {
+    return s;
+  }
+}
+function urlDedupKey(input) {
+  const s = stripFragmentAndQuery(input);
   try {
     const u = new URL(s);
     u.hash = "";
@@ -562,7 +577,7 @@ async function crawlPage(url, source, conversationId, existingInConversation) {
     throw new Error(`conversationId is required for page insertion`);
   }
   try {
-    const normalized = normalizeUrlForCrawl(url);
+    const normalized = urlDedupKey(url);
     const skip = existingInConversation?.has(normalized);
     if (skip) {
       const response2 = await fetch3(url, { headers: { "User-Agent": CRAWLER_USER_AGENT } });
@@ -852,12 +867,12 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
   if (convSourceIds.length > 0) {
     const { data: existingPages } = await supabase.from("pages").select("id, url").in("source_id", convSourceIds);
     (existingPages ?? []).forEach((p) => {
-      const norm = normalizeUrlForCrawl(p.url);
+      const norm = urlDedupKey(p.url);
       existingInConversation.add(norm);
       existingPageIdByUrl.set(norm, p.id);
     });
   }
-  const seedNorm = seedUrls[0] ? normalizeUrlForCrawl(seedUrls[0]) : "";
+  const seedNorm = seedUrls[0] ? urlDedupKey(seedUrls[0]) : "";
   const seedInSet = seedNorm && existingInConversation.has(seedNorm);
   const seedPageId = seedNorm ? existingPageIdByUrl.get(seedNorm) ?? null : null;
   let sourceTitleUpdated = false;
@@ -885,17 +900,18 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
       throw new Error(`Source ${source.id.slice(0, 8)} was deleted during crawl; stopping.`);
     }
     const url = queue.shift();
-    const urlObj = new URL(url);
-    urlObj.hash = "";
-    urlObj.search = "";
-    if (urlObj.pathname === "/" || urlObj.pathname === "") {
-      urlObj.pathname = "/";
-    } else if (urlObj.pathname.endsWith("/")) {
-      urlObj.pathname = urlObj.pathname.slice(0, -1);
-    }
-    const normalizedUrl = urlObj.toString();
-    const urlNormForLookup = normalizeUrlForCrawl(normalizedUrl);
+    const normalizedUrl = normalizeUrlForCrawl(url);
+    const urlNormForLookup = urlDedupKey(normalizedUrl);
     if (robotsParser && !robotsParser.isAllowed(normalizedUrl, "ScholiaCrawler")) {
+      const isSeedUrl = seedUrls.some((s) => urlDedupKey(s) === urlNormForLookup);
+      if (isSeedUrl) {
+        await updateCrawlJob(job.id, {
+          status: "completed",
+          error_message: `This page is blocked by the site's robots.txt and cannot be crawled. The site owner has restricted automated access to this URL.`,
+          completed_at: (/* @__PURE__ */ new Date()).toISOString()
+        });
+        return;
+      }
       continue;
     }
     try {
@@ -909,7 +925,7 @@ async function crawlSourceWithConversationId(job, source, conversationId) {
       visited.add(normalizedUrl);
       if (inserted && page) {
         newPagesCount++;
-        const norm = normalizeUrlForCrawl(normalizedUrl);
+        const norm = urlDedupKey(normalizedUrl);
         existingInConversation.add(norm);
         existingPageIdByUrl.set(norm, page.id);
       }
@@ -1092,6 +1108,7 @@ async function processCrawlJob(jobId) {
 // src/addPageProcessor.ts
 import * as cheerio4 from "cheerio";
 import fetch5 from "node-fetch";
+import RobotsParser2 from "robots-parser";
 var MAX_LINKS_PER_ADD_PAGE = 500;
 var ENCODED_SNIPPET_MAX_LENGTH = 500;
 var SEED_EDGES_LIMIT = 10;
@@ -1133,6 +1150,23 @@ async function processAddPageJob(job) {
       }
       await updateCrawlJob(jobId, { status: "completed" });
       return;
+    }
+    try {
+      const robotsUrl = new URL("/robots.txt", normalizedUrl).toString();
+      const robotsRes = await fetch5(robotsUrl);
+      if (robotsRes.ok) {
+        const robotsText = await robotsRes.text();
+        const parser = RobotsParser2(robotsUrl, robotsText);
+        if (!parser.isAllowed(normalizedUrl, "ScholiaCrawler")) {
+          await updateCrawlJob(jobId, {
+            status: "completed",
+            error_message: `This page is blocked by the site's robots.txt and cannot be crawled. The site owner has restricted automated access to this URL.`,
+            completed_at: (/* @__PURE__ */ new Date()).toISOString()
+          });
+          return;
+        }
+      }
+    } catch {
     }
     const res = await fetch5(normalizedUrl, {
       headers: { "User-Agent": CRAWLER_USER_AGENT }

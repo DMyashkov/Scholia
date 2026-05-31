@@ -10,7 +10,7 @@ import {
   MAX_PAGE_CONTENT_LENGTH,
   PAGE_TITLE_SUFFIX_REGEX,
 } from './constants';
-import { normalizeUrlForCrawl } from './urlUtils';
+import { urlDedupKey } from './urlUtils';
 
 export async function crawlPage(
   url: string,
@@ -23,7 +23,7 @@ export async function crawlPage(
   }
 
   try {
-    const normalized = normalizeUrlForCrawl(url);
+    const normalized = urlDedupKey(url);
     const skip = existingInConversation?.has(normalized);
     if (skip) {
       const response = await fetch(url, { headers: { 'User-Agent': CRAWLER_USER_AGENT } });

@@ -4,6 +4,7 @@
 
 import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
+import RobotsParser from 'robots-parser';
 import { supabase } from './db';
 import { indexSinglePageForRag, embedDiscoveredLinksForPage } from './indexer';
 import { extractLinks, extractLinksWithContext } from './crawler/index.js';
@@ -91,7 +92,25 @@ export async function processAddPageJob(job: {
       return;
     }
 
-    
+    try {
+      const robotsUrl = new URL('/robots.txt', normalizedUrl).toString();
+      const robotsRes = await fetch(robotsUrl);
+      if (robotsRes.ok) {
+        const robotsText = await robotsRes.text();
+        const parser = RobotsParser(robotsUrl, robotsText);
+        if (!parser.isAllowed(normalizedUrl, 'ScholiaCrawler')) {
+          await updateCrawlJob(jobId, {
+            status: 'completed',
+            error_message: `This page is blocked by the site's robots.txt and cannot be crawled. The site owner has restricted automated access to this URL.`,
+            completed_at: new Date().toISOString(),
+          });
+          return;
+        }
+      }
+    } catch {
+      // robots.txt fetch failed — proceed with crawl
+    }
+
     const res = await fetch(normalizedUrl, {
       headers: { 'User-Agent': CRAWLER_USER_AGENT },
     });

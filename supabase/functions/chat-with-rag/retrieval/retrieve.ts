@@ -1,8 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ChunkRow, EvidenceChunkProvenance } from './types.ts';
+import type { ChunkRow, EvidenceChunkProvenance } from '../types.ts';
 import { embedBatch } from './embed.ts';
-import { MATCH_CHUNKS_PER_QUERY, MATCH_CHUNKS_MERGED_CAP } from './config.ts';
-import { capWithFairAllocation } from './utils.ts';
+import { MATCH_CHUNKS_PER_QUERY, MATCH_CHUNKS_MERGED_CAP } from '../config.ts';
+import { capWithFairAllocation } from '../utils.ts';
 
 export type RetrieveSubquery = { slot: string; query: string };
 

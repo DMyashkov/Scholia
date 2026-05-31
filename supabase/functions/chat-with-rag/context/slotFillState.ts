@@ -1,6 +1,6 @@
-import type { SlotDb } from './types.ts';
-import { SLOT_RETRIEVAL_RULES } from './prompts.ts';
-import { normalizeSlotEntityString, slotValueDedupKey, splitListEntityValues } from './utils.ts';
+import type { SlotDb } from '../types.ts';
+import { SLOT_RETRIEVAL_RULES } from '../llm/prompts.ts';
+import { normalizeSlotEntityString, slotValueDedupKey, splitListEntityValues } from '../utils.ts';
 
 export type SlotItemRow = {
   slot_id: string;

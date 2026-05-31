@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ChunkRow, ChatResponse, QuotePayload } from './types.ts';
-import { OPENAI_CHAT_MODEL, LAST_MESSAGES_COUNT, fetchWithTimeout } from './config.ts';
+import type { ChunkRow, ChatResponse, QuotePayload } from '../types.ts';
+import { OPENAI_CHAT_MODEL, LAST_MESSAGES_COUNT, fetchWithTimeout } from '../config.ts';
 
 export async function getLastMessages(supabase: SupabaseClient, conversationId: string) {
   const { data } = await supabase

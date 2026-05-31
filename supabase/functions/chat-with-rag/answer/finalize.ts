@@ -1,15 +1,15 @@
 
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { fetchWithTimeout } from './config.ts';
-import type { PageRow, SourceRow } from './types.ts';
-import type { QuoteOut } from './types.ts';
+import { fetchWithTimeout } from '../config.ts';
+import type { PageRow, SourceRow } from '../types.ts';
+import type { QuoteOut } from '../types.ts';
 import {
   replaceCitationPlaceholders,
   attachQuotesToMessage,
   buildQuotesOut,
   updateQuoteContextFromPage,
-} from './quotes.ts';
+} from '../retrieval/quotes.ts';
 
 export interface SaveAnswerParams {
   supabase: SupabaseClient;

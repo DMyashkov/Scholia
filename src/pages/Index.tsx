@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sidebar } from '@/components/Sidebar';
-import { ChatArea } from '@/components/ChatArea';
-import { GuestModeRequiredModal } from '@/components/GuestModeRequiredModal';
+import { Sidebar } from '@/components/layout/Sidebar';
+import { ChatArea } from '@/components/chat/ChatArea';
+import { GuestModeRequiredModal } from '@/components/layout/GuestModeRequiredModal';
 import { useChatDatabase } from '@/hooks/useChatDatabase';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useSidebarWidth } from '@/hooks/useSidebarWidth';

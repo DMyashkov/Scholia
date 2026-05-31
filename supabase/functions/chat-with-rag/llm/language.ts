@@ -1,4 +1,4 @@
-import { normalizeSlotEntityString } from './utils.ts';
+import { normalizeSlotEntityString } from '../utils.ts';
 
 export type CorpusLanguage = { code: string; name: string };
 

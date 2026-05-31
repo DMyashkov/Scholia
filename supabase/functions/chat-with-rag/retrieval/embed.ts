@@ -1,4 +1,4 @@
-import { OPENAI_EMBEDDING_MODEL, fetchWithTimeout } from './config.ts';
+import { OPENAI_EMBEDDING_MODEL, fetchWithTimeout } from '../config.ts';
 
 export async function embedBatch(apiKey: string, texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];

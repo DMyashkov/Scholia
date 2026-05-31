@@ -1,6 +1,6 @@
 
 
-import { OPENAI_CHAT_MODEL, fetchWithTimeout } from './config.ts';
+import { OPENAI_CHAT_MODEL, fetchWithTimeout } from '../config.ts';
 
 export interface FinalAnswerResult {
   final_answer: string;

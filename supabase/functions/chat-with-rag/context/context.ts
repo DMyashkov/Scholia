@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ChunkRow, PageRow, SourceRow } from './types.ts';
-import type { PlanResult, PlanSlot } from './types.ts';
-import type { RagContext, RagContextReady, SlotDb } from './types.ts';
+import type { ChunkRow, PageRow, SourceRow } from '../types.ts';
+import type { PlanResult, PlanSlot } from '../types.ts';
+import type { RagContext, RagContextReady, SlotDb } from '../types.ts';
 
 export type SubqueryDb = { id: string; reasoning_step_id: string; slot_id: string; query_text: string };
 

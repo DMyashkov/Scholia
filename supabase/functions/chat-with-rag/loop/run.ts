@@ -1,12 +1,12 @@
 
-/// <reference path="./deno_types.d.ts" />
+/// <reference path="../deno_types.d.ts" />
 import type { SupabaseClient } from 'supabase';
 import { createClient } from 'supabase';
-import type { PlanResult, PlanSlot, ExtractSubquery, RouteResult } from './types.ts';
-import type { RagContextReady, SlotDb, StepDb } from './types.ts';
-import { loadRagContext, type LoadRagBody } from './context.ts';
+import type { PlanResult, PlanSlot, ExtractSubquery, RouteResult } from '../types.ts';
+import type { RagContextReady, SlotDb, StepDb } from '../types.ts';
+import { loadRagContext, type LoadRagBody } from '../context/context.ts';
 import { insertNoPagesMessage, insertClarifyMessage, insertExpandCorpusMessage, insertRetrieveHardStopMessage } from './actions.ts';
-import { saveAssistantMessageWithQuotes, suggestConversationTitle } from './finalize.ts';
+import { saveAssistantMessageWithQuotes, suggestConversationTitle } from '../answer/finalize.ts';
 import {
   MAX_ITERATIONS,
   MAX_SUBQUERIES_PER_ITER,
@@ -20,22 +20,22 @@ import {
   MATCH_CHUNKS_PER_QUERY,
   NEIGHBOR_WINDOW_CHARS,
   NEIGHBOR_MAX_PER_ANCHOR,
-} from './config.ts';
+} from '../config.ts';
 import { callPlan } from './plan.ts';
 import { callExtract, callRoute, insertClaims } from './loop.ts';
 import type { SlotRow } from './loop.ts';
-import type { EvidenceChunk } from './types.ts';
-import { upsertEvidenceChunk } from './evidenceFormat.ts';
-import { doRetrieve, fetchListSlotNeighborChunks } from './retrieve.ts';
-import { callFinalAnswer } from './finalAnswer.ts';
-import { createExtractQuote } from './quotes.ts';
+import type { EvidenceChunk } from '../types.ts';
+import { upsertEvidenceChunk } from '../retrieval/evidenceFormat.ts';
+import { doRetrieve, fetchListSlotNeighborChunks } from '../retrieval/retrieve.ts';
+import { callFinalAnswer } from '../answer/finalAnswer.ts';
+import { createExtractQuote } from '../retrieval/quotes.ts';
 import { overallCompleteness } from './completeness.ts';
 import type { SlotForCompleteness, SlotCompletenessMeta } from './completeness.ts';
 import { doExpandCorpus, getTopSuggestedPages, type SuggestedPage } from './expand.ts';
-import { getLastMessages } from './chat.ts';
-import { buildCorpusContextBlock } from './corpusContext.ts';
-import { slotValueDedupKey, splitListEntityValues } from './utils.ts';
-import { inferCorpusLanguage } from './language.ts';
+import { getLastMessages } from '../answer/chat.ts';
+import { buildCorpusContextBlock } from '../context/corpusContext.ts';
+import { slotValueDedupKey, splitListEntityValues } from '../utils.ts';
+import { inferCorpusLanguage } from '../llm/language.ts';
 import {
   buildQueryGuidance,
   computeSlotFillState,
@@ -55,7 +55,7 @@ import {
   updateParentFingerprints,
   type SlotFillStatus,
   type SlotItemRow,
-} from './slotFillState.ts';
+} from '../context/slotFillState.ts';
 
 type FillMap = Map<string, SlotFillStatus>;
 

@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
-import { SettingsSheet } from '@/components/SettingsSheet';
+import { SettingsSheet } from '@/components/layout/SettingsSheet';
 
 export const UserMenu = () => {
   const { user, signOut } = useAuthContext();

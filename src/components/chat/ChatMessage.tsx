@@ -4,8 +4,8 @@ import { User, Sparkles, Layers, Plus, Loader2, Pencil, CornerDownLeft, X, Alert
 import { Message, SuggestedPage } from '@/types/chat';
 import { Quote } from '@/types/source';
 import { cn } from '@/lib/utils';
-import { QuoteCardsList } from './QuoteCard';
-import { CitedPages } from './CitedPages';
+import { QuoteCardsList } from '../citations/QuoteCard';
+import { CitedPages } from '../citations/CitedPages';
 import { CopyMessageButton } from './CopyMessageButton';
 import { ThoughtProcessView } from './ThoughtProcessView';
 import {

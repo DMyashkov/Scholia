@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { Source } from '@/types/source';
-import { ForceGraph } from './graph';
+import { ForceGraph } from '../graph';
 import { cn } from '@/lib/utils';
 import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import { useConversationPages, useConversationGraphEdges } from '@/hooks/usePages';

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { embedBatch } from './embed.ts';
-import { deriveTitleFromUrl, extractQueryTerms, partitionByTermMatch } from './utils.ts';
+import { embedBatch } from '../retrieval/embed.ts';
+import { deriveTitleFromUrl, extractQueryTerms, partitionByTermMatch } from '../utils.ts';
 
 export type SuggestedPage = {
   url: string;

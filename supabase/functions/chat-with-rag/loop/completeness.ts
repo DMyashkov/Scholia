@@ -1,4 +1,4 @@
-import type { SlotType } from './types.ts';
+import type { SlotType } from '../types.ts';
 
 export interface SlotForCompleteness {
   id: string;

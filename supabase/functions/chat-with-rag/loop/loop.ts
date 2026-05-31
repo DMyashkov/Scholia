@@ -1,12 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { EvidenceChunk, ExtractClaim, ExtractResult, ExtractSubquery, RouteResult } from './types.ts';
-import { formatEvidenceForPrompt, trimEvidenceChunksForPrompt } from './evidenceFormat.ts';
+import type { EvidenceChunk, ExtractClaim, ExtractResult, ExtractSubquery, RouteResult } from '../types.ts';
+import { formatEvidenceForPrompt, trimEvidenceChunksForPrompt } from '../retrieval/evidenceFormat.ts';
 import type { SuggestedPage } from './expand.ts';
-import { OPENAI_CHAT_MODEL, fetchWithTimeout } from './config.ts';
-import { EXTRACT_SYSTEM, buildRouteSystemPrompt } from './prompts.ts';
-import { normalizeSlotEntityString, slotValueDedupKey, splitListEntityValues } from './utils.ts';
-import type { CorpusLanguage } from './language.ts';
-import { formatCorpusLanguageLine } from './language.ts';
+import { OPENAI_CHAT_MODEL, fetchWithTimeout } from '../config.ts';
+import { EXTRACT_SYSTEM, buildRouteSystemPrompt } from '../llm/prompts.ts';
+import { normalizeSlotEntityString, slotValueDedupKey, splitListEntityValues } from '../utils.ts';
+import type { CorpusLanguage } from '../llm/language.ts';
+import { formatCorpusLanguageLine } from '../llm/language.ts';
 
 export interface SlotRow {
   id: string;
@@ -19,7 +19,7 @@ export interface SlotRow {
   items_per_key?: number | null;
 }
 
-export type { EvidenceChunk } from './types.ts';
+export type { EvidenceChunk } from '../types.ts';
 
 function parseClaimsFromObj(
   obj: Record<string, unknown>,

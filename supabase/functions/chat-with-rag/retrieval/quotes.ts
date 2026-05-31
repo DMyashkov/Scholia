@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ChunkRow, PageRow, SourceRow, QuoteOut } from './types.ts';
-import { PAGE_CONTEXT_CHARS } from './config.ts';
+import type { ChunkRow, PageRow, SourceRow, QuoteOut } from '../types.ts';
+import { PAGE_CONTEXT_CHARS } from '../config.ts';
 
 export function snippetFromChunk(c: ChunkRow): string {
   return (c.content ?? '').trim();

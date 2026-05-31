@@ -10,10 +10,10 @@ import { useQuery } from '@tanstack/react-query';
 import { LATEST_MAIN_CRAWL_JOB_BY_SOURCES } from '@/lib/queryKeys';
 import { crawlJobsApi } from '@/lib/db';
 import { WelcomeScreen } from './WelcomeScreen';
-import { SourcesBar } from './SourcesBar';
-import { AddSourceModal } from './AddSourceModal';
-import { SourceDrawer } from './SourceDrawer';
-import { SourcePreviewDrawer } from './SourcePreviewDrawer';
+import { SourcesBar } from '../sources/SourcesBar';
+import { AddSourceModal } from '../sources/AddSourceModal';
+import { SourceDrawer } from '../sources/SourceDrawer';
+import { SourcePreviewDrawer } from '../sources/SourcePreviewDrawer';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 

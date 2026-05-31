@@ -1,7 +1,7 @@
 
 
 import { corsHeaders } from './config.ts';
-import { runRag } from './run.ts';
+import { runRag } from './loop/run.ts';
 
 Deno.serve((req) => {
   if (req.method === 'OPTIONS') {

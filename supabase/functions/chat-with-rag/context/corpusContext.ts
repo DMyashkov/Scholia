@@ -1,4 +1,4 @@
-import type { ChunkRow, PageRow, SourceRow } from './types.ts';
+import type { ChunkRow, PageRow, SourceRow } from '../types.ts';
 
 export function buildCorpusContextBlock(params: {
   pages: PageRow[];

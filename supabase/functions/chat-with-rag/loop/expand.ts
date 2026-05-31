@@ -1,10 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { embedBatch } from './embed.ts';
-import { deriveTitleFromUrl } from './utils.ts';
+import { embedBatch } from '../retrieval/embed.ts';
+import { deriveTitleFromUrl } from '../utils.ts';
 import {
   SUGGESTION_MATCH_COUNT_MAX,
   SUGGESTION_MATCH_COUNT_MIN,
-} from './config.ts';
+} from '../config.ts';
 
 export type SuggestedPage = {
   url: string;

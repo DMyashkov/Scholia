@@ -1,9 +1,9 @@
-import type { PlanResult, PlanSlot, PlanSubquery, SlotType } from './types.ts';
-import { OPENAI_CHAT_MODEL, fetchWithTimeout } from './config.ts';
-import { buildPlanUserMessage } from './corpusContext.ts';
-import { PLAN_SYSTEM } from './prompts.ts';
-import type { CorpusLanguage } from './language.ts';
-import { formatCorpusLanguageLine, looksLikeLanguageMismatch } from './language.ts';
+import type { PlanResult, PlanSlot, PlanSubquery, SlotType } from '../types.ts';
+import { OPENAI_CHAT_MODEL, fetchWithTimeout } from '../config.ts';
+import { buildPlanUserMessage } from '../context/corpusContext.ts';
+import { PLAN_SYSTEM } from '../llm/prompts.ts';
+import type { CorpusLanguage } from '../llm/language.ts';
+import { formatCorpusLanguageLine, looksLikeLanguageMismatch } from '../llm/language.ts';
 
 export async function callPlan(
   apiKey: string,

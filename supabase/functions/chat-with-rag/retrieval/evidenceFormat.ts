@@ -1,4 +1,4 @@
-import type { EvidenceChunk, EvidenceChunkProvenance } from './types.ts';
+import type { EvidenceChunk, EvidenceChunkProvenance } from '../types.ts';
 
 export function mergeEvidenceProvenance(
   existing: EvidenceChunkProvenance[],

@@ -4,8 +4,8 @@ import { getSourceDisplayLabel } from '@/lib/sourceDisplay';
 import { Conversation } from '@/types/chat';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { UserMenu } from '@/components/UserMenu';
-import { SidebarCrawlPanel } from '@/components/SidebarCrawlPanel';
+import { UserMenu } from '@/components/layout/UserMenu';
+import { SidebarCrawlPanel } from '@/components/crawl/SidebarCrawlPanel';
 import { cn } from '@/lib/utils';
 import {
   AlertDialog,

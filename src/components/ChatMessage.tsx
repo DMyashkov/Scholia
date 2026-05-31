@@ -272,6 +272,7 @@ export const ChatMessage = ({
                     ...(tp && (tp.slots?.length || tp.steps?.length) ? [tp] : []),
                     ...(followUp.thoughtProcess ? [followUp.thoughtProcess] : []),
                   ]}
+                  userQuery={isUser ? message.content : undefined}
                   className="h-8 w-8 shrink-0 opacity-70 hover:opacity-100"
                 />
               </div>

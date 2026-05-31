@@ -247,12 +247,13 @@ export async function insertClaims(
     claims: ExtractClaim[];
     ownerId: string;
     allowedKeysByMappingSlotId?: Map<string, Set<string>>;
+    chunkIdToQuoteId?: Map<string, string>;
   },
 ): Promise<{
   insertedSlotItemIds: string[];
   droppedClaims: { slot: string; key?: string; value?: string; chunkIds?: string[]; reason: string }[];
 }> {
-  const { slotIdByName, slots, claims, ownerId, allowedKeysByMappingSlotId } = params;
+  const { slotIdByName, slots, claims, ownerId, allowedKeysByMappingSlotId, chunkIdToQuoteId } = params;
   const inserted: string[] = [];
   const batchDedup = new Map<string, string>();
   const droppedClaims: { slot: string; key?: string; value?: string; chunkIds?: string[]; reason: string }[] = [];
@@ -356,9 +357,11 @@ export async function insertClaims(
     const batchHit = batchDedup.get(batchKey);
     if (batchHit) {
       for (const chunkId of claim.chunkIds) {
+        const quoteId = chunkIdToQuoteId?.get(chunkId);
+        if (!quoteId) continue;
         await supabase.from('claim_evidence').upsert(
-          { slot_item_id: batchHit, chunk_id: chunkId, owner_id: ownerId },
-          { onConflict: 'slot_item_id,chunk_id', ignoreDuplicates: true },
+          { slot_item_id: batchHit, quote_id: quoteId, owner_id: ownerId },
+          { onConflict: 'slot_item_id,quote_id', ignoreDuplicates: true },
         );
       }
       return;
@@ -410,9 +413,11 @@ export async function insertClaims(
     }
 
     for (const chunkId of claim.chunkIds) {
+      const quoteId = chunkIdToQuoteId?.get(chunkId);
+      if (!quoteId) continue;
       await supabase.from('claim_evidence').upsert(
-        { slot_item_id: slotItemId, chunk_id: chunkId, owner_id: ownerId },
-        { onConflict: 'slot_item_id,chunk_id', ignoreDuplicates: true },
+        { slot_item_id: slotItemId, quote_id: quoteId, owner_id: ownerId },
+        { onConflict: 'slot_item_id,quote_id', ignoreDuplicates: true },
       );
     }
   };

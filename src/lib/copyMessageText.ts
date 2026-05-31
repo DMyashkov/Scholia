@@ -135,6 +135,10 @@ export function buildThoughtProcessSection(tp: ThoughtProcess | null | undefined
       if (step.completeness != null) {
         lines.push(`- Completeness: ${Math.round(step.completeness * 100)}%`);
       }
+      if (step.timingMs) {
+        const fmt = (ms: number) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+        lines.push(`- Timing: retrieve ${fmt(step.timingMs.retrieve)} · extract ${fmt(step.timingMs.extract)} · quotes ${fmt(step.timingMs.quoteCreate)} · total ${fmt(step.timingMs.total)}`);
+      }
       if (step.why) lines.push(`- Why: ${step.why}`);
       if (step.nextAction) lines.push(`- Next: ${step.nextAction}`);
       if (step.subqueries?.length) {
@@ -169,9 +173,42 @@ export function buildThoughtProcessSection(tp: ThoughtProcess | null | undefined
         lines.push(JSON.stringify(step.claims, null, 2));
         lines.push('```');
       }
+      if (step.droppedClaims?.length) {
+        lines.push(`- Dropped claims (${step.droppedClaims.length}):`);
+        for (const d of step.droppedClaims.slice(0, 50)) {
+          lines.push(`  - [${d.slot}${d.key ? `/${d.key}` : ''}] ${d.reason}${d.value ? ` — "${d.value}"` : ''}`);
+        }
+      }
+      if (step.droppedSubqueries?.length) {
+        lines.push(`- Dropped subqueries (${step.droppedSubqueries.length}):`);
+        for (const d of step.droppedSubqueries.slice(0, 50)) {
+          lines.push(`  - [${d.slot}] "${d.query}" — ${d.reason}`);
+        }
+      }
+      if (step.queryGuidance?.trim()) {
+        lines.push('- Query guidance (model context):');
+        lines.push('```');
+        lines.push(step.queryGuidance.trim());
+        lines.push('```');
+      }
       if (step.slotSnapshot && Object.keys(step.slotSnapshot).length > 0) {
         lines.push('- Slot snapshot:');
         lines.push(...formatSlotSnapshot(step.slotSnapshot));
+      }
+      if (step.extractDebug?.request || step.extractDebug?.responseRaw) {
+        lines.push('- Extract raw:');
+        if (step.extractDebug.request) {
+          lines.push('  Request:');
+          lines.push('  ```');
+          lines.push(step.extractDebug.request.split('\n').map((l) => `  ${l}`).join('\n'));
+          lines.push('  ```');
+        }
+        if (step.extractDebug.responseRaw) {
+          lines.push('  Response:');
+          lines.push('  ```');
+          lines.push(step.extractDebug.responseRaw.split('\n').map((l) => `  ${l}`).join('\n'));
+          lines.push('  ```');
+        }
       }
     }
   }
@@ -192,6 +229,32 @@ export function buildThoughtProcessSection(tp: ThoughtProcess | null | undefined
     lines.push('\n### Clarify questions\n');
     for (const q of tp.clarifyQuestions) lines.push(`- ${q}`);
   }
+  if (tp.quoteDiagnostics || tp.droppedQuotes?.length) {
+    const diag = tp.quoteDiagnostics;
+    if (diag) {
+      lines.push(`\n### Quote diagnostics\nPlaceholders found: ${diag.placeholdersFound ?? '?'} · unique: ${diag.placeholdersUnique ?? '?'} · verified: ${diag.verifiedQuotes ?? '?'}`);
+    }
+    if (tp.droppedQuotes?.length) {
+      lines.push(`Dropped quote IDs (${tp.droppedQuotes.length}): ${tp.droppedQuotes.join(', ')}`);
+    }
+    if (diag?.dropped?.length) {
+      lines.push('Dropped details:');
+      for (const d of diag.dropped.slice(0, 50)) lines.push(`  - ${d.id}: ${d.reason}`);
+    }
+  }
+  if (tp.finalAnswerDebug?.request || tp.finalAnswerDebug?.responseRaw) {
+    lines.push('\n### Final answer raw\n');
+    if (tp.finalAnswerDebug.request) {
+      lines.push('**Request:**\n```');
+      lines.push(tp.finalAnswerDebug.request);
+      lines.push('```');
+    }
+    if (tp.finalAnswerDebug.responseRaw) {
+      lines.push('**Response:**\n```');
+      lines.push(tp.finalAnswerDebug.responseRaw);
+      lines.push('```');
+    }
+  }
 
   return lines.join('\n');
 }
@@ -200,12 +263,15 @@ export function buildMessageCopyText(
   message: Pick<Message, 'content' | 'quotes' | 'thoughtProcess'>,
   format: CopyFormat,
   phases?: ThoughtProcess[],
+  userQuery?: string,
 ): string {
   const quotes = message.quotes ?? [];
-  const base =
+  const answerText =
     format === 'plain'
       ? stripCitations(message.content)
       : buildCopyWithEvidence(message.content, quotes);
+  const prefix = userQuery ? `**Question:** ${userQuery}\n\n` : '';
+  const base = prefix + answerText;
 
   if (format !== 'debug') return base;
 

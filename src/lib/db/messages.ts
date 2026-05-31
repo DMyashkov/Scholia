@@ -46,18 +46,20 @@ export const messagesApi = {
   },
 
   async deleteFrom(conversationId: string, messageId: string) {
-    const { data: msg, error: fetchErr } = await supabase
+    const { data: allMsgs, error: listErr } = await supabase
       .from('messages')
-      .select('created_at')
-      .eq('id', messageId)
-      .single();
-    if (fetchErr || !msg) throw fetchErr ?? new Error('Message not found');
-
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    if (listErr) throw listErr;
+    const rows = (allMsgs ?? []) as { id: string }[];
+    const pivotIdx = rows.findIndex((r) => r.id === messageId);
+    if (pivotIdx === -1) return;
+    const ids = rows.slice(pivotIdx).map((r) => r.id);
     const { error } = await supabase
       .from('messages')
       .delete()
-      .eq('conversation_id', conversationId)
-      .gte('created_at', (msg as { created_at: string }).created_at);
+      .in('id', ids);
     if (error) throw error;
   },
 };

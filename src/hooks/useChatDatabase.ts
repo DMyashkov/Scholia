@@ -139,7 +139,7 @@ export const useChatDatabase = () => {
     [conversationSourcesData]
   );
 
-  useRealtimeCrawlUpdates(activeConversationId, sourceIds);
+  useRealtimeCrawlUpdates(activeConversationId, sourceIds, user?.id ?? null);
 
   const activeConversationSources: Source[] = conversationSourcesData.map(cs => {
     const db = cs.source;

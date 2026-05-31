@@ -326,6 +326,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     clarifyQuestions?: string[];
     extractionGaps?: string[];
     partialAnswerNote?: string;
+    finalAnswerDebug?: { request?: string; responseRaw?: string };
   } = {
     slots: buildThoughtSlots(slots, planResult?.slots ?? undefined),
     slotFillSummary: buildSlotFillSummary(slots, new Map(slots.map((s) => [s.id, 0]))),
@@ -421,10 +422,14 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         const parentItems = parentSlot ? (currentSlotState[parentSlot.name]?.items ?? []) : [];
         const filledKeys = new Set(items.map((i) => i.key).filter(Boolean));
         const parentTotal = Math.max(parentItems.length, parentSlot?.target_item_count ?? 0);
-        fillNoteLines.push(`"${slot.name}": ${filledKeys.size} of ${parentTotal} keys have data`);
+        if (filledKeys.size < parentTotal) {
+          fillNoteLines.push(`"${slot.name}": ${filledKeys.size} of ${parentTotal} keys have data`);
+        }
       } else if (slot.type === 'list') {
         const target = slot.target_item_count ?? 0;
-        fillNoteLines.push(`"${slot.name}": ${items.length} items${target > 0 ? ` (requested: ${target})` : ''}`);
+        if (target > 0 && items.length < target) {
+          fillNoteLines.push(`"${slot.name}": ${items.length} items (requested: ${target})`);
+        }
       }
     }
     const fillNote = fillNoteLines.length > 0 ? fillNoteLines.join('\n') : undefined;
@@ -441,106 +446,98 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
     let quoteRefTable: string | undefined;
     let validQuoteIds = new Set<string>();
-    const orderedRefEntries: { quoteId: string }[] = [];
+    // Maps the cite-key string (e.g. "отглеждане:СИНОРА") to a quote UUID for post-processing.
+    const citeKeyToQuoteId = new Map<string, string>();
 
     if (slotItemIds.length > 0) {
       const { data: evidRows } = await supabase
         .from('claim_evidence')
-        .select('slot_item_id, chunk_id')
+        .select('slot_item_id, quote_id')
         .in('slot_item_id', slotItemIds);
-      const evidList = (evidRows ?? []) as { slot_item_id: string; chunk_id: string }[];
-      const chunkIds = [...new Set(evidList.map((r) => r.chunk_id))];
+      const evidList = (evidRows ?? []) as { slot_item_id: string; quote_id: string }[];
 
-      if (chunkIds.length > 0) {
-        // Fetch pre-created quotes for these chunks (message_id is null = not yet attached).
-        // Filter by owner_id to avoid picking up quotes from other users' concurrent runs.
-        // Use most-recently created quote per chunk (latest step has best key verification).
-        const { data: preQuotes } = await supabase
-          .from('quotes')
-          .select('id, chunk_id')
-          .in('chunk_id', chunkIds)
-          .is('message_id', null)
-          .eq('owner_id', ownerId)
-          .order('id', { ascending: false });
-        const quoteIdByChunkId = new Map<string, string>();
-        for (const q of (preQuotes ?? []) as { id: string; chunk_id: string }[]) {
-          if (!quoteIdByChunkId.has(q.chunk_id)) quoteIdByChunkId.set(q.chunk_id, q.id);
+      // One quote per slot item: first quote found wins (primary chunk).
+      const quoteIdBySlotItemId = new Map<string, string>();
+      for (const ev of evidList) {
+        if (!quoteIdBySlotItemId.has(ev.slot_item_id)) {
+          quoteIdBySlotItemId.set(ev.slot_item_id, ev.quote_id);
         }
-        validQuoteIds = new Set(quoteIdByChunkId.values());
-
-        // Map slot_item_id → quoteId (first chunk with a quote wins).
-        const quoteIdBySlotItemId = new Map<string, string>();
-        for (const ev of evidList) {
-          if (!quoteIdBySlotItemId.has(ev.slot_item_id)) {
-            const qId = quoteIdByChunkId.get(ev.chunk_id);
-            if (qId) quoteIdBySlotItemId.set(ev.slot_item_id, qId);
-          }
-        }
-
-        // Build reference table with sequential [ref:N] markers — model copies small numbers,
-        // not UUIDs, which eliminates citation mix-ups. Post-processing below maps back to UUIDs.
-        const refLines: string[] = [];
-        const slotValueStr = (v: unknown): string =>
-          typeof v === 'string' ? v : JSON.stringify(v ?? '');
-        for (const slot of slots) {
-          const items = currentSlotState[slot.name]?.items ?? [];
-          if (items.length === 0) continue;
-          if (slot.type === 'mapping') {
-            refLines.push(`Slot "${slot.name}":`);
-            for (const item of items) {
-              if (!item.key) continue;
-              const row = slotItemRows.find((r) => r.slot_id === slot.id && r.key === item.key);
-              const qId = row ? quoteIdBySlotItemId.get(row.id) : undefined;
-              if (qId) {
-                const refNum = orderedRefEntries.length + 1;
-                orderedRefEntries.push({ quoteId: qId });
-                refLines.push(`  ${item.key} → [ref:${refNum}]`);
-              } else {
-                refLines.push(`  ${item.key} → (no citation)`);
-              }
-            }
-          } else if (slot.type === 'scalar') {
-            // One item per scalar slot — cite it if a quote exists.
-            const row = slotItemRows.find((r) => r.slot_id === slot.id);
-            const qId = row ? quoteIdBySlotItemId.get(row.id) : undefined;
-            if (qId) {
-              const refNum = orderedRefEntries.length + 1;
-              orderedRefEntries.push({ quoteId: qId });
-              refLines.push(`Slot "${slot.name}": ${slotValueStr(items[0]?.value)} → [ref:${refNum}]`);
-            }
-          } else if (slot.type === 'list') {
-            // One row per list item — match by value_json for correct ordering.
-            refLines.push(`Slot "${slot.name}":`);
-            for (const item of items) {
-              const itemStr = slotValueStr(item.value);
-              const row = slotItemRows.find(
-                (r) => r.slot_id === slot.id && slotValueStr(r.value_json) === itemStr,
-              );
-              const qId = row ? quoteIdBySlotItemId.get(row.id) : undefined;
-              if (qId) {
-                const refNum = orderedRefEntries.length + 1;
-                orderedRefEntries.push({ quoteId: qId });
-                refLines.push(`  - ${itemStr} → [ref:${refNum}]`);
-              } else {
-                refLines.push(`  - ${itemStr} → (no citation)`);
-              }
-            }
-          }
-        }
-        if (refLines.length > 0) quoteRefTable = refLines.join('\n');
       }
+      validQuoteIds = new Set(quoteIdBySlotItemId.values());
+
+      // Build citation table using [cite:slot_name:key] markers.
+      // Keys are truncated to 40 chars so the LLM can copy them reliably even for long values.
+      // The LLM may also use a shorter prefix ending in "..." — we match by prefix below.
+      const CITE_KEY_MAX = 40;
+      const truncateCiteKey = (s: string): string =>
+        s.length <= CITE_KEY_MAX ? s : s.slice(0, CITE_KEY_MAX);
+      const makeCiteTag = (slotName: string, key: string): string =>
+        `[cite:${slotName}:${truncateCiteKey(key)}]`;
+
+      const refLines: string[] = [];
+      const slotValueStr = (v: unknown): string =>
+        typeof v === 'string' ? v : JSON.stringify(v ?? '');
+      for (const slot of slots) {
+        const items = currentSlotState[slot.name]?.items ?? [];
+        if (items.length === 0) continue;
+        if (slot.type === 'mapping') {
+          refLines.push(`Slot "${slot.name}":`);
+          for (const item of items) {
+            if (!item.key) continue;
+            const row = slotItemRows.find((r) => r.slot_id === slot.id && r.key === item.key);
+            const qId = row ? quoteIdBySlotItemId.get(row.id) : undefined;
+            const tag = makeCiteTag(slot.name, String(item.key));
+            if (qId) {
+              citeKeyToQuoteId.set(`${slot.name}:${truncateCiteKey(String(item.key))}`, qId);
+              refLines.push(`  ${item.key} → ${tag}`);
+            } else {
+              refLines.push(`  ${item.key} → (no citation)`);
+            }
+          }
+        } else if (slot.type === 'scalar') {
+          const row = slotItemRows.find((r) => r.slot_id === slot.id);
+          const qId = row ? quoteIdBySlotItemId.get(row.id) : undefined;
+          if (qId) {
+            const tag = `[cite:${slot.name}]`;
+            citeKeyToQuoteId.set(slot.name, qId);
+            refLines.push(`Slot "${slot.name}": ${slotValueStr(items[0]?.value)} → ${tag}`);
+          }
+        }
+      }
+      if (refLines.length > 0) quoteRefTable = refLines.join('\n');
     }
 
     const result = await callFinalAnswer(openaiKey, userMsg, currentSlotStateJson, quoteRefTable, fillNote);
-    // Replace [ref:N] markers with [[quote:uuid]] for the downstream citation pipeline.
+    if (result.debug) thoughtProcess.finalAnswerDebug = result.debug;
+
+    // Replace [cite:...] markers with [[quote:uuid]] for the downstream citation pipeline.
+    // The LLM may truncate the key further (e.g. "[cite:slot:СИНОР...]"); we match by the
+    // longest stored prefix that fits inside the tag.
     let finalAnswerText = result.final_answer;
-    for (let i = 0; i < orderedRefEntries.length; i++) {
-      const refNum = i + 1;
-      finalAnswerText = finalAnswerText.replace(
-        new RegExp(`\\[ref:${refNum}\\]`, 'g'),
-        `[[quote:${orderedRefEntries[i].quoteId}]]`,
-      );
-    }
+    finalAnswerText = finalAnswerText.replace(/\[cite:([^\]]+)\]/g, (_match, inner: string) => {
+      // Scalar slots: [cite:slot_name] (no colon after slot name)
+      if (citeKeyToQuoteId.has(inner)) {
+        return `[[quote:${citeKeyToQuoteId.get(inner)}]]`;
+      }
+      // Slot+key tags: inner = "slot_name:key_or_prefix"
+      const colonIdx = inner.indexOf(':');
+      if (colonIdx < 0) return '';
+      const slotPart = inner.slice(0, colonIdx);
+      const keyPart = inner.slice(colonIdx + 1).replace(/\.{2,}$/, ''); // strip trailing ellipsis
+      // Exact match first.
+      const exactKey = `${slotPart}:${keyPart}`;
+      if (citeKeyToQuoteId.has(exactKey)) {
+        return `[[quote:${citeKeyToQuoteId.get(exactKey)}]]`;
+      }
+      // Prefix match: find stored key that starts with the (possibly truncated) keyPart.
+      for (const [storedKey, qId] of citeKeyToQuoteId) {
+        if (storedKey.startsWith(`${slotPart}:`) && storedKey.slice(slotPart.length + 1).startsWith(keyPart)) {
+          return `[[quote:${qId}]]`;
+        }
+      }
+      return '';
+    });
+
     return {
       finalAnswer: finalAnswerText,
       validQuoteIds,
@@ -998,48 +995,54 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     })();
     const beforeCounts = new Map(slotItemCountBySlotId);
     const beforeFill = new Map(fillBySlotId);
+
+    // Create quotes before inserting claims so we can store quote_id in claim_evidence directly.
+    // Create one quote per unique chunk across all claims this step (deduped by chunkId).
+    // cited_snippet from the first claim that references a chunk is used for that chunk's quote.
+    const quoteCreateStart = Date.now();
+    const stepQuoteByChunkId = new Map<string, string>();
+    for (const claim of extractResult.claims) {
+      for (let ci = 0; ci < claim.chunkIds.length; ci++) {
+        const chunkId = claim.chunkIds[ci];
+        if (!chunkId || stepQuoteByChunkId.has(chunkId)) continue;
+        const chunkContent = evidenceChunksById.get(chunkId)?.snippet ?? '';
+        const pageId = chunkPageIdMap.get(chunkId);
+        const page = pageId ? pageById.get(pageId) : undefined;
+        if (!pageId || !page) continue;
+        let domain = '';
+        if (page.url) { try { domain = new URL(page.url).hostname; } catch { domain = ''; } }
+        if (!domain) domain = sourceById.get(page.source_id)?.domain ?? '';
+        const mappingKey = claim.key ?? undefined;
+        // Only pass cited_snippet for the primary chunk (index 0); additional chunks use raw content.
+        const qId = await createExtractQuote(supabase, {
+          chunkId,
+          chunkContent,
+          pageId,
+          page,
+          domain,
+          stepId: currentStepId,
+          ownerId,
+          mappingKey,
+          citedSnippet: ci === 0 ? claim.cited_snippet : undefined,
+        });
+        if (qId) stepQuoteByChunkId.set(chunkId, qId);
+      }
+    }
+    const quoteCreateMs = Date.now() - quoteCreateStart;
+
     const { droppedClaims } = await insertClaims(supabase, {
       slotIdByName,
       slots,
       claims: extractResult.claims,
       ownerId,
       allowedKeysByMappingSlotId,
+      chunkIdToQuoteId: stepQuoteByChunkId,
     });
     if (droppedClaims.length > 0) {
       extractionGapsAccumulated.push(
         ...droppedClaims.slice(0, 25).map((d) => `Dropped unsupported claim for ${d.slot}${d.key ? `/${d.key}` : ''}: ${d.reason}`),
       );
     }
-
-    // Create quotes for each claim immediately, while we know exactly which chunk supports which value.
-    // Use a per-step dedup map so the same chunk only produces one quote row per step.
-    const quoteCreateStart = Date.now();
-    const stepQuoteByChunkId = new Map<string, string>();
-    for (const claim of extractResult.claims) {
-      const chunkId = claim.chunkIds[0];
-      if (!chunkId || stepQuoteByChunkId.has(chunkId)) continue;
-      const chunkContent = evidenceChunksById.get(chunkId)?.snippet ?? '';
-      const pageId = chunkPageIdMap.get(chunkId);
-      const page = pageId ? pageById.get(pageId) : undefined;
-      if (!pageId || !page) continue;
-      let domain = '';
-      if (page.url) { try { domain = new URL(page.url).hostname; } catch { domain = ''; } }
-      if (!domain) domain = sourceById.get(page.source_id)?.domain ?? '';
-      const mappingKey = claim.key ?? undefined;
-      const qId = await createExtractQuote(supabase, {
-        chunkId,
-        chunkContent,
-        pageId,
-        page,
-        domain,
-        stepId: currentStepId,
-        ownerId,
-        mappingKey,
-        citedSnippet: claim.cited_snippet,
-      });
-      if (qId) stepQuoteByChunkId.set(chunkId, qId);
-    }
-    const quoteCreateMs = Date.now() - quoteCreateStart;
 
     const { data: slotItemsAfter } = await supabase
       .from('slot_items')

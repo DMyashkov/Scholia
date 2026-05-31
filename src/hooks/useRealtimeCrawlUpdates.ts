@@ -7,7 +7,6 @@ import {
   CURRENT_CRAWL_JOB_BY_SOURCE,
   LATEST_MAIN_CRAWL_JOB_BY_SOURCES,
   LIST_OF_CRAWL_JOBS_BY_SOURCE,
-  CRAWL_JOB_INVALIDATION_PREFIXES,
   COUNT_OF_DISCOVERED_LINKS_BY_SOURCE,
   COUNTS_OF_DISCOVERED_LINKS_BY_CONVERSATION,
   ENCODED_COUNT_OF_DISCOVERED_LINKS_BY_SOURCE,
@@ -58,7 +57,7 @@ function debouncedInvoke(
   };
 }
 
-export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds: string[]) {
+export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds: string[], ownerId: string | null) {
   const queryClient = useQueryClient();
   const sourceIdsKey = useMemo(() => sourceIds.join(','), [sourceIds]);
   const channelsRef = useRef<Array<ReturnType<typeof supabase.channel>>>([]);
@@ -68,7 +67,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
   const discoveredLinksDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!conversationId) {
+    if (!conversationId || !ownerId) {
       return;
     }
 
@@ -98,7 +97,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
             const [prefix, arg1, arg2] = key;
             if (queryKeyMatches(key, CURRENT_CRAWL_JOB_BY_SOURCE, job.source_id)) return true;
             if (prefix === LIST_OF_CRAWL_JOBS_BY_SOURCE && (arg1 === job.source_id || key.length === 1)) return true;
-            if (CRAWL_JOB_INVALIDATION_PREFIXES.includes(prefix as (typeof CRAWL_JOB_INVALIDATION_PREFIXES)[number])) return true;
+            if (prefix === LATEST_MAIN_CRAWL_JOB_BY_SOURCES) return true;
             if (prefix === LATEST_ADD_PAGE_JOB_BY_CONVERSATION_AND_SOURCE && arg1 === conversationId && arg2 === job.source_id && job.explicit_crawl_urls != null) return true;
             return false;
           };
@@ -156,6 +155,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
           event: 'INSERT',
           schema: 'public',
           table: 'page_edges',
+          filter: `owner_id=eq.${ownerId}`,
         },
         () => {
           const graphEdgesPredicate = (query: { queryKey: unknown }) =>
@@ -179,9 +179,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
           }, EDGES_TRAILING_MS);
         }
       )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') syncAfterSubscribe();
-      });
+      .subscribe();
 
     channelsRef.current.push(edgesChannel);
 
@@ -197,6 +195,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
                 event: 'INSERT',
                 schema: 'public',
                 table: 'encoded_discovered',
+                filter: `owner_id=eq.${ownerId}`,
               },
               () => {
                 debouncedInvoke(discoveredLinksDebounceRef, DISCOVERED_LINKS_DEBOUNCE_MS, () => {
@@ -211,6 +210,7 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
                 event: 'UPDATE',
                 schema: 'public',
                 table: 'encoded_discovered',
+                filter: `owner_id=eq.${ownerId}`,
               },
               () => {
                 debouncedInvoke(discoveredLinksDebounceRef, DISCOVERED_LINKS_DEBOUNCE_MS, () => {
@@ -250,5 +250,5 @@ export function useRealtimeCrawlUpdates(conversationId: string | null, sourceIds
     };
     
     
-  }, [conversationId, sourceIdsKey, sourceIds, queryClient]);
+  }, [conversationId, sourceIdsKey, sourceIds, ownerId, queryClient]);
 }

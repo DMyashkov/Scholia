@@ -36,9 +36,22 @@ export async function crawlPage(
       return { page: null, html, inserted: false };
     }
 
-    const response = await fetch(url, {
-      headers: { 'User-Agent': CRAWLER_USER_AGENT },
-    });
+    let fetchUrl = url;
+    let response = await fetch(fetchUrl, { headers: { 'User-Agent': CRAWLER_USER_AGENT } });
+
+    if (response.status === 404) {
+      const u = new URL(url);
+      const altPathname = u.pathname.endsWith('/') && u.pathname !== '/'
+        ? u.pathname.slice(0, -1)
+        : u.pathname + '/';
+      u.pathname = altPathname;
+      const altUrl = u.toString();
+      const altResponse = await fetch(altUrl, { headers: { 'User-Agent': CRAWLER_USER_AGENT } });
+      if (altResponse.ok) {
+        fetchUrl = altUrl;
+        response = altResponse;
+      }
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -56,12 +69,12 @@ export async function crawlPage(
     const mainText = (mainContent.length > 0 ? mainContent.text() : $('body').text()).trim().substring(0, MAX_PAGE_CONTENT_LENGTH);
     const content = mainText || $('body').text().trim().substring(0, MAX_PAGE_CONTENT_LENGTH);
 
-    const urlObj = new URL(url);
+    const urlObj = new URL(fetchUrl);
     const path = urlObj.pathname + urlObj.search;
 
     const insertData = {
       source_id: source.id,
-      url: url,
+      url: fetchUrl,
       title: title,
       path: path,
       content: content,
@@ -91,7 +104,7 @@ export async function crawlPage(
         .from('pages')
         .select('*')
         .eq('source_id', source.id)
-        .eq('url', url)
+        .eq('url', fetchUrl)
         .single();
 
       if (existing) {

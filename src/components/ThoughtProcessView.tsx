@@ -814,6 +814,32 @@ function PhaseContent({
         </div>
       )}
 
+      {tp.finalAnswerDebug && (tp.finalAnswerDebug.request || tp.finalAnswerDebug.responseRaw) && (
+        <details className="rounded-lg border border-border/40 bg-muted/10 text-[11px]">
+          <summary className="cursor-pointer px-3 py-2 text-muted-foreground font-medium">
+            Final answer raw (request/response)
+          </summary>
+          <div className="px-3 pb-2.5 space-y-2">
+            {tp.finalAnswerDebug.request && (
+              <div>
+                <div className="text-[10px] text-muted-foreground mb-1">Request (truncated)</div>
+                <pre className="whitespace-pre-wrap font-mono text-muted-foreground leading-snug">
+                  {tp.finalAnswerDebug.request}
+                </pre>
+              </div>
+            )}
+            {tp.finalAnswerDebug.responseRaw && (
+              <div>
+                <div className="text-[10px] text-muted-foreground mb-1">Response (truncated)</div>
+                <pre className="whitespace-pre-wrap font-mono text-muted-foreground leading-snug">
+                  {tp.finalAnswerDebug.responseRaw}
+                </pre>
+              </div>
+            )}
+          </div>
+        </details>
+      )}
+
       {hasStopOrNote && (
         <div className="space-y-1.5">
           {tp.hardStopReason && (

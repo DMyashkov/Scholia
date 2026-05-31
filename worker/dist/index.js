@@ -589,9 +589,19 @@ async function crawlPage(url, source, conversationId, existingInConversation) {
       });
       return { page: null, html: html2, inserted: false };
     }
-    const response = await fetch3(url, {
-      headers: { "User-Agent": CRAWLER_USER_AGENT }
-    });
+    let fetchUrl = url;
+    let response = await fetch3(fetchUrl, { headers: { "User-Agent": CRAWLER_USER_AGENT } });
+    if (response.status === 404) {
+      const u = new URL(url);
+      const altPathname = u.pathname.endsWith("/") && u.pathname !== "/" ? u.pathname.slice(0, -1) : u.pathname + "/";
+      u.pathname = altPathname;
+      const altUrl = u.toString();
+      const altResponse = await fetch3(altUrl, { headers: { "User-Agent": CRAWLER_USER_AGENT } });
+      if (altResponse.ok) {
+        fetchUrl = altUrl;
+        response = altResponse;
+      }
+    }
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -602,11 +612,11 @@ async function crawlPage(url, source, conversationId, existingInConversation) {
     const mainContent = $(MAIN_CONTENT_SELECTOR).first();
     const mainText = (mainContent.length > 0 ? mainContent.text() : $("body").text()).trim().substring(0, MAX_PAGE_CONTENT_LENGTH);
     const content = mainText || $("body").text().trim().substring(0, MAX_PAGE_CONTENT_LENGTH);
-    const urlObj = new URL(url);
+    const urlObj = new URL(fetchUrl);
     const path2 = urlObj.pathname + urlObj.search;
     const insertData = {
       source_id: source.id,
-      url,
+      url: fetchUrl,
       title,
       path: path2,
       content,
@@ -625,7 +635,7 @@ async function crawlPage(url, source, conversationId, existingInConversation) {
       if (isSourceFk) {
         throw new Error(`Source ${source.id.slice(0, 8)} was deleted during crawl. Stopping.`);
       }
-      const { data: existing } = await supabase.from("pages").select("*").eq("source_id", source.id).eq("url", url).single();
+      const { data: existing } = await supabase.from("pages").select("*").eq("source_id", source.id).eq("url", fetchUrl).single();
       if (existing) {
         console.log("[crawl] [crawlPage] INSERT conflict (existing for this source)", { urlNorm: normalized.slice(-60) });
         return { page: existing, html, inserted: false };

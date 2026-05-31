@@ -17,9 +17,10 @@ interface CopyMessageButtonProps {
   message: Message;
   className?: string;
   phases?: ThoughtProcess[];
+  userQuery?: string;
 }
 
-export const CopyMessageButton = ({ message, className, phases }: CopyMessageButtonProps) => {
+export const CopyMessageButton = ({ message, className, phases, userQuery }: CopyMessageButtonProps) => {
   const [justCopied, setJustCopied] = useState(false);
   const { copyFormat, setCopyFormat } = useCopyFormat();
 
@@ -33,7 +34,7 @@ export const CopyMessageButton = ({ message, className, phases }: CopyMessageBut
 
   const doCopy = () => {
     const format: CopyFormat = isUser ? 'plain' : copyFormat;
-    const text = buildMessageCopyText(message, format, phases);
+    const text = buildMessageCopyText(message, format, phases, userQuery);
     navigator.clipboard.writeText(text).then(
       () => setJustCopied(true),
       () => {},

@@ -84,6 +84,7 @@ export interface ThoughtProcess {
     extractDebug?: { request?: string; responseRaw?: string };
     timingMs?: { retrieve: number; extract: number; quoteCreate: number; total: number };
   }[];
+  finalAnswerDebug?: { request?: string; responseRaw?: string };
   iterationCount?: number;
   completeness?: number;
   hardStopReason?: string;

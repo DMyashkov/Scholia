@@ -28,8 +28,6 @@ import type { Conversation, Message, ThoughtProcess } from '@/types/chat';
 import type { Source } from '@/types/source';
 import { deriveTitleFromUrl } from '@/lib/utils';
 import { isAddPagePipelineComplete } from '@/lib/crawlJobProgress';
-import { generateTitle } from '@/data/mockResponses';
-import { generateQuotesForMessage, generateSourcedResponse } from '@/data/mockSourceContent';
 import { consumeRagStream } from '@/lib/consumeRagStream';
 import { toast } from 'sonner';
 
@@ -469,7 +467,8 @@ export const useChatDatabase = () => {
 
     
     if (!conversationId) {
-      const title = generateTitle(content);
+      const words = content.trim().split(' ').slice(0, 5).join(' ');
+      const title = words.length > 30 ? words.substring(0, 30) + '...' : words;
       const newConv = await createConversationMutation.mutateAsync(title);
       conversationId = newConv.id;
       setActiveConversationId(conversationId);
@@ -596,26 +595,14 @@ export const useChatDatabase = () => {
       return;
     }
 
-    const fullResponse = generateSourcedResponse(
-      content,
-      readySources.length > 0,
-      crawlingSources.length > 0,
-    );
-
-    const words = fullResponse.split(' ');
-    for (let i = 0; i < words.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 30 + Math.random() * 20));
-      setStreamingMessage((prev) => prev + (i === 0 ? '' : ' ') + words[i]);
-    }
-
+    const noSourcesMsg = 'Add a source to get started — crawl a website and I can answer questions based on its content.';
     await createMessageMutation.mutateAsync({
       conversation_id: conversationId,
       role: 'assistant',
-      content: fullResponse,
+      content: noSourcesMsg,
       was_multi_step: false,
     });
 
-    setStreamingMessage('');
     setIsLoading(false);
   }, [activeConversationId, isLoading, currentSources, createConversationMutation, createMessageMutation, queryClient]);
 

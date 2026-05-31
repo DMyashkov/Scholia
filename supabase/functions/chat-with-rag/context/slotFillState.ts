@@ -480,6 +480,7 @@ export function getSlotQueryMode(
       if (fill.filled <= 0 && (track?.consecutiveStagnantBroadSteps ?? 0) >= STAGNATION_STEPS_TO_FINISH) return 'targeted_only';
       if (fill.filled <= 0) return 'broad_only';
       if (broadStagnant) return 'targeted_only';
+      if (fill.filled > 0) return 'broad_and_targeted';
       if (fill.effectiveTarget > 0 && fill.filled < fill.effectiveTarget) return 'broad_and_targeted';
     } else {
       if (!fill.parentSatisfied) return 'broad_only';

@@ -1,11 +1,11 @@
 import type { EvidenceChunk, EvidenceChunkProvenance } from './types.ts';
 
 export function mergeEvidenceProvenance(
-  existing: EvidenceChunkProvenance[] | undefined,
+  existing: EvidenceChunkProvenance[],
   added: EvidenceChunkProvenance[],
 ): EvidenceChunkProvenance[] {
-  const seen = new Set((existing ?? []).map((p) => `${p.slot}\0${p.query}`));
-  const out = [...(existing ?? [])];
+  const seen = new Set(existing.map((p) => `${p.slot}\0${p.query}`));
+  const out = [...existing];
   for (const p of added) {
     const key = `${p.slot}\0${p.query}`;
     if (seen.has(key)) continue;
@@ -17,13 +17,7 @@ export function mergeEvidenceProvenance(
 
 export function upsertEvidenceChunk(
   map: Map<string, EvidenceChunk>,
-  params: {
-    id: string;
-    snippet: string;
-    pageUrl?: string;
-    pageTitle?: string;
-    retrievedBy: EvidenceChunkProvenance[];
-  },
+  params: EvidenceChunk,
 ): void {
   const { id, snippet, pageUrl, pageTitle, retrievedBy } = params;
   if (!snippet) return;
@@ -129,13 +123,12 @@ export function trimEvidenceChunksForPrompt(chunks: EvidenceChunk[]): EvidenceCh
 }
 
 export function formatEvidenceForPrompt(chunks: EvidenceChunk[]): string {
-  const trimmed = trimEvidenceChunksForPrompt(chunks);
-  return trimmed
+  return chunks
     .map((q, i) => {
       const lines: string[] = [`(evidence ${i + 1})`];
       if (q.pageTitle) lines.push(`page_title: ${q.pageTitle}`);
       if (q.pageUrl) lines.push(`page_url: ${q.pageUrl}`);
-      const by = q.retrievedBy ?? [];
+      const by = q.retrievedBy;
       if (by.length > 0) {
         const uniqueSlots = [...new Set(by.map((p) => p.slot))];
         lines.push(`retrieved_by: ${uniqueSlots.map((s) => `"${s}"`).join(', ')}`);

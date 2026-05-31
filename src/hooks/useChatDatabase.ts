@@ -54,10 +54,23 @@ type DbQuoteRow = {
   page_title: string;
   page_path: string;
   domain: string;
+  citation_order?: number | null;
   context_before?: string | null;
   context_after?: string | null;
   pages?: { source_id: string } | null;
 };
+
+/** Align quote array index with [N] markers in message content (citation_order is 1-based). */
+function sortQuotesByCitationOrder(quotes: DbQuoteRow[]): DbQuoteRow[] {
+  return [...quotes].sort((a, b) => {
+    const ao = a.citation_order;
+    const bo = b.citation_order;
+    if (ao != null && bo != null) return ao - bo;
+    if (ao != null) return -1;
+    if (bo != null) return 1;
+    return 0;
+  });
+}
 
 const mapQuoteDbToUI = (q: DbQuoteRow): MessageQuote => ({
   id: q.id,
@@ -79,7 +92,7 @@ const dbMessageToUI = (db: DBMessage): Message => {
     scraped_page_display?: string | null;
     thought_process?: Message['thoughtProcess'] | null;
   };
-  const quotesDb = extended.quotes ?? [];
+  const quotesDb = sortQuotesByCitationOrder(extended.quotes ?? []);
   const quotes = quotesDb.map(mapQuoteDbToUI) as Message['quotes'];
   return {
     id: db.id,

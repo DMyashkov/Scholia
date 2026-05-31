@@ -2,7 +2,7 @@
 /// <reference path="./deno_types.d.ts" />
 import type { SupabaseClient } from 'supabase';
 import { createClient } from 'supabase';
-import type { PlanResult, PlanSlot, ExtractSubquery } from './types.ts';
+import type { PlanResult, PlanSlot, ExtractSubquery, RouteResult } from './types.ts';
 import type { RagContextReady, SlotDb, StepDb } from './types.ts';
 import { loadRagContext, type LoadRagBody } from './context.ts';
 import { insertNoPagesMessage, insertClarifyMessage, insertExpandCorpusMessage, insertRetrieveHardStopMessage } from './actions.ts';
@@ -23,7 +23,7 @@ import {
 } from './config.ts';
 import type { PageRow, SourceRow } from './types.ts';
 import { callPlan } from './plan.ts';
-import { callExtractAndDecide, insertClaims } from './loop.ts';
+import { callExtract, callRoute, insertClaims } from './loop.ts';
 import type { SlotRow } from './loop.ts';
 import type { EvidenceChunk } from './types.ts';
 import { upsertEvidenceChunk } from './evidenceFormat.ts';
@@ -311,7 +311,9 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     droppedClaims?: { slot: string; key?: string; value?: string; chunkIds?: string[]; reason: string }[];
     droppedSubqueries?: { slot: string; query: string; reason: string }[];
     listSlotState?: Record<string, { attempts: number; count: number; strategy: string; finished_querying: boolean }>;
-    timingMs?: { retrieve: number; extract: number; quoteCreate: number; total: number };
+    extractDebug?: { request?: string; responseRaw?: string };
+    routeDebug?: { request?: string; responseRaw?: string };
+    timingMs?: { retrieve: number; extract: number; route: number; quoteCreate: number; total: number };
   };
   let droppedSubqueriesPreparedThisIter: { slot: string; query: string; reason: string }[] = [];
   const thoughtProcess: {
@@ -396,7 +398,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
   // Per-slot tracking of chunk IDs already passed to the extract model.
   // Used to avoid re-sending the same chunk for the same slot across steps.
   const seenChunksBySlotName = new Map<string, Set<string>>();
-  let lastExtractResult: { next_action?: string; why?: string; final_answer?: string; subqueries?: ExtractSubquery[]; extractionGaps?: string[] } | null = null;
+  let lastRouteResult: RouteResult | null = null;
   const extractionGapsAccumulated: string[] = [];
   let slotItemCountBySlotId = new Map<string, number>();
   let fillBySlotId: FillMap = new Map();
@@ -637,14 +639,14 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
           owner_id: ownerId,
           iteration_number: iteration,
           action: 'retrieve',
-          why: lastExtractResult?.why ?? null,
+          why: lastRouteResult?.why ?? null,
         })
         .select('id')
         .single();
       if (!newStep?.id) break;
       currentStepId = newStep.id;
-      const subsInput: ExtractSubquery[] = lastExtractResult?.subqueries?.length
-        ? (lastExtractResult.subqueries as ExtractSubquery[])
+      const subsInput: ExtractSubquery[] = lastRouteResult?.subqueries?.length
+        ? (lastRouteResult.subqueries as ExtractSubquery[])
         : [{ slot: 'answer', query: userMsg.slice(0, 200) }];
       
       const currentSlotStateForExpand = await getCurrentSlotItemsState();
@@ -881,18 +883,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
     const currentSlotState = await getCurrentSlotItemsState();
     const currentSlotStateJson = Object.keys(currentSlotState).length > 0 ? JSON.stringify(currentSlotState, null, 2) : '';
-    const previousAttemptsBySlot = (() => {
-      const lines: string[] = [];
-      for (const slot of slotsWithAttempts) {
-        if (slot.finished_querying || slot.attempt_count === 0 || !slot.last_queries?.length) continue;
-        const items = currentSlotState[slot.name]?.items ?? [];
-        const itemsPreview = items.length <= 5
-          ? JSON.stringify(items.map((i) => i.value ?? i.key ?? i))
-          : `${items.length} items (e.g. ${JSON.stringify(items.slice(0, 2).map((i) => i.value ?? i.key ?? i))}...)`;
-        lines.push(`Slot "${slot.name}": last queries were [${slot.last_queries.map((q) => `"${q}"`).join(', ')}]. Items now: ${itemsPreview}. Try different queries.`);
-      }
-      return lines.length > 0 ? lines.join('\n') : undefined;
-    })();
+
+    // Track which slots had broad queries this step (for broad_query_completed_slot_fully later)
     const { data: stepSubqRows } = await supabase
       .from('reasoning_subqueries')
       .select('slot_id, query_text, strategy')
@@ -916,13 +908,9 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const broadSlotNamesThisStep = [
       ...new Set(slots.filter((s) => broadSlotIdsThisStep.has(s.id)).map((s) => s.name)),
     ];
-    const queryGuidanceBlock = buildQueryGuidance(slots, fillBySlotId, stagnationBySlotId);
-    const finishedQueryingSlotNames = slots.filter((s) => s.finished_querying).map((s) => s.name);
-    const topSuggestedPages: SuggestedPage[] | null =
-      dynamicMode && sourceIds.length > 0
-        ? await getTopSuggestedPages(supabase, openaiKey, sourceIds, userMsg, retrieveSubqueries.map((s) => s.query), suggestedPageCandidates)
-        : null;
-    log('extract-call', { iteration, chunkCount: evidenceChunksForExtract.length, topSuggestedCount: topSuggestedPages?.length ?? 0 });
+
+    // --- EXTRACT: claims only ---
+    log('extract-call', { iteration, chunkCount: evidenceChunksForExtract.length });
     const snippetPreviews = evidenceChunksForExtract.map((q) => (q.snippet ?? '').slice(0, 120));
     log('extract-evidence-preview', { iteration, snippetPreviews });
     const extractStart = Date.now();
@@ -938,33 +926,21 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         ...((s.type === 'list' || s.type === 'mapping') && target > 0 ? { target_item_count: target } : {}),
       };
     });
-    const extractResult = await callExtractAndDecide(
+    const finishedQueryingSlotNamesForExtract = slots.filter((s) => s.finished_querying).map((s) => s.name);
+    const extractResult = await callExtract(
       openaiKey,
       slotRowsForExtract,
       evidenceChunksForExtract,
       currentSlotStateJson,
       userMsg,
       inferCorpusLanguage(buildCorpusContextBlock({ pages, sourceById, leadChunks: leadList })),
-      dynamicMode,
-      topSuggestedPages,
-      previousAttemptsBySlot,
-      broadSlotNamesThisStep,
-      finishedQueryingSlotNames,
-      queryGuidanceBlock,
+      finishedQueryingSlotNamesForExtract,
     );
     const extractMs = Date.now() - extractStart;
-    lastExtractResult = extractResult;
     if (extractResult.extractionGaps?.length) {
       extractionGapsAccumulated.push(...extractResult.extractionGaps);
     }
-
-    log('extract-done', {
-      iteration,
-      next_action: extractResult.next_action,
-      claimsCount: extractResult.claims.length,
-      why: extractResult.why,
-      extractionGaps: extractResult.extractionGaps,
-    });
+    log('extract-done', { iteration, claimsCount: extractResult.claims.length });
 
     const allowedKeysByMappingSlotId = await (async (): Promise<Map<string, Set<string>>> => {
       const map = new Map<string, Set<string>>();
@@ -994,7 +970,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       return map;
     })();
     const beforeCounts = new Map(slotItemCountBySlotId);
-    const beforeFill = new Map(fillBySlotId);
 
     // Create quotes before inserting claims so we can store quote_id in claim_evidence directly.
     // Create one quote per unique chunk across all claims this step (deduped by chunkId).
@@ -1097,21 +1072,18 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       if (hadSubqueriesThisStep) {
         slot.attempt_count += 1;
         slot.last_queries = thisStepQueriesBySlotId.get(slot.id) ?? slot.last_queries ?? [];
-        if ((extractResult.broad_query_completed_slot_fully ?? []).includes(slot.name)) {
-          if (effectiveTarget <= 0 || currentCount >= effectiveTarget) slot.finished_querying = true;
-        }
       }
 
       if (slotShouldBeFinishedQuerying(slot, fill, track, currentCount)) {
         slot.finished_querying = true;
       }
     }
-    
+
     for (const slot of slots) {
       if (slot.type !== 'scalar') continue;
       const count = slotItemCountBySlotId.get(slot.id) ?? 0;
       if (count >= 1) continue;
-            if (thisStepQueriesBySlotId.has(slot.id)) {
+      if (thisStepQueriesBySlotId.has(slot.id)) {
         const priorFails = failedAttemptsBySlotId.get(slot.id) ?? 0;
         const prevFilled = beforeCounts.get(slot.id) ?? 0;
         const progressed = count > prevFilled;
@@ -1123,6 +1095,50 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const currentSlotItemCount = Array.from(slotItemCountBySlotId.values()).reduce((a, b) => a + b, 0);
     if (stagnationThisIteration) {
       log('stagnation-mark-finished', { iteration, currentSlotItemCount, prevSlotItemCount });
+    }
+
+    // --- ROUTE: decide next action + subqueries, now that stagnation is updated ---
+    // Query guidance is built here so it reflects actual step results and updated stagnation counts.
+    const queryGuidanceBlock = buildQueryGuidance(slots, fillBySlotId, stagnationBySlotId);
+    const finishedQueryingSlotNames = slots.filter((s) => s.finished_querying).map((s) => s.name);
+    const previousAttemptsBySlot = (() => {
+      const lines: string[] = [];
+      for (const slot of slotsWithAttempts) {
+        if (slot.finished_querying || slot.attempt_count === 0 || !slot.last_queries?.length) continue;
+        const count = slotItemCountBySlotId.get(slot.id) ?? 0;
+        lines.push(`Slot "${slot.name}": last queries [${slot.last_queries.map((q) => `"${q}"`).join(', ')}]. Items: ${count}. Try different queries.`);
+      }
+      return lines.length > 0 ? lines.join('\n') : undefined;
+    })();
+    const topSuggestedPages: SuggestedPage[] | null =
+      dynamicMode && sourceIds.length > 0
+        ? await getTopSuggestedPages(supabase, openaiKey, sourceIds, userMsg, retrieveSubqueries.map((s) => s.query), suggestedPageCandidates)
+        : null;
+    log('route-call', { iteration, topSuggestedCount: topSuggestedPages?.length ?? 0 });
+    const routeStart = Date.now();
+    const routeResult = await callRoute(
+      openaiKey,
+      slotRowsForExtract,
+      currentSlotStateJson,
+      userMsg,
+      inferCorpusLanguage(buildCorpusContextBlock({ pages, sourceById, leadChunks: leadList })),
+      queryGuidanceBlock,
+      broadSlotNamesThisStep,
+      finishedQueryingSlotNames,
+      dynamicMode,
+      topSuggestedPages,
+      previousAttemptsBySlot,
+    );
+    const routeMs = Date.now() - routeStart;
+    lastRouteResult = routeResult;
+
+    // Apply broad_query_completed_slot_fully signal from the router
+    for (const slot of slotsWithAttempts) {
+      if ((routeResult.broad_query_completed_slot_fully ?? []).includes(slot.name)) {
+        const effectiveTarget = getEffectiveTarget(slot, slotItemCountBySlotId, slotsById);
+        const currentCount = slotItemCountBySlotId.get(slot.id) ?? 0;
+        if (effectiveTarget <= 0 || currentCount >= effectiveTarget) slot.finished_querying = true;
+      }
     }
 
     for (const slot of slots) {
@@ -1141,8 +1157,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     }
 
     const nowFinishedNames = new Set(slots.filter((s) => s.finished_querying).map((s) => s.name));
-    if (lastExtractResult?.subqueries?.length && nowFinishedNames.size > 0) {
-      lastExtractResult.subqueries = lastExtractResult.subqueries.filter((q) => !nowFinishedNames.has(q.slot));
+    if (lastRouteResult?.subqueries?.length && nowFinishedNames.size > 0) {
+      lastRouteResult.subqueries = lastRouteResult.subqueries.filter((q) => !nowFinishedNames.has(q.slot));
     }
     const slotMetaBySlotId = new Map<string, SlotCompletenessMeta>(
       slots.map((s) => [s.id, { target_item_count: getEffectiveTarget(s, slotItemCountBySlotId, slotsById), finished_querying: s.finished_querying }]),
@@ -1155,13 +1171,13 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const completeness = overallCompleteness(slotsForCompleteness, slotItemCountBySlotId, slotMetaBySlotId);
     const allFinished = slots.every((s) => s.finished_querying);
     let effectiveNextAction =
-      extractResult.next_action === 'answer' && !allFinished
+      routeResult.next_action === 'answer' && !allFinished
         ? 'retrieve'
-        : (extractResult.next_action === 'retrieve' && allFinished)
+        : (routeResult.next_action === 'retrieve' && allFinished)
           ? 'answer'
-          : extractResult.next_action;
+          : routeResult.next_action;
 
-            if (effectiveNextAction === 'answer') {
+    if (effectiveNextAction === 'answer') {
       const pending = slots.filter((s) => {
         if (s.finished_querying) return false;
         const track = stagnationBySlotId.get(s.id);
@@ -1174,13 +1190,13 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
           query: s.type === 'mapping' ? ('__map__' as const) : ((s.description ?? '').trim() || s.name),
           ...(s.type === 'mapping' && s.description ? { map_description: s.description } : {}),
         }));
-        lastExtractResult = { ...extractResult, next_action: 'retrieve', subqueries: fallbackInput as ExtractSubquery[] };
+        lastRouteResult = { ...routeResult, next_action: 'retrieve', subqueries: fallbackInput as ExtractSubquery[] };
       }
     }
 
     if (effectiveNextAction === 'expand_corpus' && anySlotHasGuidedWork(slots, fillBySlotId, stagnationBySlotId)) {
       effectiveNextAction = 'retrieve';
-      log('expand_corpus-override-guided-work', { why: extractResult.why });
+      log('expand_corpus-override-guided-work', { why: routeResult.why });
       const fallbackInput = slots
         .filter((s) => !s.finished_querying && slotHasGuidedWorkRemaining(fillBySlotId.get(s.id), stagnationBySlotId.get(s.id), s))
         .map((s) => ({
@@ -1188,8 +1204,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
           query: s.type === 'mapping' ? ('__map__' as const) : ((s.description ?? '').trim() || s.name),
           ...(s.type === 'mapping' && s.description ? { map_description: s.description } : {}),
         }));
-      lastExtractResult = { ...extractResult, next_action: 'retrieve', subqueries: fallbackInput as ExtractSubquery[] };
-      (extractResult as { next_action: string }).next_action = 'retrieve';
+      lastRouteResult = { ...routeResult, next_action: 'retrieve', subqueries: fallbackInput as ExtractSubquery[] };
     }
 
     // High-completeness shortcut: stop retrieving when we already have enough evidence.
@@ -1208,7 +1223,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
     await supabase
       .from('reasoning_steps')
-      .update({ completeness_score: completeness, why: extractResult.why ?? undefined })
+      .update({ completeness_score: completeness, why: routeResult.why ?? undefined })
       .eq('id', currentStepId);
 
     let fillStatusBySlot: Record<string, string> | undefined;
@@ -1251,7 +1266,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       : retrieveSubqueries.map((q) => ({ slot: q.slot, query: q.query }));
     const stepStatements: string[] = [];
     stepStatements.push(`Retrieved ${retrievedChunks.length} chunks from this step.`);
-    stepStatements.push(extractResult.why ?? 'Extract');
+    stepStatements.push(routeResult.why ?? 'Route');
     stepStatements.push(`Achieved ${Math.round((completeness ?? 0) * 100)}% completeness.`);
     if (INCLUDE_FILL_STATUS_BY_SLOT && fillStatusBySlot && Object.keys(fillStatusBySlot).length > 0) {
       stepStatements.push(`Fill: ${Object.entries(fillStatusBySlot).map(([k, v]) => `${k}=${v}`).join(', ')}.`);
@@ -1275,7 +1290,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const stepEntry: ThoughtStep = {
       iter: iteration,
       action: 'retrieve',
-      why: extractResult.why,
+      why: routeResult.why,
       subqueries: subqueriesForStep,
       chunksPerSubquery: chunksPerSubquery?.length ? chunksPerSubquery : undefined,
       quotesFound: retrievedChunks.length,
@@ -1289,8 +1304,9 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       ...(droppedClaims.length ? { droppedClaims } : {}),
       ...(droppedSubqueriesPreparedThisIter.length ? { droppedSubqueries: droppedSubqueriesPreparedThisIter.slice(0, 50) } : {}),
       ...(extractResult.debug ? { extractDebug: extractResult.debug } : {}),
+      ...(routeResult.debug ? { routeDebug: routeResult.debug } : {}),
       ...(Object.keys(listSlotDebug).length > 0 ? { listSlotState: listSlotDebug } : {}),
-      timingMs: { retrieve: retrieveMs, extract: extractMs, quoteCreate: quoteCreateMs, total: totalMs },
+      timingMs: { retrieve: retrieveMs, extract: extractMs, route: routeMs, quoteCreate: quoteCreateMs, total: totalMs },
     };
     thoughtProcess.steps.push(stepEntry);
     if (extractionGapsAccumulated.length > 0) {
@@ -1304,29 +1320,24 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       iter: iteration,
       action: effectiveNextAction,
       label: effectiveNextAction === 'answer' ? 'Answering' : effectiveNextAction === 'retrieve' ? 'Retrieving again' : effectiveNextAction,
-      why: extractResult.why,
+      why: routeResult.why,
       quotesFound: retrievedChunks.length,
       claims: extractResult.claims,
       completeness,
       fillStatusBySlot: INCLUDE_FILL_STATUS_BY_SLOT ? fillStatusBySlot : undefined,
     });
 
-    const zeroCompletenessGiveUp = completeness === 0 && iteration >= 1;
-
     if (effectiveNextAction === 'answer') {
       const finalResult = await produceFinalAnswer();
       finalAnswer = finalResult.finalAnswer;
-      if (extractResult.next_action === 'retrieve' && allFinished) {
-        (lastExtractResult as { next_action?: string }).next_action = 'answer';
-      }
       validQuoteIdsForSave = finalResult.validQuoteIds;
       done = true;
       break;
     }
 
-    if (extractResult.next_action === 'clarify') {
-      log('clarify', { why: extractResult.why });
-      const questions = extractResult.questions?.length ? extractResult.questions : [extractResult.why ?? 'Could you clarify?'];
+    if (routeResult.next_action === 'clarify') {
+      log('clarify', { why: routeResult.why });
+      const questions = routeResult.questions?.length ? routeResult.questions : [routeResult.why ?? 'Could you clarify?'];
       const content = typeof questions === 'object' && Array.isArray(questions)
         ? questions.map((q, i) => `${i + 1}. ${q}`).join('\n')
         : String(questions);
@@ -1343,7 +1354,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     }
 
     if (effectiveNextAction === 'expand_corpus') {
-      log('expand_corpus', { why: extractResult.why, expansionCount });
+      log('expand_corpus', { why: routeResult.why, expansionCount });
       if (expansionCount >= MAX_EXPANSIONS) {
         thoughtProcess.hardStopReason = `Max expansions (${MAX_EXPANSIONS}) reached`;
         if (INCLUDE_FILL_STATUS_BY_SLOT && fillStatusBySlot) {
@@ -1364,7 +1375,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       let suggestedPage: SuggestedPage | null = null;
       if (dynamicMode && sourceIds.length > 0) {
         if (topSuggestedPages && topSuggestedPages.length > 0) {
-          const idx = extractResult.suggested_page_index;
+          const idx = routeResult.suggested_page_index;
           const oneBased = typeof idx === 'number' && idx >= 1 && idx <= topSuggestedPages.length ? idx : 1;
           suggestedPage = topSuggestedPages[oneBased - 1];
         } else {
@@ -1372,7 +1383,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         }
         if (suggestedPage) log('expand-suggested', { url: suggestedPage.url });
       }
-      thoughtProcess.expandCorpusReason = extractResult.why;
+      thoughtProcess.expandCorpusReason = routeResult.why;
       if (extractionGapsAccumulated.length > 0) thoughtProcess.extractionGaps = [...extractionGapsAccumulated];
       await emit({ thoughtProcess: { ...thoughtProcess } });
       const stubContent = suggestedPage
@@ -1384,7 +1395,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         ownerId,
         stubContent,
         thoughtProcess,
-        extractResult.why,
+        routeResult.why,
         suggestedPage,
       );
       if (stubErr || !stubMsg) {
@@ -1396,31 +1407,27 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     }
 
     if (effectiveNextAction === 'retrieve') {
-      if (totalSubqueriesRun >= MAX_TOTAL_SUBQUERIES || stagnationThisIteration || zeroCompletenessGiveUp) {
+      if (totalSubqueriesRun >= MAX_TOTAL_SUBQUERIES || stagnationThisIteration) {
         thoughtProcess.hardStopReason = totalSubqueriesRun >= MAX_TOTAL_SUBQUERIES
           ? `Max total subqueries (${MAX_TOTAL_SUBQUERIES})`
-          : zeroCompletenessGiveUp
-            ? 'No evidence found (0% completeness)'
-            : 'No new claims (stagnation)';
+          : 'No new claims (stagnation)';
         log('hard-stop', { reason: thoughtProcess.hardStopReason });
         if (INCLUDE_FILL_STATUS_BY_SLOT && fillStatusBySlot) {
           const missing = Object.entries(fillStatusBySlot).filter(([, v]) => v === 'missing' || v === 'partial').map(([k, v]) => `${k} (${v})`);
           if (missing.length) {
             thoughtProcess.partialAnswerNote = completeness === 0
-              ? (thoughtProcess.hardStopReason === 'No evidence found (0% completeness)' ? undefined : 'No evidence found for the requested slots.')
+              ? 'No evidence found for the requested slots.'
               : `Answered with partial completeness; missing or partial: ${missing.join(', ')}`;
           }
         }
         if (extractionGapsAccumulated.length > 0) thoughtProcess.extractionGaps = [...extractionGapsAccumulated];
         const lastCompleteness = thoughtProcess.steps[thoughtProcess.steps.length - 1]?.completeness ?? 0;
         if (dynamicMode && sourceIds.length > 0) {
-          thoughtProcess.expandCorpusReason = thoughtProcess.hardStopReason === 'No evidence found (0% completeness)'
-            ? 'Suggesting a page to add.'
-            : thoughtProcess.hardStopReason + '; suggesting a page to add.';
+          thoughtProcess.expandCorpusReason = thoughtProcess.hardStopReason + '; suggesting a page to add.';
           await emit({ thoughtProcess: { ...thoughtProcess } });
           const suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, retrieveSubqueries.map((s) => s.query));
           if (suggestedPage) log('expand-suggested-on-stagnation', { url: suggestedPage.url });
-          const stagnationModelMessage = (lastExtractResult?.why ?? '').trim();
+          const stagnationModelMessage = (lastRouteResult?.why ?? '').trim();
           const stubContent = stagnationModelMessage.length > 0
             ? stagnationModelMessage
             : suggestedPage
@@ -1488,7 +1495,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       ownerId,
       finalAnswer,
       validQuoteIds: validQuoteIdsForSave,
-      lastExtractResult,
+      lastExtractResult: lastRouteResult as Record<string, unknown> | null,
       thoughtProcess,
       extractionGapsAccumulated,
       iteration,

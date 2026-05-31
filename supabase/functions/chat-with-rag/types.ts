@@ -78,22 +78,20 @@ export interface ExtractClaim {
 
 export interface ExtractResult {
   claims: ExtractClaim[];
+  extractionGaps?: string[];
+  debug?: {
+    request?: string;
+    responseRaw?: string;
+  };
+}
+
+export interface RouteResult {
   next_action: 'retrieve' | 'expand_corpus' | 'clarify' | 'answer';
   why?: string;
-  final_answer?: string;
-  
   subqueries?: ExtractSubquery[];
-  
   questions?: string[];
-  
-  extractionGaps?: string[];
-  
-  cited_snippets?: Record<string, string>;
-  
   suggested_page_index?: number;
-  
   broad_query_completed_slot_fully?: string[];
-
   debug?: {
     request?: string;
     responseRaw?: string;
@@ -122,7 +120,7 @@ export interface EvidenceChunk {
   snippet: string;
   pageUrl?: string;
   pageTitle?: string;
-  retrievedBy?: EvidenceChunkProvenance[];
+  retrievedBy: EvidenceChunkProvenance[];
 }
 
 export type PageRow = { id: string; source_id: string; title: string | null; path: string; url: string };

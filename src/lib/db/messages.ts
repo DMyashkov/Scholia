@@ -7,7 +7,8 @@ export const messagesApi = {
       .from('messages')
       .select('*, quotes(*, pages!quotes_page_id_fkey(source_id))')
       .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: true })
+      .order('citation_order', { foreignTable: 'quotes', ascending: true, nullsFirst: false });
 
     if (error) throw error;
     return (data ?? []) as (Message & { quotes: Array<Record<string, unknown>> })[];

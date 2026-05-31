@@ -58,19 +58,13 @@ Typical shapes (use the minimum that fits the question):
 - Descriptions should be concrete. For mapping slots, say what the key is and what the value is.
 - Language: If the user message includes an "Indexed corpus" section, infer the primary language of the crawled site from its domains, page titles, and sample passages. Write every slot name, slot description, and subquery search phrase in that corpus language—even when the question is in another language.`;
 
-export const EXTRACT_SYSTEM = `You extract atomic claims from the provided evidence (chunks) and decide the next step.
+export const EXTRACT_SYSTEM = `You extract atomic claims from the provided evidence (chunks).
 
 Output JSON only:
 {
   "claims": [
-    { "slot": "slot_name", "value": <atomic value: string or number>, "key": "<REQUIRED for mapping slots — must exactly match a key in the dependency slot's current state; omit for list/scalar>", "confidence": 0.0-1.0, "cited_snippet": "<1-3 verbatim sentences from the cited chunk that directly state this value>", "chunkIds": [3] }
-  ],
-  "next_action": "retrieve" | "expand_corpus" | "clarify" | "answer",
-  "why": "short reason",
-  "subqueries": "optional when next_action is retrieve: array of { slot, query } OR for mapping with satisfied parent { slot, query: \"__map__\", map_description, key_connector } — see mapping matrix rules below",
-  "questions": "optional: when next_action is clarify, array of clarifying question strings",
-  "suggested_page_index": "optional: when next_action is expand_corpus and a candidate list was provided, integer 1–10 (1 = first); omit for first",
-  "broad_query_completed_slot_fully": "optional: array of BROAD slot names (listed below) for which no more retrieval is needed; evidence sufficient."
+    { "slot": "slot_name", "value": <atomic value: string or number>, "key": "<REQUIRED for mapping slots — must exactly match a key in the dependency slot’s current state; omit for list/scalar>", "confidence": 0.0-1.0, "cited_snippet": "<1-3 verbatim sentences from the cited chunk that directly state this value>", "chunkIds": [3] }
+  ]
 }
 
 Rules:
@@ -78,31 +72,42 @@ Rules:
 - Claims: each claim must cite at least one chunkId. Use the integer index shown in parentheses next to each evidence block, e.g. "chunkIds": [3]. Do NOT copy UUIDs; the backend maps indices to chunk IDs.
 - Slot values must reflect what the cited chunks directly state. You may rephrase for conciseness (e.g. extract a number or name from prose) but must not infer, generalize, or add context that is not explicitly present in the cited chunk text.
 - Do NOT invent facts, conclusions, or "standard practice" generalizations that are not supported by the cited chunks for that slot/key.
-- Do NOT cite a chunk unless it actually discusses the entity (mapping key) or fact you are claiming. For mapping attribution: the chunk's page URL/title is the primary signal — a chunk whose URL contains the entity name is authoritative even if retrieved_by lists other slots. The retrieved_by list is retrieval metadata, not attribution ground truth. When a chunk was retrieved_by many queries, treat it as a broad match and rely on the page URL/title + snippet content to decide which key it supports.
+- Do NOT cite a chunk unless it actually discusses the entity (mapping key) or fact you are claiming. For mapping attribution: the chunk’s page URL/title is the primary signal — a chunk whose URL contains the entity name is authoritative even if retrieved_by lists other slots. The retrieved_by list is retrieval metadata, not attribution ground truth. When a chunk was retrieved_by many queries, treat it as a broad match and rely on the page URL/title + snippet content to decide which key it supports.
 Scalar: one value, no key. List: one claim per distinct NEW item only—never one comma-separated claim bundling many entities; emit separate list claims per entity. Never re-emit a value already in Current slot state — this applies to all slot types: if a list item, mapping key→value, or scalar value is already present in Current slot state, do NOT emit a claim for it again. Emitting duplicates wastes budget and is not allowed.
-List target_item_count is a minimum, not a cap: if the list already has at least that many items and this step's chunks name another distinct entity not in state, still emit a list claim for it. Do not skip new list items just because count >= target.
-Cross-slot discovery (REQUIRED): if a chunk in this step names an entity that belongs to a list slot but is NOT yet in that slot's current state, you MUST emit a list claim for it in addition to any mapping/scalar claim. Skipping this causes the mapping claim to be silently dropped as "key not in dependency state". Use one canonical spelling per name (trim; normalize spaces around parentheses).
+List target_item_count is a minimum, not a cap: if the list already has at least that many items and this step’s chunks name another distinct entity not in state, still emit a list claim for it. Do not skip new list items just because count >= target.
+Cross-slot discovery (REQUIRED): if a chunk in this step names an entity that belongs to a list slot but is NOT yet in that slot’s current state, you MUST emit a list claim for it in addition to any mapping/scalar claim. Skipping this causes the mapping claim to be silently dropped as "key not in dependency state". Use one canonical spelling per name (trim; normalize spaces around parentheses).
 List proper-noun filtering: when a chunk line names a proper-noun entity followed by a generic category label (e.g. "АГАТА, семена картофи"), emit only the proper-noun entity (АГАТА); never emit the generic category label as a separate list item.
-Mapping: the "key" field is REQUIRED for every mapping claim — omitting it causes the claim to be silently dropped. The key must exactly match (same spelling) an entity already listed in the dependency slot's current state. Do not invent keys not in the state. Do not embed the key name inside "value"; put it in "key".
+Mapping: the "key" field is REQUIRED for every mapping claim — omitting it causes the claim to be silently dropped. The key must exactly match (same spelling) an entity already listed in the dependency slot’s current state. Do not invent keys not in the state. Do not embed the key name inside "value"; put it in "key".
 Mapping attribution: for every mapping claim, the chunk you cite must explicitly name the key entity **in the same sentence or table row** as the value you are extracting. If the value and the key entity appear in different sentences or rows describing different entities, do not combine them into a single claim.
+- Language: Write any text in the corpus language.`;
 
-- Prefer "retrieve" or "answer"; use "expand_corpus" only when evidence genuinely lacks the facts (not merely spread across chunks). 
-Use "clarify" only when the question is ambiguous, not when evidence is missing.
+export const ROUTE_SYSTEM = `You decide the next retrieval action given the current slot state and query guidance.
 
-- Answer: Set next_action to "answer" only when every slot that matters for the user’s question has been filled (non-empty / at target) and a useful answer can be given, or retrieval has clearly stagnated and no further useful evidence is likely. 
-Backend runs a separate final-answer step; you do not write answer text.
+Output JSON only:
+{
+  "next_action": "retrieve" | "expand_corpus" | "clarify" | "answer",
+  "why": "short reason",
+  "subqueries": "array of { slot, query } OR for mapping with satisfied parent { slot, query: \\"__map__\\", map_description, key_connector } — see mapping matrix rules",
+  "questions": "array of clarifying question strings (only when next_action is clarify)",
+  "suggested_page_index": "integer 1–N (only when next_action is expand_corpus and candidates listed)",
+  "broad_query_completed_slot_fully": "array of BROAD slot names for which no more retrieval is needed"
+}
 
-- Subqueries: omit for (a) slots that have finished querying (listed below), (b) scalar slots that already have a value in current slot state, 
-(c) list/mapping slots that have reached target (for lists, target is a minimum—keep retrieving only while you still expect genuinely new distinct items; target 0 = no fixed minimum, continue until broad_query_completed_slot_fully or stagnate; for mappings, target is either total expected values when items_per_key>=1, or distinct-key coverage when items_per_key===0). 
-Only suggest subqueries for slots that still need retrieval after your claims.
-For mapping slots with a satisfied parent you MUST use __map__ (not one subquery per key, not one query listing many keys). Backend expands to one query per unfilled non-stagnated key. Writing per-key queries manually defeats batching, causes timeouts, and is not allowed.
+Rules:
+- "answer": all slots that matter are filled / at target, or retrieval has clearly stagnated. Backend runs the final-answer step; do not write answer text here.
+- "retrieve": more queries are needed per the query guidance. Always include subqueries when choosing retrieve.
+- "expand_corpus": only when a candidate page is listed AND evidence genuinely lacks the facts AND no guided retrieve queries remain.
+- "clarify": only when the question itself is ambiguous, not when evidence is missing.
+
+Subquery rules:
+- Omit subqueries for slots that have finished querying (listed below) or scalar slots already filled.
+- Follow the per-slot mode in the query guidance exactly (BROAD only / TARGETED only / BROAD+TARGETED).
+- Do NOT repeat queries listed under "prior broad" in the guidance.
+- For mapping slots with a satisfied parent, use __map__ (not per-key queries). Backend expands to one query per unfilled non-stagnated key.
+
+${SLOT_RETRIEVAL_RULES}
 
 ${MAPPING_MATRIX_QUERY_RULES}
 
-- Query guidance block (below) is authoritative for per-step retrieval strategy and slot progress.
 - broad_query_completed_slot_fully: only for independent list slots that need no more discovery (not for dependent slots while parent may still grow).
-
-- Candidate suggested pages: prefer "expand_corpus" only when evidence genuinely lacks info AND a candidate is clearly relevant; 
-otherwise "retrieve" with subqueries or "answer". If expand_corpus, set suggested_page_index (1–10) or omit for first.
-
-- Language: Write subqueries, map_description, and key_connector in the corpus language (from evidence / indexed corpus), not necessarily the question language.`;
+- Language: Write subqueries, map_description, and key_connector in the corpus language.`;

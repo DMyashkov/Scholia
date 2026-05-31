@@ -1,9 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { EvidenceChunk, ExtractClaim, ExtractResult, ExtractSubquery } from './types.ts';
-import { formatEvidenceForPrompt } from './evidenceFormat.ts';
+import type { EvidenceChunk, ExtractClaim, ExtractResult, ExtractSubquery, RouteResult } from './types.ts';
+import { formatEvidenceForPrompt, trimEvidenceChunksForPrompt } from './evidenceFormat.ts';
 import type { SuggestedPage } from './expand.ts';
 import { OPENAI_CHAT_MODEL, fetchWithTimeout } from './config.ts';
-import { EXTRACT_SYSTEM } from './prompts.ts';
+import { EXTRACT_SYSTEM, ROUTE_SYSTEM } from './prompts.ts';
 import { normalizeSlotEntityString, slotValueDedupKey, splitListEntityValues } from './utils.ts';
 import type { CorpusLanguage } from './language.ts';
 import { formatCorpusLanguageLine } from './language.ts';
@@ -21,22 +21,74 @@ export interface SlotRow {
 
 export type { EvidenceChunk } from './types.ts';
 
-export async function callExtractAndDecide(
+function parseClaimsFromObj(
+  obj: Record<string, unknown>,
+  evidenceChunks: EvidenceChunk[],
+): ExtractClaim[] {
+  const claimsRaw = Array.isArray(obj.claims) ? obj.claims : [];
+  const chunkIdSet = new Set(evidenceChunks.map((q) => q.id));
+  const chunkIdsByIndex = evidenceChunks.map((q) => q.id);
+  return claimsRaw
+    .filter((c): c is Record<string, unknown> => c != null && typeof c === 'object')
+    .map((c) => {
+      const cRecord = c as Record<string, unknown>;
+      const rawIds = Array.isArray(cRecord.chunkIds) ? (cRecord.chunkIds as unknown[]) : [];
+      const chunkIds: string[] = [];
+      const seen = new Set<string>();
+      for (const id of rawIds) {
+        if (typeof id === 'string' && chunkIdSet.has(id)) {
+          if (!seen.has(id)) { seen.add(id); chunkIds.push(id); }
+          continue;
+        }
+        const idx = typeof id === 'number' ? id : typeof id === 'string' ? parseInt(id, 10) : NaN;
+        if (Number.isInteger(idx) && idx >= 1 && idx <= chunkIdsByIndex.length) {
+          const cid = chunkIdsByIndex[idx - 1];
+          if (!seen.has(cid)) { seen.add(cid); chunkIds.push(cid); }
+        }
+      }
+      return {
+        slot: String(c.slot ?? ''),
+        value: c.value !== undefined ? c.value : '',
+        key: typeof c.key === 'string' ? c.key : undefined,
+        confidence: typeof c.confidence === 'number' ? c.confidence : 1,
+        cited_snippet: typeof c.cited_snippet === 'string' && c.cited_snippet.trim().length > 0 ? c.cited_snippet.trim() : undefined,
+        chunkIds,
+      };
+    })
+    .filter((c) => c.slot && c.chunkIds.length > 0);
+}
+
+function parseSubqueriesFromObj(obj: Record<string, unknown>): ExtractSubquery[] {
+  const subqueriesRaw = Array.isArray(obj.subqueries) ? obj.subqueries : [];
+  return subqueriesRaw
+    .filter((q): q is Record<string, unknown> => q != null && typeof q === 'object')
+    .map((q) => {
+      const slot = String(q.slot ?? '').trim();
+      const queryRaw = q.query;
+      const query = queryRaw === '__map__' ? '__map__' : String(queryRaw ?? '');
+      if (slot.length === 0) return null;
+      if (query === '__map__') {
+        const map_description = typeof q.map_description === 'string' ? q.map_description.trim() || undefined : undefined;
+        const key_connector = typeof q.key_connector === 'string' ? q.key_connector.trim() || undefined : undefined;
+        return { slot, query: '__map__' as const, ...(map_description ? { map_description } : {}), ...(key_connector ? { key_connector } : {}) };
+      }
+      if (typeof query === 'string' && query.length > 0) return { slot, query };
+      return null;
+    })
+    .filter((q): q is ExtractSubquery => q != null);
+}
+
+export async function callExtract(
   apiKey: string,
   slots: SlotRow[],
   evidenceChunks: EvidenceChunk[],
   currentSlotStateJson: string,
   userMessage: string,
   corpusLanguage?: CorpusLanguage,
-  suggestExpandWhenNoEvidence = false,
-  topSuggestedPages: SuggestedPage[] | null = null,
-  previousAttemptsBySlot?: string,
-
-  broadSlotNamesThisStep: string[] = [],
   finishedQueryingSlotNames: string[] = [],
-  queryGuidanceBlock?: string,
 ): Promise<ExtractResult> {
-  const quoteBlock = formatEvidenceForPrompt(evidenceChunks);
+  const trimmedChunks = trimEvidenceChunksForPrompt(evidenceChunks);
+  const quoteBlock = formatEvidenceForPrompt(trimmedChunks);
   const slotBlock = slots
     .map((s) => {
       const targetStr = s.target_item_count != null && (s.type === 'list' || s.type === 'mapping') ? ` target=${s.target_item_count}` : '';
@@ -45,45 +97,9 @@ export async function callExtractAndDecide(
     })
     .join('\n');
 
-  let previousAttemptsBlock = '';
-  if (previousAttemptsBySlot && previousAttemptsBySlot.trim().length > 0) {
-    previousAttemptsBlock = `
-
-Previous attempt (slots not yet completed — try different queries):
-${previousAttemptsBySlot}`;
-  }
-
-  let dynamicBlock = '';
-  if (topSuggestedPages && topSuggestedPages.length > 0) {
-    const candidateList = topSuggestedPages
-      .map((p, i) => `${i + 1}. ${p.url}\n   title: ${p.title}\n   snippet: ${(p.snippet || '').slice(0, 200)}${(p.snippet?.length ?? 0) > 200 ? '...' : ''}`)
-      .join('\n');
-    dynamicBlock = `
-
-Candidate suggested pages (suggest expand_corpus only if one is clearly relevant and evidence lacks the info):
-${candidateList}
-
-expand_corpus: set suggested_page_index (1–${topSuggestedPages.length}) or omit for first. Prefer retrieve when more retrieval could fill slots.`;
-  } else if (suggestExpandWhenNoEvidence) {
-    dynamicBlock = '\nDynamic sources: when evidence is insufficient, prefer next_action "expand_corpus" with why (what kind of page would help).';
-  }
-
-  let broadBlock = '';
-  if (broadSlotNamesThisStep.length > 0) {
-    broadBlock = `\n\nBROAD slots this step (may set broad_query_completed_slot_fully): ${broadSlotNamesThisStep.join(', ')}.`;
-  }
-
-  const finishedBlock =
-    finishedQueryingSlotNames.length > 0
-      ? `${finishedQueryingSlotNames.join(', ')}. Do not suggest new subqueries for these slots.`
-      : 'none';
-
-  const guidanceBlock =
-    queryGuidanceBlock && queryGuidanceBlock.trim().length > 0
-      ? `
-
-${queryGuidanceBlock}`
-      : '';
+  const finishedBlock = finishedQueryingSlotNames.length > 0
+    ? `${finishedQueryingSlotNames.join(', ')}. Skip extraction for these.`
+    : 'none';
 
   const langLine = corpusLanguage ? `${formatCorpusLanguageLine(corpusLanguage)}\n` : '';
   const userContent = `${langLine}Question: ${userMessage}
@@ -91,20 +107,18 @@ ${queryGuidanceBlock}`
 Slots to fill:
 ${slotBlock}
 
-Slots already finished (no subqueries needed):
+Slots already finished (skip extraction):
 ${finishedBlock}
 
-Current slot state (JSON — existing keys per slot; for mapping, which keys are allowed):
+Current slot state (JSON — do not re-emit values already present):
 ${currentSlotStateJson || '{}'}
-${guidanceBlock}
-${previousAttemptsBlock}
 
 Evidence (each block starts with "(evidence N)" — use N as the integer index in chunkIds; page URL/title is the primary attribution signal for mapping):
 ---
 ${quoteBlock}
----${dynamicBlock}${broadBlock}
+---
 
-Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_page_index if expand_corpus; broad_query_completed_slot_fully only when appropriate per guidance.`;
+Output JSON: claims only.`;
 
   const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -127,81 +141,103 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
   } catch {
     return {
       claims: [],
-      next_action: 'retrieve',
-      why: 'Parse error',
       extractionGaps: ['Could not parse extract response (invalid JSON)'],
-      debug: {
-        request: userContent.slice(0, 20000),
-        responseRaw: content.slice(0, 20000),
-      },
+      debug: { request: userContent.slice(0, 20000), responseRaw: content.slice(0, 20000) },
     };
   }
   const obj = parsed as Record<string, unknown>;
-  const next_action = ['retrieve', 'expand_corpus', 'clarify', 'answer'].includes(String(obj.next_action))
-    ? (obj.next_action as ExtractResult['next_action'])
+  return {
+    claims: parseClaimsFromObj(obj, trimmedChunks),
+    debug: { request: userContent.slice(0, 20000), responseRaw: content.slice(0, 20000) },
+  };
+}
+
+export async function callRoute(
+  apiKey: string,
+  slots: SlotRow[],
+  currentSlotStateJson: string,
+  userMessage: string,
+  corpusLanguage?: CorpusLanguage,
+  queryGuidanceBlock?: string,
+  broadSlotNamesThisStep: string[] = [],
+  finishedQueryingSlotNames: string[] = [],
+  suggestExpandWhenNoEvidence = false,
+  topSuggestedPages: SuggestedPage[] | null = null,
+  previousAttemptsBySlot?: string,
+): Promise<RouteResult> {
+  let dynamicBlock = '';
+  if (topSuggestedPages && topSuggestedPages.length > 0) {
+    const candidateList = topSuggestedPages
+      .map((p, i) => `${i + 1}. ${p.url}\n   title: ${p.title}\n   snippet: ${(p.snippet || '').slice(0, 200)}${(p.snippet?.length ?? 0) > 200 ? '...' : ''}`)
+      .join('\n');
+    dynamicBlock = `\n\nCandidate suggested pages (expand_corpus only if clearly relevant and evidence genuinely lacks info):\n${candidateList}\n\nIf expand_corpus, set suggested_page_index (1–${topSuggestedPages.length}) or omit for first. Prefer retrieve when more retrieval could fill slots.`;
+  } else if (suggestExpandWhenNoEvidence) {
+    dynamicBlock = '\nDynamic sources available: use next_action "expand_corpus" when evidence is genuinely missing.';
+  }
+
+  let broadBlock = '';
+  if (broadSlotNamesThisStep.length > 0) {
+    broadBlock = `\n\nBROAD slots this step (may set broad_query_completed_slot_fully): ${broadSlotNamesThisStep.join(', ')}.`;
+  }
+
+  const finishedBlock = finishedQueryingSlotNames.length > 0
+    ? `${finishedQueryingSlotNames.join(', ')}. Do not suggest subqueries for these.`
+    : 'none';
+
+  const guidanceBlock = queryGuidanceBlock && queryGuidanceBlock.trim().length > 0
+    ? `\n\n${queryGuidanceBlock}`
+    : '';
+
+  let previousAttemptsBlock = '';
+  if (previousAttemptsBySlot && previousAttemptsBySlot.trim().length > 0) {
+    previousAttemptsBlock = `\n\nPrevious queries (do not repeat — try materially different queries):\n${previousAttemptsBySlot}`;
+  }
+
+  const langLine = corpusLanguage ? `${formatCorpusLanguageLine(corpusLanguage)}\n` : '';
+  const userContent = `${langLine}Question: ${userMessage}
+
+Current slot state (JSON):
+${currentSlotStateJson || '{}'}
+
+Slots already finished (no subqueries needed):
+${finishedBlock}
+${guidanceBlock}${previousAttemptsBlock}${dynamicBlock}${broadBlock}
+
+Output JSON: next_action, why; add subqueries if retrieve; suggested_page_index if expand_corpus; broad_query_completed_slot_fully only when appropriate per guidance.`;
+
+  const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: OPENAI_CHAT_MODEL,
+      messages: [
+        { role: 'system', content: ROUTE_SYSTEM },
+        { role: 'user', content: userContent },
+      ],
+      response_format: { type: 'json_object' },
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenAI route: ${res.status}`);
+  const raw = (await res.json()) as { choices: { message: { content: string } }[] };
+  const content = raw.choices?.[0]?.message?.content ?? '{}';
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return {
+      next_action: 'retrieve',
+      why: 'Parse error in route response',
+      debug: { request: userContent.slice(0, 20000), responseRaw: content.slice(0, 20000) },
+    };
+  }
+  const obj = parsed as Record<string, unknown>;
+  const next_action = (['retrieve', 'expand_corpus', 'clarify', 'answer'] as const).includes(obj.next_action as never)
+    ? (obj.next_action as RouteResult['next_action'])
     : 'retrieve';
   const why = typeof obj.why === 'string' ? obj.why : undefined;
-  const subqueriesRaw = Array.isArray(obj.subqueries) ? obj.subqueries : [];
-  const subqueries: ExtractSubquery[] = subqueriesRaw
-    .filter((q): q is Record<string, unknown> => q != null && typeof q === 'object')
-    .map((q) => {
-      const slot = String(q.slot ?? '').trim();
-      const queryRaw = q.query;
-      const query = queryRaw === '__map__' ? '__map__' : String(queryRaw ?? '');
-      if (slot.length === 0) return null;
-      if (query === '__map__') {
-        const map_description = typeof q.map_description === 'string' ? q.map_description.trim() || undefined : undefined;
-        const key_connector = typeof q.key_connector === 'string' ? q.key_connector.trim() || undefined : undefined;
-        return {
-          slot,
-          query: '__map__' as const,
-          ...(map_description ? { map_description } : {}),
-          ...(key_connector ? { key_connector } : {}),
-        };
-      }
-      if (typeof query === 'string' && query.length > 0) return { slot, query };
-      return null;
-    })
-    .filter((q): q is ExtractSubquery => q != null);
+  const subqueries = parseSubqueriesFromObj(obj);
   const questionsRaw = Array.isArray(obj.questions) ? obj.questions : [];
   const questions = questionsRaw.filter((q): q is string => typeof q === 'string' && q.trim().length > 0).map((q) => q.trim());
-  const claimsRaw = Array.isArray(obj.claims) ? obj.claims : [];
-  const chunkIdSet = new Set(evidenceChunks.map((q) => q.id));
-  const chunkIdsByIndex = evidenceChunks.map((q) => q.id);
-  const claims: ExtractClaim[] = claimsRaw
-    .filter((c): c is Record<string, unknown> => c != null && typeof c === 'object')
-    .map((c) => {
-      const cRecord = c as Record<string, unknown>;
-      const rawIds = Array.isArray(cRecord.chunkIds) ? (cRecord.chunkIds as unknown[]) : [];
-      const chunkIds: string[] = [];
-      const seen = new Set<string>();
-      for (const id of rawIds) {
-        if (typeof id === 'string' && chunkIdSet.has(id)) {
-          if (!seen.has(id)) {
-            seen.add(id);
-            chunkIds.push(id);
-          }
-          continue;
-        }
-        const idx = typeof id === 'number' ? id : typeof id === 'string' ? parseInt(id, 10) : NaN;
-        if (Number.isInteger(idx) && idx >= 1 && idx <= chunkIdsByIndex.length) {
-          const cid = chunkIdsByIndex[idx - 1];
-          if (!seen.has(cid)) {
-            seen.add(cid);
-            chunkIds.push(cid);
-          }
-        }
-      }
-      return {
-        slot: String(c.slot ?? ''),
-        value: c.value !== undefined ? c.value : '',
-        key: typeof c.key === 'string' ? c.key : undefined,
-        confidence: typeof c.confidence === 'number' ? c.confidence : 1,
-        cited_snippet: typeof c.cited_snippet === 'string' && c.cited_snippet.trim().length > 0 ? c.cited_snippet.trim() : undefined,
-        chunkIds,
-      };
-    })
-    .filter((c) => c.slot && c.chunkIds.length > 0);
 
   let suggested_page_index: number | undefined;
   if (next_action === 'expand_corpus' && typeof obj.suggested_page_index === 'number') {
@@ -218,18 +254,13 @@ Output JSON: claims, next_action, why; add subqueries if retrieve; suggested_pag
   }
 
   return {
-    claims,
     next_action,
     why,
     subqueries: subqueries.length > 0 ? subqueries : undefined,
     questions: questions.length > 0 ? questions : undefined,
-    extractionGaps: undefined,
     suggested_page_index,
     broad_query_completed_slot_fully,
-    debug: {
-      request: userContent.slice(0, 20000),
-      responseRaw: content.slice(0, 20000),
-    },
+    debug: { request: userContent.slice(0, 20000), responseRaw: content.slice(0, 20000) },
   };
 }
 

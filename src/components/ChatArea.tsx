@@ -241,15 +241,22 @@ export const ChatArea = ({
           <ScrollArea className="flex-1 scrollbar-thin" ref={scrollRef}>
             <div className="pb-4">
               {conversation.messages.map((message, i) => {
-                
+
                 if (message.followsMessageId) return null;
-                const next = conversation.messages[i + 1];
-                const followUp = next?.followsMessageId === message.id ? next : undefined;
+                const followUps: typeof conversation.messages = [];
+                const followedIds = new Set([message.id]);
+                for (let j = i + 1; j < conversation.messages.length; j++) {
+                  const candidate = conversation.messages[j];
+                  if (candidate.followsMessageId && followedIds.has(candidate.followsMessageId)) {
+                    followUps.push(candidate);
+                    followedIds.add(candidate.id);
+                  }
+                }
                 return (
                   <ChatMessage
                     key={message.id}
                     message={message}
-                    followUp={followUp}
+                    followUps={followUps.length > 0 ? followUps : undefined}
                     sources={sourcesList}
                     onQuoteClick={handleQuoteClick}
                     onSourceClick={handleKnowledgeTrailClick}

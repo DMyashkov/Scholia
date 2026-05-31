@@ -18,6 +18,7 @@ interface ChatMessageProps {
   message: Message;
 
   followUp?: Message;
+  followUps?: Message[];
   isStreaming?: boolean;
   sources?: { id: string; domain: string }[];
   onQuoteClick?: (quote: Quote) => void;
@@ -30,7 +31,8 @@ interface ChatMessageProps {
 
 export const ChatMessage = ({
   message,
-  followUp,
+  followUp: followUpProp,
+  followUps: followUpsProp,
   isStreaming,
   onQuoteClick,
   onAddSuggestedPage,
@@ -38,6 +40,8 @@ export const ChatMessage = ({
   onEditMessage,
   isEditingDisabled,
 }: ChatMessageProps) => {
+  const followUps = followUpsProp ?? (followUpProp ? [followUpProp] : []);
+  const followUp = followUps[0];
   const isUser = message.role === 'user';
   const isErrorMessage = !isUser && message.content.startsWith('__error__:');
   const errorText = isErrorMessage ? message.content.slice('__error__:'.length) : null;
@@ -243,41 +247,41 @@ export const ChatMessage = ({
           )}
 
           {}
-          {!isUser && !isStreaming && !followUp && tp && (tp.slots?.length || tp.steps?.length) ? (
+          {!isUser && !isStreaming && followUps.length === 0 && tp && (tp.slots?.length || tp.steps?.length) ? (
             <ThoughtProcessView thoughtProcess={tp} suggestedPage={message.suggestedPage} isLive={false} defaultOpen={false} />
           ) : null}
 
           {}
-          {!isUser && !isStreaming && followUp && (
-            <>
+          {!isUser && !isStreaming && followUps.length > 0 && followUps.map((fu, fuIdx) => (
+            <React.Fragment key={fu.id}>
               <div className="my-4 h-px bg-border" />
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div className="flex items-center gap-2">
                   <p className="text-sm text-muted-foreground">
-                    Scraped {followUp.scrapedPageDisplay || 'new page'}
+                    Scraped {fu.scrapedPageDisplay || 'new page'}
                   </p>
-                  {followUp.thoughtProcess?.completeness != null && (
+                  {fu.thoughtProcess?.completeness != null && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span
                           className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground border border-border cursor-help"
                           tabIndex={0}
                         >
-                          {Math.round(followUp.thoughtProcess.completeness * 100)}%
+                          {Math.round(fu.thoughtProcess.completeness * 100)}%
                         </span>
                       </TooltipTrigger>
                       <TooltipContent side="bottom" className="max-w-[200px]">
-                        <p className="font-medium">Evidence: {Math.round(followUp.thoughtProcess.completeness * 100)}%</p>
+                        <p className="font-medium">Evidence: {Math.round(fu.thoughtProcess.completeness * 100)}%</p>
                         <p className="text-muted-foreground text-xs mt-0.5">Slot coverage for this answer.</p>
                       </TooltipContent>
                     </Tooltip>
                   )}
                 </div>
                 <CopyMessageButton
-                  message={followUp}
+                  message={fu}
                   phases={[
-                    ...(tp && (tp.slots?.length || tp.steps?.length) ? [tp] : []),
-                    ...(followUp.thoughtProcess ? [followUp.thoughtProcess] : []),
+                    ...(fuIdx === 0 && tp && (tp.slots?.length || tp.steps?.length) ? [tp] : []),
+                    ...(fu.thoughtProcess ? [fu.thoughtProcess] : []),
                   ]}
                   userQuery={isUser ? message.content : undefined}
                   className="h-8 w-8 shrink-0 opacity-70 hover:opacity-100"
@@ -285,33 +289,40 @@ export const ChatMessage = ({
               </div>
               <div className="space-y-2">
                 <div className="prose prose-invert prose-sm max-w-none">
-                  <MessageContent 
-                    content={followUp.content} 
-                    quotes={followUp.quotes ?? []}
+                  <MessageContent
+                    content={fu.content}
+                    quotes={fu.quotes ?? []}
                     onQuoteClick={onQuoteClick}
                   />
                 </div>
-                {(followUp.quotes?.length ?? 0) > 0 && onQuoteClick && (
-                  <QuoteCardsList quotes={followUp.quotes ?? []} onQuoteClick={onQuoteClick} />
+                {(fu.quotes?.length ?? 0) > 0 && onQuoteClick && (
+                  <QuoteCardsList quotes={fu.quotes ?? []} onQuoteClick={onQuoteClick} />
                 )}
-                {(followUp.quotes?.length ?? 0) > 0 && onQuoteClick && (
-                  <CitedPages quotes={followUp.quotes ?? []} onQuoteClick={onQuoteClick} />
+                {(fu.quotes?.length ?? 0) > 0 && onQuoteClick && (
+                  <CitedPages quotes={fu.quotes ?? []} onQuoteClick={onQuoteClick} />
                 )}
-                {followUp.thoughtProcess && (followUp.thoughtProcess.slots?.length || followUp.thoughtProcess.steps?.length) ? (
+                {fu.thoughtProcess && (fu.thoughtProcess.slots?.length || fu.thoughtProcess.steps?.length) ? (
                   <ThoughtProcessView
-                    thoughtProcess={followUp.thoughtProcess}
-                    thoughtProcessBefore={tp && (tp.slots?.length || tp.steps?.length) ? tp : undefined}
+                    thoughtProcess={fu.thoughtProcess}
+                    thoughtProcessBefore={fuIdx === 0 && tp && (tp.slots?.length || tp.steps?.length) ? tp : undefined}
                     suggestedPage={message.suggestedPage}
                     isLive={false}
                     defaultOpen={false}
                   />
                 ) : null}
+                {fu.suggestedPage && onAddSuggestedPage && conversationId && (
+                  <IndexSuggestionCard
+                    suggestedPage={fu.suggestedPage}
+                    messageId={fu.id}
+                    onAddAndReask={onAddSuggestedPage}
+                  />
+                )}
               </div>
-            </>
-          )}
+            </React.Fragment>
+          ))}
 
           {}
-          {!isUser && !isStreaming && !followUp && message.suggestedPage && onAddSuggestedPage && conversationId && (
+          {!isUser && !isStreaming && followUps.length === 0 && message.suggestedPage && onAddSuggestedPage && conversationId && (
             <IndexSuggestionCard
               suggestedPage={message.suggestedPage}
               messageId={message.id}

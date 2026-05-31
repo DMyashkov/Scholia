@@ -15,7 +15,7 @@ export type SuggestedPage = {
 export async function trySuggestPage(
   supabase: SupabaseClient,
   openaiKey: string,
-  conversationId: string,
+  _conversationId: string,
   userMessage: string,
   searchQueries: string[],
   allSourceIds: string[],

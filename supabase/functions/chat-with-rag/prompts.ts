@@ -9,7 +9,6 @@ export const SLOT_RETRIEVAL_RULES = `Retrieval strategy for slots with finished_
 7. Per-key / __map__: only keys in dependency state; skip filled and stagnated keys; follow mapping matrix phrasing when using __map__.
 8. Stagnation: two consecutive steps with stable dependency, same strategy, and no new items → slot finished_querying; stagnated mapping keys are not queried again until dependency grows (new keys only).`;
 
-
 export const MAPPING_MATRIX_QUERY_RULES = `Mapping matrix (__map__) — backend expands to one search per unfilled key:
 - Final query shape: map_description + key_connector + key (concatenated). The key is already the parent entity from the dependency slot; do not encode "for each item" or "every entity" in map_description.
 - map_description: short topic phrase only — the attribute or fact you want per key. Not a full sentence. Do not restate the parent list or the per-key iteration in map_description.

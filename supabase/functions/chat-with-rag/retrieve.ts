@@ -22,7 +22,6 @@ export async function doRetrieve(
   pageIds: string[],
   subqueries: RetrieveSubquery[],
   perQuery = MATCH_CHUNKS_PER_QUERY,
-  /** Chunks already sent to the extract model per slot — excluded from results for that slot. */
   excludeChunksBySlot?: Map<string, Set<string>>,
 ): Promise<RetrieveResult> {
   const queries = subqueries.map((s) => s.query);
@@ -32,11 +31,9 @@ export async function doRetrieve(
   const chunksPerSubquery: number[] = new Array(embeddings.length).fill(0);
   const provenanceByChunkId = new Map<string, EvidenceChunkProvenance[]>();
 
-  // Fire all pgvector searches in parallel instead of sequentially
   await Promise.all(embeddings.map(async (embedding, i) => {
     const { slot, query } = subqueries[i];
     const excluded = excludeChunksBySlot?.get(slot);
-    // Fetch extra rows so we still get ~perQuery new chunks after excluding already-seen ones.
     const fetchCount = excluded && excluded.size > 0
       ? Math.min(perQuery + excluded.size, perQuery * 3)
       : perQuery;
@@ -46,7 +43,6 @@ export async function doRetrieve(
       match_count: fetchCount,
     });
     const rawList = (matchedChunks || []) as ChunkRow[];
-    // Filter out chunks already processed for this slot in prior steps, then cap to perQuery.
     const list = excluded && excluded.size > 0
       ? rawList.filter((c) => !excluded.has(c.id)).slice(0, perQuery)
       : rawList;
@@ -85,17 +81,9 @@ export interface ListNeighborResult {
   slotName: string;
 }
 
-/**
- * For each list-slot anchor chunk that has a known character position, fetches
- * adjacent chunks from the same page within windowChars of the anchor's range.
- * Groups anchors by page to minimise DB round-trips (one query per page).
- * Excludes chunk IDs in excludeIds; does not mutate that set.
- */
 export async function fetchListSlotNeighborChunks(
   supabase: SupabaseClient,
-  /** IDs of chunks retrieved for list-type slots this step */
   listSlotChunkIds: string[],
-  /** Page metadata keyed by anchor chunk ID */
   anchorMeta: Map<string, { pageId: string; pageUrl?: string; pageTitle?: string; slotName: string }>,
   windowChars: number,
   maxPerAnchor: number,

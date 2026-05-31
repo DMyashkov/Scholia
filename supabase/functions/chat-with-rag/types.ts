@@ -23,7 +23,6 @@ export interface QuoteOut {
   contextAfter?: string;
 }
 
-
 export type SlotType = 'scalar' | 'list' | 'mapping';
 
 export interface PlanSlot {
@@ -42,12 +41,10 @@ export interface PlanSubquery {
   query: string;
 }
 
-
 export interface NormalSubquery {
   slot: string;
   query: string;
 }
-
 
 export interface MapSubquery {
   slot: string;
@@ -65,7 +62,6 @@ export interface PlanResult {
   slots: PlanSlot[];
   subqueries: PlanSubquery[];
 }
-
 
 export interface ExtractClaim {
   slot: string;
@@ -109,7 +105,6 @@ export type ChunkRow = {
   distance?: number;
 };
 
-
 export interface EvidenceChunkProvenance {
   slot: string;
   query: string;
@@ -125,7 +120,6 @@ export interface EvidenceChunk {
 
 export type PageRow = { id: string; source_id: string; title: string | null; path: string; url: string };
 export type SourceRow = { id: string; domain: string };
-
 
 export type SlotDb = {
   id: string;

@@ -74,7 +74,6 @@ export function countFilledBySlotId(
   slots: SlotDb[],
   itemsBySlotId: Map<string, SlotItemRow[]>,
 ): Map<string, number> {
-  const slotById = new Map(slots.map((s) => [s.id, s]));
   const countBySlot = new Map<string, number>();
   for (const s of slots) countBySlot.set(s.id, 0);
 
@@ -162,15 +161,12 @@ function strategiesUsedBySlot(
   return used;
 }
 
-
 export function pickDiversifiedBroadQuery(
   slot: SlotDb,
   fill: SlotFillStatus | undefined,
   seen: Set<string>,
 ): string | null {
   const base = (slot.description ?? slot.name).trim().replace(/\.+$/, '');
-  // Only use the base description — discovery term diversification is the AI's job
-  // (plan/extract phases generate language-appropriate subqueries).
   const variants: string[] = [base];
   const prior = new Set(fill?.broadQueriesAttempted ?? []);
   const normalizeTokens = (s: string): string[] =>
@@ -206,11 +202,10 @@ function pickNewBroadQuery(
   return pickDiversifiedBroadQuery(slot, fill, seen);
 }
 
-
 export function ensureSubqueriesForSlotModes(
   subs: { slot: string; query: string }[],
   slots: SlotDb[],
-  slotIdByName: Map<string, string>,
+  _slotIdByName: Map<string, string>,
   fillBySlotId: Map<string, SlotFillStatus>,
   seen: Set<string>,
 ): { slot: string; query: string }[] {
@@ -247,14 +242,11 @@ export function ensureSubqueriesForSlotModes(
           seen.add(`${slot.id}\0${q}`);
         }
       }
-      // For list slots in targeted mode: rely on AI-generated subqueries from the extract phase.
-      // No hardcoded language-specific facet terms injected here.
     }
   }
 
   return out;
 }
-
 
 export function formatMappingKeyQuery(
   phrase: string,
@@ -268,7 +260,6 @@ export function formatMappingKeyQuery(
   if (!c) return `${p} ${k}`.replace(/\s+/g, ' ').trim();
   return `${p} ${c} ${k}`.replace(/\s+/g, ' ').trim();
 }
-
 
 export function extractMappingKeyFromQuery(query: string, parentKeys: string[]): string | null {
   const qNorm = normalizeSlotEntityString(query);
@@ -286,7 +277,6 @@ export function isMappingPerKeyQuery(query: string, parentKeys: string[]): boole
   if (countParentKeysInQuery(query, parentKeys) !== 1) return false;
   return extractMappingKeyFromQuery(query, parentKeys) != null;
 }
-
 
 export function countParentKeysInQuery(query: string, parentKeys: string[]): number {
   const q = normalizeSlotEntityString(query).toLowerCase();
@@ -584,7 +574,7 @@ export function expandMapSubqueries(params: {
   parentItems: { value?: unknown; key?: string | null }[];
   stagnatedKeys?: Set<string>;
 }): { slot: string; query: string }[] {
-  const { slotName, slot, mapDescription, keyConnector, depSlot, fill, parentItems, stagnatedKeys } = params;
+  const { slotName, slot, mapDescription, keyConnector, fill, parentItems, stagnatedKeys } = params;
   const phrase = mapDescription || slot.description || slotName;
 
   if (!fill?.parentSatisfied) {
@@ -613,7 +603,6 @@ export function expandMapSubqueries(params: {
   }));
 }
 
-
 export function filterSubqueriesForFilledKeys(
   subs: { slot: string; query: string }[],
   slotIdByName: Map<string, string>,
@@ -636,7 +625,6 @@ export function filterSubqueriesForFilledKeys(
   });
 }
 
-
 export function filterSubqueriesForStagnatedKeys(
   subs: { slot: string; query: string }[],
   slotIdByName: Map<string, string>,
@@ -657,7 +645,6 @@ export function filterSubqueriesForStagnatedKeys(
   });
 }
 
-
 export function filterSubqueriesForUnknownMappingKeys(
   subs: { slot: string; query: string }[],
   slotIdByName: Map<string, string>,
@@ -677,7 +664,6 @@ export function filterSubqueriesForUnknownMappingKeys(
     return parentKeys.has(slotValueDedupKey(matchedKey));
   });
 }
-
 
 export function filterMappingMegaQueries(
   subs: { slot: string; query: string }[],
@@ -701,7 +687,6 @@ export function filterMappingMegaQueries(
     return true;
   });
 }
-
 
 export function applySubqueryPriorityCaps(
   subs: { slot: string; query: string }[],
@@ -889,7 +874,6 @@ export function slotShouldBeFinishedQuerying(
   return false;
 }
 
-
 export function prepareRunnableSubqueries(params: {
   subsInput: { slot: string; query: string; map_description?: string; key_connector?: string }[];
   slots: SlotDb[];
@@ -900,7 +884,6 @@ export function prepareRunnableSubqueries(params: {
   getParentItems: (depSlotName: string) => { value?: unknown; key?: string | null }[];
   maxMappingPerIter: number;
   maxPerIter: number;
-  /** Optional predicate — return true to exclude a query (e.g. already run in a prior step). */
   skipQuery?: (slotId: string, query: string) => boolean;
 }): { runnable: { slot: string; query: string }[]; dropped: { slot: string; query: string; reason: string }[] } {
   const {
@@ -1046,7 +1029,6 @@ export function anySlotHasGuidedWork(
   });
 }
 
-
 export function buildRecoverySubqueries(
   slots: SlotDb[],
   fillBySlotId: Map<string, SlotFillStatus>,
@@ -1072,7 +1054,6 @@ export function buildRecoverySubqueries(
       }
     }
 
-    // For list slots in targeted mode: recovery subqueries are AI-driven; no hardcoded language facets.
   }
 
   return out;

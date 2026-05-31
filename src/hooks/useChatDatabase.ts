@@ -61,7 +61,6 @@ type DbQuoteRow = {
   pages?: { source_id: string } | null;
 };
 
-/** Align quote array index with [N] markers in message content (citation_order is 1-based). */
 function sortQuotesByCitationOrder(quotes: DbQuoteRow[]): DbQuoteRow[] {
   return [...quotes].sort((a, b) => {
     const ao = a.citation_order;

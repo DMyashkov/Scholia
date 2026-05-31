@@ -1,13 +1,9 @@
 
 
-
-
-
-
 import { corsHeaders } from './config.ts';
 import { runRag } from './run.ts';
 
-Deno.serve(async (req) => {
+Deno.serve((req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }

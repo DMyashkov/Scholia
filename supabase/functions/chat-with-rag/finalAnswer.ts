@@ -1,8 +1,5 @@
 
 
-
-
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { OPENAI_CHAT_MODEL, fetchWithTimeout } from './config.ts';
 
 export interface FinalAnswerResult {
@@ -10,8 +7,6 @@ export interface FinalAnswerResult {
   cited_snippets: Record<string, string>;
   debug?: { request?: string; responseRaw?: string };
 }
-
-
 
 const FINAL_ANSWER_SYSTEM = `You write the final answer to the user's question from extracted slot state data. Your job is to present the information in a natural, readable way — not to echo raw slot values mechanically.
 

@@ -59,6 +59,7 @@ Citation rules:
         raw = JSON.stringify({ content: inner.content, quotes: inner.quotes ?? [], title: inner.title });
       }
     } catch {
+      void 0;
     }
   }
   const parsed = JSON.parse(raw) as ChatResponse & { title?: string };

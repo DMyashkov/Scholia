@@ -1,6 +1,5 @@
 
 
-
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchWithTimeout } from './config.ts';
 import type { PageRow, SourceRow } from './types.ts';
@@ -11,7 +10,6 @@ import {
   buildQuotesOut,
   updateQuoteContextFromPage,
 } from './quotes.ts';
-import { getLastMessages } from './chat.ts';
 
 export interface SaveAnswerParams {
   supabase: SupabaseClient;
@@ -50,8 +48,6 @@ export async function saveAssistantMessageWithQuotes(params: SaveAnswerParams): 
     sourceById,
   } = params;
 
-  // Quotes are pre-created during extract steps. We just validate the IDs the LLM used,
-  // replace placeholders with [N], then attach the pre-created quote rows to this message.
   const placeholderMatches = [...finalAnswer.matchAll(/\[\[quote:([^\]]+)\]\]/g)].map((m) => (m[1] ?? '').trim()).filter(Boolean);
   const placeholderUnique = [...new Set(placeholderMatches)];
   const { content, quoteIdsOrdered } = replaceCitationPlaceholders(finalAnswer, validQuoteIds);
@@ -96,7 +92,6 @@ export async function saveAssistantMessageWithQuotes(params: SaveAnswerParams): 
     await supabase.from('messages').update({ suggested_page: null }).eq('id', appendToMessageId);
   }
 
-  // Attach the pre-created quote rows to this message.
   if (quoteIdsOrdered.length > 0) {
     await attachQuotesToMessage(supabase, assistantRow.id, quoteIdsOrdered);
   }

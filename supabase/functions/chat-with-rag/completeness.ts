@@ -11,7 +11,6 @@ export interface SlotCompletenessMeta {
   finished_querying: boolean;
 }
 
-
 export function slotCompleteness(
   slot: SlotForCompleteness,
   slotItemCountBySlotId: Map<string, number>,
@@ -43,7 +42,6 @@ export function slotCompleteness(
   }
   return 0;
 }
-
 
 export function overallCompleteness(
   slots: SlotForCompleteness[],

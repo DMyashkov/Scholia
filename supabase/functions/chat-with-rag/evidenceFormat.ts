@@ -47,7 +47,6 @@ function splitSnippetLines(snippet: string): string[] {
   return snippet.split(/\r?\n/).map(normalizeLine).filter((line) => line.length > 0);
 }
 
-/** Lines repeated across many chunks in one step — likely shared page chrome, not content. */
 export function detectBoilerplateLines(allSnippets: string[]): Set<string> {
   const counts = new Map<string, number>();
   const chunkCount = allSnippets.length;
@@ -64,10 +63,6 @@ export function detectBoilerplateLines(allSnippets: string[]): Set<string> {
     }
   }
 
-  // Minimum count thresholds: keep them high enough that short content lines (e.g.
-  // "АГАТА, семена картофи" appearing in a navigation sidebar on every variety page)
-  // are not mistakenly stripped alongside true boilerplate (headers, footers, contact info).
-  // A short line appearing in only 2-3 chunks is almost certainly content, not chrome.
   const twoFifths = Math.max(5, Math.ceil(chunkCount * 0.4));
   const half = Math.ceil(chunkCount * 0.5);
   const shortLineMin = Math.max(5, Math.ceil(chunkCount * 0.3));

@@ -2,19 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ChunkRow, PageRow, SourceRow, QuoteOut } from './types.ts';
 import { PAGE_CONTEXT_CHARS } from './config.ts';
 
-
-
-
-
 export function snippetFromChunk(c: ChunkRow): string {
   return (c.content ?? '').trim();
 }
 
-/**
- * Creates a quote row during the extract step (before final answer).
- * For mapping claims, verifies the key entity appears in the chunk to drop fake attributions.
- * Returns the new quote ID, or null if attribution is invalid or DB insert fails.
- */
 export async function createExtractQuote(
   supabase: SupabaseClient,
   params: {
@@ -32,9 +23,6 @@ export async function createExtractQuote(
   const { chunkId, chunkContent, pageId, page, domain, stepId, ownerId, mappingKey, citedSnippet } = params;
   if (!chunkContent.trim()) return null;
 
-  // Drop fake mapping citations: key entity must appear in the chunk text, OR in
-  // the page title / path (e.g. torene sections live on individual variety pages
-  // whose chunk text is "ТОРЕНЕ: ..." without repeating the variety name).
   if (mappingKey) {
     const keyNorm = normalizeForQuoteMatch(mappingKey);
     const contentNorm = normalizeForQuoteMatch(chunkContent);
@@ -45,7 +33,6 @@ export async function createExtractQuote(
     }
   }
 
-  // Choose snippet: use LLM-provided cited_snippet if it verifies against chunk, else chunk text.
   let snippet = chunkContent;
   if (citedSnippet) {
     const verified = citedSnippetVerifiedInChunk(chunkContent, citedSnippet);
@@ -115,9 +102,6 @@ export function citedSnippetVerifiedInChunk(chunkText: string, snippet: string):
   if (!snippetTrim) return false;
   const chunkNorm = normalizeForQuoteMatch(chunkText);
   const snippetNorm = normalizeForQuoteMatch(snippetTrim);
-  // Use fuzzy matching: exact substring → ellipsis segments → 80/60/40-char prefix.
-  // The LLM often paraphrases slightly or copies from slot state; the prefix check
-  // rescues quotes that start verbatim but were truncated by the LLM.
   return findSnippetInText(chunkNorm, snippetNorm) !== null;
 }
 
@@ -143,8 +127,6 @@ export function replaceAndVerifyCitationPlaceholders(
 ): { content: string; quoteIdsOrdered: string[]; droppedQuoteIds: string[]; snippetsByQuoteId: Map<string, string> } {
   const verifiedIds = new Set<string>();
   const droppedQuoteIds: string[] = [];
-  // For each kept quote: LLM snippet when it fuzzy-matches the chunk, raw chunk text otherwise.
-  // This ensures every valid citation gets a displayable snippet even when the LLM paraphrases.
   const snippetsByQuoteId = new Map<string, string>();
   const seen = new Set<string>();
 
@@ -160,7 +142,6 @@ export function replaceAndVerifyCitationPlaceholders(
       continue;
     }
 
-    // Keep the citation regardless of snippet quality; choose the best available snippet.
     const chunkText = chunkTextById.get(id) ?? '';
     const modelSnippet = typeof citedSnippets[id] === 'string' ? citedSnippets[id].trim() : '';
     const llmSnippetValid =
@@ -229,10 +210,6 @@ export async function attachQuotesToMessage(
   }
 }
 
-
-
-
-
 export async function updateQuoteContextFromPage(
   supabase: SupabaseClient,
   quoteId: string,
@@ -252,7 +229,6 @@ export async function updateQuoteContextFromPage(
 export function chunkShape(c: ChunkRow): string {
   return `page_id: ${c.page_id}\n[${c.source_domain}${c.page_path}] ${c.page_title}\n${c.content}`;
 }
-
 
 const ELLIPSIS_RE = /\s*\.{2,}\s*|\s*…\s*/g;
 

@@ -1,17 +1,15 @@
 
 
-
 export function normalizeSlotEntityString(raw: string): string {
   let s = raw.trim().replace(/\s+/g, ' ');
   s = s.replace(/\s*\(\s*/g, '(').replace(/\s*\)\s*/g, ')');
   try {
     s = s.normalize('NFKC');
   } catch {
-    /* older runtimes */
+    void 0;
   }
   return s;
 }
-
 
 export function splitListEntityValues(raw: string): string[] {
   const normalized = normalizeSlotEntityString(raw);
@@ -20,9 +18,7 @@ export function splitListEntityValues(raw: string): string[] {
   return parts.length > 0 ? parts : [normalized];
 }
 
-
 export function slotValueDedupKey(valueJson: unknown): string {
-  // Lowercase so "Фонтане" and "ФОНТАНЕ" deduplicate to the same key.
   if (typeof valueJson === 'string') return normalizeSlotEntityString(valueJson).toLowerCase();
   if (typeof valueJson === 'number' || typeof valueJson === 'boolean') return String(valueJson);
   return JSON.stringify(valueJson);
@@ -77,26 +73,21 @@ export function deriveTitleFromUrl(url: string): string {
   }
 }
 
-
 export function extractQueryTerms(query: string): string[] {
   const stop = new Set([
-    // English
     'a', 'an', 'the', 'of', 'to', 'for', 'in', 'on', 'at', 'by', 'with',
     'other', 'than', 'give', 'me', 'get', 'show', 'find', 'what', 'how',
     'is', 'are', 'was', 'were', 'all', 'each', 'every', 'list', 'about',
-    // Bulgarian
     'за', 'на', 'в', 'и', 'от', 'с', 'е', 'да', 'се', 'не', 'по', 'до',
     'при', 'като', 'но', 'или', 'са', 'ще', 'ми', 'му', 'им', 'тя', 'те',
     'той', 'то', 'ги', 'го', 'си', 'ти', 'аз', 'ни',
   ]);
-  // Use unicode-aware replacement so Cyrillic/Greek letters are preserved
   return query
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .split(/\s+/)
     .filter((w) => w.length > 1 && !stop.has(w));
 }
-
 
 export function partitionByTermMatch<T extends { to_url: string; anchor_text: string | null }>(
   list: T[],

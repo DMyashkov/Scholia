@@ -154,7 +154,7 @@ Output JSON: claims only.`;
 
 export async function callRoute(
   apiKey: string,
-  slots: SlotRow[],
+  _slots: SlotRow[],
   currentSlotStateJson: string,
   userMessage: string,
   corpusLanguage?: CorpusLanguage,

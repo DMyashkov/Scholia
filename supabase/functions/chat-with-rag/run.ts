@@ -21,7 +21,6 @@ import {
   NEIGHBOR_WINDOW_CHARS,
   NEIGHBOR_MAX_PER_ANCHOR,
 } from './config.ts';
-import type { PageRow, SourceRow } from './types.ts';
 import { callPlan } from './plan.ts';
 import { callExtract, callRoute, insertClaims } from './loop.ts';
 import type { SlotRow } from './loop.ts';
@@ -30,7 +29,7 @@ import { upsertEvidenceChunk } from './evidenceFormat.ts';
 import { doRetrieve, fetchListSlotNeighborChunks } from './retrieve.ts';
 import { callFinalAnswer } from './finalAnswer.ts';
 import { createExtractQuote } from './quotes.ts';
-import { slotCompleteness, overallCompleteness } from './completeness.ts';
+import { overallCompleteness } from './completeness.ts';
 import type { SlotForCompleteness, SlotCompletenessMeta } from './completeness.ts';
 import { doExpandCorpus, getTopSuggestedPages, type SuggestedPage } from './expand.ts';
 import { getLastMessages } from './chat.ts';
@@ -126,7 +125,7 @@ function buildSlotFillSummary(
 export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> {
   log('start');
   const body = (await req.json()) as LoadRagBody & { rootMessageId?: string };
-  const { conversationId, userMessage, rootMessageId: bodyRootMessageId, appendToMessageId, scrapedPageDisplay } = body;
+  const { conversationId, userMessage } = body;
 
   if (!conversationId || !userMessage?.trim()) {
     log('error', { reason: 'conversationId and userMessage required' });
@@ -182,7 +181,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     pageIds,
     pageById,
     sourceById,
-    sourceDomainByPageId,
     leadChunks: leadList,
     rootMessageId,
     slots: initialSlots,
@@ -346,8 +344,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       .in('slot_id', slots.map((s) => s.id));
     const bySlot = new Map<string, { key: string | null; value: unknown }[]>();
     const seenListValueBySlotId = new Map<string, Set<string>>();
-    // For mapping slots where items_per_key=0 (one value per key), deduplicate by key
-    // so the slot state (and thus the final answer LLM) only sees one entry per variety.
     const seenMappingKeyBySlotId = new Map<string, Set<string>>();
     for (const row of (items ?? []) as { slot_id: string; key: string | null; value_json: unknown }[]) {
       const slot = slotById.get(row.slot_id);
@@ -374,7 +370,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       list.push({ key: row.key, value: row.value_json });
       bySlot.set(row.slot_id, list);
     }
-    const names = new Map(slots.map((s) => [s.id, s.name]));
     const state: Record<string, { type: string; items: { key?: string | null; value: unknown }[] }> = {};
     for (const slot of slots) {
       const list = bySlot.get(slot.id) ?? [];
@@ -394,9 +389,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
   let validQuoteIdsForSave = new Set<string>();
   
   const evidenceChunksById = new Map<string, EvidenceChunk>();
-  const chunkPageIdMap = new Map<string, string>(); // chunkId → pageId
-  // Per-slot tracking of chunk IDs already passed to the extract model.
-  // Used to avoid re-sending the same chunk for the same slot across steps.
+  const chunkPageIdMap = new Map<string, string>();
   const seenChunksBySlotName = new Map<string, Set<string>>();
   let lastRouteResult: RouteResult | null = null;
   const extractionGapsAccumulated: string[] = [];
@@ -414,7 +407,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const currentSlotState = await getCurrentSlotItemsState();
     const currentSlotStateJson = Object.keys(currentSlotState).length > 0 ? JSON.stringify(currentSlotState, null, 2) : '{}';
 
-    // Compute fill note for correct completeness counts in the preamble sentence.
     const fillNoteLines: string[] = [];
     for (const slot of slots) {
       const stateEntry = currentSlotState[slot.name];
@@ -436,8 +428,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     }
     const fillNote = fillNoteLines.length > 0 ? fillNoteLines.join('\n') : undefined;
 
-    // Build the pre-assigned citation reference table by joining slot_items → claim_evidence → quotes.
-    // This works even on resumed runs because quotes are persisted in the DB.
     const slotIds = slots.map((s) => s.id);
     const { data: allSlotItemRows } = await supabase
       .from('slot_items')
@@ -448,7 +438,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
     let quoteRefTable: string | undefined;
     let validQuoteIds = new Set<string>();
-    // Maps the cite-key string (e.g. "отглеждане:СИНОРА") to a quote UUID for post-processing.
     const citeKeyToQuoteId = new Map<string, string>();
 
     if (slotItemIds.length > 0) {
@@ -458,7 +447,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         .in('slot_item_id', slotItemIds);
       const evidList = (evidRows ?? []) as { slot_item_id: string; quote_id: string }[];
 
-      // One quote per slot item: first quote found wins (primary chunk).
       const quoteIdBySlotItemId = new Map<string, string>();
       for (const ev of evidList) {
         if (!quoteIdBySlotItemId.has(ev.slot_item_id)) {
@@ -467,9 +455,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       }
       validQuoteIds = new Set(quoteIdBySlotItemId.values());
 
-      // Build citation table using [cite:slot_name:key] markers.
-      // Keys are truncated to 40 chars so the LLM can copy them reliably even for long values.
-      // The LLM may also use a shorter prefix ending in "..." — we match by prefix below.
       const CITE_KEY_MAX = 40;
       const truncateCiteKey = (s: string): string =>
         s.length <= CITE_KEY_MAX ? s : s.slice(0, CITE_KEY_MAX);
@@ -512,26 +497,19 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const result = await callFinalAnswer(openaiKey, userMsg, currentSlotStateJson, quoteRefTable, fillNote);
     if (result.debug) thoughtProcess.finalAnswerDebug = result.debug;
 
-    // Replace [cite:...] markers with [[quote:uuid]] for the downstream citation pipeline.
-    // The LLM may truncate the key further (e.g. "[cite:slot:СИНОР...]"); we match by the
-    // longest stored prefix that fits inside the tag.
     let finalAnswerText = result.final_answer;
     finalAnswerText = finalAnswerText.replace(/\[cite:([^\]]+)\]/g, (_match, inner: string) => {
-      // Scalar slots: [cite:slot_name] (no colon after slot name)
       if (citeKeyToQuoteId.has(inner)) {
         return `[[quote:${citeKeyToQuoteId.get(inner)}]]`;
       }
-      // Slot+key tags: inner = "slot_name:key_or_prefix"
       const colonIdx = inner.indexOf(':');
       if (colonIdx < 0) return '';
       const slotPart = inner.slice(0, colonIdx);
-      const keyPart = inner.slice(colonIdx + 1).replace(/\.{2,}$/, ''); // strip trailing ellipsis
-      // Exact match first.
+      const keyPart = inner.slice(colonIdx + 1).replace(/\.{2,}$/, '');
       const exactKey = `${slotPart}:${keyPart}`;
       if (citeKeyToQuoteId.has(exactKey)) {
         return `[[quote:${citeKeyToQuoteId.get(exactKey)}]]`;
       }
-      // Prefix match: find stored key that starts with the (possibly truncated) keyPart.
       for (const [storedKey, qId] of citeKeyToQuoteId) {
         if (storedKey.startsWith(`${slotPart}:`) && storedKey.slice(slotPart.length + 1).startsWith(keyPart)) {
           return `[[quote:${qId}]]`;
@@ -592,11 +570,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     type SubqWithSlot = { slotId: string; query: string; strategy?: 'broad' | 'targeted' };
     let subqueriesWithSlot: SubqWithSlot[] = [];
 
-    // Build the seen set before insertion so fresh runs can skip duplicates upfront.
-    // This also acts as a safety net for the resume path.
     const previousStepIds = stepList.filter((s) => s.iteration_number < iteration).map((s) => s.id);
     const seen = new Set<string>();
-    // Normalize to lowercase so "Информация за X" and "информация за X" are the same key.
     const seenKey = (slotId: string, query: string) => `${slotId}::${query.trim().toLowerCase()}`;
     if (previousStepIds.length > 0) {
       const { data: allPrevSubq } = await supabase
@@ -670,14 +645,12 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         getParentItems: (depSlotName) => currentSlotStateForExpand[depSlotName]?.items ?? [],
         maxMappingPerIter: MAX_MAPPING_SUBQUERIES_PER_ITER,
         maxPerIter: MAX_SUBQUERIES_PER_ITER,
-        // Exclude queries already run in prior steps so the cap-N selection picks from genuinely new queries.
         skipQuery: (slotId, query) => seen.has(seenKey(slotId, query)),
       });
       droppedSubqueriesPreparedThisIter = prepared.dropped;
       for (const q of prepared.runnable) {
         const sid = slotIdByName.get(q.slot);
         if (!sid) continue;
-        // Safety net: also check here in case skipQuery wasn't called for some path.
         if (seen.has(seenKey(sid, q.query))) continue;
         const slot = slots.find((s) => s.id === sid);
         const fill = fillBySlotId.get(sid);
@@ -709,18 +682,14 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         }));
     }
 
-    // `seen` and `seenKey` were computed above before insertion; no need to rebuild.
-    // Keep the post-block filter as a safety net (handles the resume path where queries
-    // were inserted by an older code version that lacked pre-insertion dedup).
     const seenDedupKey = (slotId: string, query: string) => `${slotId}\0${query}`;
-    let runnable = subqueriesWithSlot.filter(
+    const runnable = subqueriesWithSlot.filter(
       (sq) => sq.query && !seen.has(seenKey(sq.slotId, sq.query)),
     );
 
     if (runnable.length === 0) {
       const seenForRecovery = new Set<string>();
       for (const key of seen) {
-        // seen keys are "slotId::queryNormalized"; convert to "slotId\0queryNormalized" for recovery
         const sep = key.indexOf('::');
         if (sep >= 0) seenForRecovery.add(`${key.slice(0, sep)}\0${key.slice(sep + 2)}`);
       }
@@ -798,7 +767,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       seenChunksBySlotName,
     );
     const retrieveMs = Date.now() - retrieveStart;
-    // Record which chunks were just retrieved per slot so subsequent steps can skip them.
     for (const [chunkId, provList] of provenanceByChunkId.entries()) {
       for (const prov of provList) {
         const slotSet = seenChunksBySlotName.get(prov.slot) ?? new Set<string>();
@@ -808,10 +776,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     }
     log('retrieve-done', { chunksRetrieved: retrievedChunks.length, chunksPerSubquery, retrieveMs });
 
-    // Only pass this step's new chunks to extraction. Old chunks have already been processed
-    // in prior iterations and their claims are in the current slot state. Keeping all accumulated
-    // chunks blows up the extraction context with each step and causes edge-function timeouts.
-    // The AI can still see what has already been found via the slot state JSON.
     const stepChunks: EvidenceChunk[] = [];
     for (const chunk of retrievedChunks) {
       chunkPageIdMap.set(chunk.id, chunk.page_id);
@@ -827,8 +791,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       stepChunks.push(ec);
     }
 
-    // For list-slot anchors with known character positions, fetch adjacent chunks from
-    // the same page to improve coverage of listing pages where items span many chunks.
     const listSlotNames = new Set(slots.filter((s) => s.type === 'list').map((s) => s.name));
     const listAnchorIds: string[] = [];
     const listAnchorMeta = new Map<string, { pageId: string; pageUrl?: string; pageTitle?: string; slotName: string }>();
@@ -874,7 +836,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       }
     }
 
-    // Cap per-step evidence if needed (edge case: many queries with large results).
     const evidenceChunksForExtract: EvidenceChunk[] = stepChunks.length > EXTRACT_CHUNKS_CAP
       ? stepChunks
           .sort((a, b) => ((a as { distance?: number }).distance ?? 1) - ((b as { distance?: number }).distance ?? 1))
@@ -884,7 +845,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const currentSlotState = await getCurrentSlotItemsState();
     const currentSlotStateJson = Object.keys(currentSlotState).length > 0 ? JSON.stringify(currentSlotState, null, 2) : '';
 
-    // Track which slots had broad queries this step (for broad_query_completed_slot_fully later)
     const { data: stepSubqRows } = await supabase
       .from('reasoning_subqueries')
       .select('slot_id, query_text, strategy')
@@ -909,7 +869,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       ...new Set(slots.filter((s) => broadSlotIdsThisStep.has(s.id)).map((s) => s.name)),
     ];
 
-    // --- EXTRACT: claims only ---
     log('extract-call', { iteration, chunkCount: evidenceChunksForExtract.length });
     const snippetPreviews = evidenceChunksForExtract.map((q) => (q.snippet ?? '').slice(0, 120));
     log('extract-evidence-preview', { iteration, snippetPreviews });
@@ -971,9 +930,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     })();
     const beforeCounts = new Map(slotItemCountBySlotId);
 
-    // Create quotes before inserting claims so we can store quote_id in claim_evidence directly.
-    // Create one quote per unique chunk across all claims this step (deduped by chunkId).
-    // cited_snippet from the first claim that references a chunk is used for that chunk's quote.
     const quoteCreateStart = Date.now();
     const stepQuoteByChunkId = new Map<string, string>();
     for (const claim of extractResult.claims) {
@@ -988,7 +944,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         if (page.url) { try { domain = new URL(page.url).hostname; } catch { domain = ''; } }
         if (!domain) domain = sourceById.get(page.source_id)?.domain ?? '';
         const mappingKey = claim.key ?? undefined;
-        // Only pass cited_snippet for the primary chunk (index 0); additional chunks use raw content.
         const qId = await createExtractQuote(supabase, {
           chunkId,
           chunkContent,
@@ -1046,7 +1001,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       slot.current_item_count = currentCount;
 
       const fill = fillBySlotId.get(slot.id);
-      const effectiveTarget = getEffectiveTarget(slot, slotItemCountBySlotId, slotsById);
       const track = stagnationBySlotId.get(slot.id) ?? createSlotStagnationTrack();
       stagnationBySlotId.set(slot.id, track);
 
@@ -1097,8 +1051,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       log('stagnation-mark-finished', { iteration, currentSlotItemCount, prevSlotItemCount });
     }
 
-    // --- ROUTE: decide next action + subqueries, now that stagnation is updated ---
-    // Query guidance is built here so it reflects actual step results and updated stagnation counts.
     const queryGuidanceBlock = buildQueryGuidance(slots, fillBySlotId, stagnationBySlotId);
     const finishedQueryingSlotNames = slots.filter((s) => s.finished_querying).map((s) => s.name);
     const previousAttemptsBySlot = (() => {
@@ -1133,7 +1085,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const routeMs = Date.now() - routeStart;
     lastRouteResult = routeResult;
 
-    // Apply broad_query_completed_slot_fully signal from the router
     for (const slot of slotsWithAttempts) {
       if ((routeResult.broad_query_completed_slot_fully ?? []).includes(slot.name)) {
         const effectiveTarget = getEffectiveTarget(slot, slotItemCountBySlotId, slotsById);
@@ -1213,10 +1164,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       lastRouteResult = { ...routeResult, next_action: 'retrieve', subqueries: fallbackInput as ExtractSubquery[] };
     }
 
-    // High-completeness shortcut: stop retrieving when we already have enough evidence.
-    // Each additional step costs ~13s (one LLM extraction call) and risks hitting the
-    // 60s edge-function wall clock. Answering at ≥90% after ≥2 iterations avoids
-    // timeout while still delivering near-complete results.
     if (
       effectiveNextAction === 'retrieve' &&
       completeness != null &&
@@ -1240,7 +1187,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         const count = slotItemCountBySlotId.get(slot.id) ?? 0;
         if (slot.type === 'mapping' && fill) {
           const keysDone = fill.filledKeys.length;
-          const keysTotal = fill.filledKeys.length + fill.unfilledKeys.length;
           fillStatusBySlot[slot.name] =
             fill.atTarget && fill.unfilledKeys.length === 0
               ? 'filled'
@@ -1434,7 +1380,6 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
           const suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, retrieveSubqueries.map((s) => s.query));
           if (suggestedPage) log('expand-suggested-on-stagnation', { url: suggestedPage.url });
           if (lastCompleteness > 0) {
-            // Partial evidence found — produce a real answer and attach the page suggestion.
             const finalResult = await produceFinalAnswer();
             const { message: assistantRow, quotesOut } = await saveAssistantMessageWithQuotes({
               supabase,

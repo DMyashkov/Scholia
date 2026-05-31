@@ -1442,7 +1442,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
               ownerId,
               finalAnswer: finalResult.finalAnswer,
               validQuoteIds: finalResult.validQuoteIds,
-              lastExtractResult: lastRouteResult as Record<string, unknown> | null,
+              lastExtractResult: lastRouteResult as unknown as Record<string, unknown> | null,
               thoughtProcess,
               extractionGapsAccumulated,
               iteration,

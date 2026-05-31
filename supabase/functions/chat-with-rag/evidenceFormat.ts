@@ -133,7 +133,7 @@ export function formatEvidenceForPrompt(chunks: EvidenceChunk[]): string {
         const uniqueSlots = [...new Set(by.map((p) => p.slot))];
         lines.push(`retrieved_by: ${uniqueSlots.map((s) => `"${s}"`).join(', ')}`);
       }
-      lines.push(q.snippet);
+      lines.push(`"${q.snippet}"`);
       return lines.join('\n');
     })
     .join('\n\n---\n\n');

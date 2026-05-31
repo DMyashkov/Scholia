@@ -709,16 +709,6 @@ function PhaseContent({
                         })}
                       </div>
                     )}
-                    {step.queryGuidance && step.queryGuidance.trim().length > 0 && (
-                      <details className="rounded-lg border border-border/40 bg-muted/10 text-[11px]">
-                        <summary className="cursor-pointer px-3 py-2 text-muted-foreground font-medium">
-                          Query guidance (model context)
-                        </summary>
-                        <pre className="px-3 pb-2.5 whitespace-pre-wrap font-mono text-muted-foreground leading-snug">
-                          {step.queryGuidance}
-                        </pre>
-                      </details>
-                    )}
                     {step.extractDebug && (step.extractDebug.request || step.extractDebug.responseRaw) && (
                       <details className="rounded-lg border border-border/40 bg-muted/10 text-[11px]">
                         <summary className="cursor-pointer px-3 py-2 text-muted-foreground font-medium">
@@ -752,6 +742,16 @@ function PhaseContent({
                     )}
                     {step.slotSnapshot && Object.keys(step.slotSnapshot).length > 0 && (
                       <SlotSnapshotBlock snapshot={step.slotSnapshot} slots={tp.slots ?? []} claims={step.claims ?? []} />
+                    )}
+                    {step.queryGuidance && step.queryGuidance.trim().length > 0 && step.nextAction !== 'answer' && (
+                      <details className="rounded-lg border border-border/40 bg-muted/10 text-[11px]">
+                        <summary className="cursor-pointer px-3 py-2 text-muted-foreground font-medium">
+                          Query guidance for next step
+                        </summary>
+                        <pre className="px-3 pb-2.5 whitespace-pre-wrap font-mono text-muted-foreground leading-snug">
+                          {step.queryGuidance}
+                        </pre>
+                      </details>
                     )}
                     {step.nextAction && (
                       <div className="pt-1.5">

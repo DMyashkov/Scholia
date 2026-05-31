@@ -570,13 +570,22 @@ export const useChatDatabase = () => {
     }
 
     if (ragFailed && hasSources) {
-      const errText = ragError
-        ? `The assistant couldn't finish: **${ragError}**`
-        : "The assistant couldn't finish. Make sure the crawl has finished and chunks are indexed, then try again.";
+      const rawError = ragError ?? '';
+      const lower = rawError.toLowerCase();
+      let friendlyError: string;
+      if (lower.includes('signal') && lower.includes('aborted')) {
+        friendlyError = 'The request timed out — the assistant took too long to respond. Try again, or simplify your question.';
+      } else if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('network error')) {
+        friendlyError = 'Network error — could not reach the server. Check your connection and try again.';
+      } else if (rawError) {
+        friendlyError = rawError;
+      } else {
+        friendlyError = "The assistant couldn't finish. Make sure the crawl has finished and chunks are indexed, then try again.";
+      }
       await createMessageMutation.mutateAsync({
         conversation_id: conversationId,
         role: 'assistant',
-        content: errText,
+        content: `__error__:${friendlyError}`,
         was_multi_step: false,
       });
       queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });

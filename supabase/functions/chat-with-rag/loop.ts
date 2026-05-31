@@ -3,7 +3,7 @@ import type { EvidenceChunk, ExtractClaim, ExtractResult, ExtractSubquery, Route
 import { formatEvidenceForPrompt, trimEvidenceChunksForPrompt } from './evidenceFormat.ts';
 import type { SuggestedPage } from './expand.ts';
 import { OPENAI_CHAT_MODEL, fetchWithTimeout } from './config.ts';
-import { EXTRACT_SYSTEM, ROUTE_SYSTEM } from './prompts.ts';
+import { EXTRACT_SYSTEM, buildRouteSystemPrompt } from './prompts.ts';
 import { normalizeSlotEntityString, slotValueDedupKey, splitListEntityValues } from './utils.ts';
 import type { CorpusLanguage } from './language.ts';
 import { formatCorpusLanguageLine } from './language.ts';
@@ -211,7 +211,7 @@ Output JSON: next_action, why; add subqueries if retrieve; suggested_page_index 
     body: JSON.stringify({
       model: OPENAI_CHAT_MODEL,
       messages: [
-        { role: 'system', content: ROUTE_SYSTEM },
+        { role: 'system', content: buildRouteSystemPrompt(suggestExpandWhenNoEvidence || (topSuggestedPages != null && topSuggestedPages.length > 0)) },
         { role: 'user', content: userContent },
       ],
       response_format: { type: 'json_object' },

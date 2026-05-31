@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { User, Sparkles, Layers, Plus, Loader2, Pencil, CornerDownLeft, X } from 'lucide-react';
+import { User, Sparkles, Layers, Plus, Loader2, Pencil, CornerDownLeft, X, AlertCircle } from 'lucide-react';
 import { Message, SuggestedPage } from '@/types/chat';
 import { Quote } from '@/types/source';
 import { cn } from '@/lib/utils';
@@ -39,6 +39,8 @@ export const ChatMessage = ({
   isEditingDisabled,
 }: ChatMessageProps) => {
   const isUser = message.role === 'user';
+  const isErrorMessage = !isUser && message.content.startsWith('__error__:');
+  const errorText = isErrorMessage ? message.content.slice('__error__:'.length) : null;
   const quotes = message.quotes || [];
   const tp = message.thoughtProcess;
   const isComplex = (tp?.iterationCount ?? 0) > 2 || message.wasMultiStep;
@@ -212,6 +214,11 @@ export const ChatMessage = ({
                 <span className="text-xs text-muted-foreground ml-1">⌘↵ to send · Esc to cancel</span>
               </div>
             </div>
+          ) : isErrorMessage ? (
+            <div className="flex items-start gap-2 text-sm text-destructive rounded-md border border-destructive/40 bg-destructive/8 px-3 py-2.5 mt-1">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{errorText}</span>
+            </div>
           ) : (
             <div className="prose prose-invert prose-sm max-w-none">
               <MessageContent
@@ -226,17 +233,17 @@ export const ChatMessage = ({
           )}
 
           {}
-          {!isUser && !isStreaming && quotes.length > 0 && onQuoteClick && (
+          {!isUser && !isStreaming && !isErrorMessage && quotes.length > 0 && onQuoteClick && (
             <QuoteCardsList quotes={quotes} onQuoteClick={onQuoteClick} />
           )}
 
           {}
-          {!isUser && !isStreaming && quotes.length > 0 && onQuoteClick && (
+          {!isUser && !isStreaming && !isErrorMessage && quotes.length > 0 && onQuoteClick && (
             <CitedPages quotes={quotes} onQuoteClick={onQuoteClick} />
           )}
 
           {}
-          {!isUser && !isStreaming && !followUp && tp && (tp.slots?.length || tp.steps?.length) ? (
+          {!isUser && !isStreaming && !isErrorMessage && !followUp && tp && (tp.slots?.length || tp.steps?.length) ? (
             <ThoughtProcessView thoughtProcess={tp} suggestedPage={message.suggestedPage} isLive={false} defaultOpen={false} />
           ) : null}
 

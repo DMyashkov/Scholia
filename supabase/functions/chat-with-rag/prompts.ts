@@ -81,23 +81,32 @@ Mapping: the "key" field is REQUIRED for every mapping claim — omitting it cau
 Mapping attribution: for every mapping claim, the chunk you cite must explicitly name the key entity **in the same sentence or table row** as the value you are extracting. If the value and the key entity appear in different sentences or rows describing different entities, do not combine them into a single claim.
 - Language: Write any text in the corpus language.`;
 
-export const ROUTE_SYSTEM = `You decide the next retrieval action given the current slot state and query guidance.
+export function buildRouteSystemPrompt(allowExpandCorpus: boolean): string {
+  const nextActionValues = allowExpandCorpus
+    ? `"retrieve" | "expand_corpus" | "clarify" | "answer"`
+    : `"retrieve" | "clarify" | "answer"`;
+  const expandCorpusField = allowExpandCorpus
+    ? `\n  "suggested_page_index": "integer 1–N (only when next_action is expand_corpus and candidates listed)",`
+    : '';
+  const expandCorpusRule = allowExpandCorpus
+    ? `\n- "expand_corpus": only when a candidate page is listed AND evidence genuinely lacks the facts AND no guided retrieve queries remain.`
+    : '';
+
+  return `You decide the next retrieval action given the current slot state and query guidance.
 
 Output JSON only:
 {
-  "next_action": "retrieve" | "expand_corpus" | "clarify" | "answer",
+  "next_action": ${nextActionValues},
   "why": "short reason",
   "subqueries": "array of { slot, query } OR for mapping with satisfied parent { slot, query: \\"__map__\\", map_description, key_connector } — see mapping matrix rules",
-  "questions": "array of clarifying question strings (only when next_action is clarify)",
-  "suggested_page_index": "integer 1–N (only when next_action is expand_corpus and candidates listed)",
+  "questions": "array of clarifying question strings (only when next_action is clarify)",${expandCorpusField}
   "broad_query_completed_slot_fully": "array of BROAD slot names for which no more retrieval is needed"
 }
 
 Rules:
 - "answer": all slots that matter are filled / at target, or retrieval has clearly stagnated. Backend runs the final-answer step; do not write answer text here.
-- "retrieve": more queries are needed per the query guidance. Always include subqueries when choosing retrieve.
-- "expand_corpus": only when a candidate page is listed AND evidence genuinely lacks the facts AND no guided retrieve queries remain.
-- "clarify": only when the question itself is ambiguous, not when evidence is missing.
+- "retrieve": more queries are needed per the query guidance. Always include subqueries when choosing retrieve.${expandCorpusRule}
+- "clarify": only when the question itself is ambiguous, not when evidence is missing.`;
 
 Subquery rules:
 - Omit subqueries for slots that have finished querying (listed below) or scalar slots already filled.
@@ -111,3 +120,6 @@ ${MAPPING_MATRIX_QUERY_RULES}
 
 - broad_query_completed_slot_fully: only for independent list slots that need no more discovery (not for dependent slots while parent may still grow).
 - Language: Write subqueries, map_description, and key_connector in the corpus language.`;
+}
+
+export const ROUTE_SYSTEM = buildRouteSystemPrompt(true);

@@ -1194,6 +1194,11 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       }
     }
 
+    if (effectiveNextAction === 'expand_corpus' && !dynamicMode) {
+      effectiveNextAction = 'answer';
+      log('expand_corpus-override-no-dynamic-source', { why: routeResult.why });
+    }
+
     if (effectiveNextAction === 'expand_corpus' && anySlotHasGuidedWork(slots, fillBySlotId, stagnationBySlotId)) {
       effectiveNextAction = 'retrieve';
       log('expand_corpus-override-guided-work', { why: routeResult.why });
@@ -1427,12 +1432,30 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
           await emit({ thoughtProcess: { ...thoughtProcess } });
           const suggestedPage = await doExpandCorpus(supabase, openaiKey, sourceIds, userMsg, retrieveSubqueries.map((s) => s.query));
           if (suggestedPage) log('expand-suggested-on-stagnation', { url: suggestedPage.url });
-          const stagnationModelMessage = (lastRouteResult?.why ?? '').trim();
-          const stubContent = stagnationModelMessage.length > 0
-            ? stagnationModelMessage
-            : suggestedPage
-              ? "I didn't find any evidence in the current sources for that. Consider adding the suggested page below, then ask again."
-              : "I didn't find any evidence in the current sources for that. You could try adding more sources or rephrasing.";
+          if (lastCompleteness > 0) {
+            // Partial evidence found — produce a real answer and attach the page suggestion.
+            const finalResult = await produceFinalAnswer();
+            const { message: assistantRow, quotesOut } = await saveAssistantMessageWithQuotes({
+              supabase,
+              conversationId: convId,
+              ownerId,
+              finalAnswer: finalResult.finalAnswer,
+              validQuoteIds: finalResult.validQuoteIds,
+              lastExtractResult: lastRouteResult as Record<string, unknown> | null,
+              thoughtProcess,
+              extractionGapsAccumulated,
+              iteration,
+              appendToMessageId: appendId,
+              scrapedPageDisplay: scrapedDisplay,
+              pageById,
+              sourceById,
+            });
+            await emit({ done: true, message: assistantRow, quotes: quotesOut, suggestedPage: suggestedPage ?? undefined, thoughtProcess });
+            return;
+          }
+          const stubContent = suggestedPage
+            ? "I didn't find any evidence in the current sources for that. Consider adding the suggested page below, then ask again."
+            : "I didn't find any evidence in the current sources for that. You could try adding more sources or rephrasing.";
           const { data: stubMsg, error: stubErr } = await insertRetrieveHardStopMessage(
             supabase,
             convId,

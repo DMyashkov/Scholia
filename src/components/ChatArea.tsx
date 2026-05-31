@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { Conversation, ThoughtProcess } from '@/types/chat';
-import { PanelLeft } from 'lucide-react';
+import { PanelLeft, AlertCircle } from 'lucide-react';
 import { Quote, Source, CrawlDepth } from '@/types/source';
 import { ChatMessage, TypingIndicator } from './ChatMessage';
 import { ThoughtProcessView } from './ThoughtProcessView';
@@ -39,6 +39,17 @@ interface ChatAreaProps {
   onAddSuggestedPage?: (url: string, sourceId: string, questionToReask?: string, messageId?: string, scrapedPageDisplay?: string) => Promise<void>;
   addingPageSourceId?: string | null;
   onEditMessage?: (messageId: string, newContent: string) => Promise<void>;
+}
+
+function formatRagError(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes('signal') && lower.includes('aborted')) {
+    return 'The request timed out — the assistant took too long to respond. Try again, or simplify your question.';
+  }
+  if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('network error')) {
+    return 'Network error — could not reach the server. Check your connection and try again.';
+  }
+  return raw;
 }
 
 export const ChatArea = ({
@@ -268,9 +279,10 @@ export const ChatArea = ({
                 <div className="px-4 pt-2 pb-4">
                   <div className="max-w-3xl mx-auto w-full space-y-2">
                     {ragStreamError ? (
-                      <p className="text-sm text-destructive rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
-                        {ragStreamError}
-                      </p>
+                      <div className="flex items-start gap-2 text-sm text-destructive rounded-md border border-destructive/40 bg-destructive/8 px-3 py-2.5">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>{formatRagError(ragStreamError)}</span>
+                      </div>
                     ) : null}
                     <ThoughtProcessView
                       thoughtProcess={liveThoughtProcess}

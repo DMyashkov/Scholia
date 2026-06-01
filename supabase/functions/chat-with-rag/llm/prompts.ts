@@ -3,7 +3,7 @@ export const SLOT_RETRIEVAL_RULES = `Retrieval strategy for slots with finished_
 1. Dependency empty: exploratory BROAD only (no per-key / __map__).
 2. Dependency has items and changed since the previous step: one exploratory BROAD + TARGETED for unfilled gaps.
 3. Dependency has items and unchanged since the previous step: TARGETED only for unfilled gaps (no new broad).
-4. No dependency: BROAD while below target; add TARGETED when partially filled if useful.
+4. No dependency (list): 1 BROAD + 4–5 TARGETED facet queries when partially filled (BROAD+TARGETED mode); BROAD only when empty.
 5. finished_querying=true: no subqueries.
 6. Do not repeat broad queries listed under "prior broad".
 7. Per-key / __map__: only keys in dependency state; skip filled and stagnated keys; follow mapping matrix phrasing when using __map__.
@@ -27,7 +27,7 @@ Output JSON only with this shape:
 
   - description: one short sentence for what this slot represents (helps extraction and UI)
 
-  - target_item_count: for list slots only. Desired number of distinct items to find when the user specifies a count; set to 0 if not specified. Omit or 0 for scalar/mapping.
+  - target_item_count: for list slots only. MINIMUM number of distinct items to find — not a cap. Keep retrieving and extracting beyond this number if more items exist. Set to 0 if the user does not specify a count.
 
   - items_per_key: (mapping only) Values per key when the user asks for multiple values per key; use 0 for key-coverage mode (at least one value per dependency key).
     Backend: if items_per_key >= 1, target = dependency target_item_count × items_per_key; if items_per_key === 0, target = dependency target_item_count (key coverage).
@@ -69,11 +69,12 @@ Output JSON only:
 Rules:
 - Only fill slots listed under "Slots to fill". Do not treat other topics as required even if they appear on the same website pages.
 - Claims: each claim must cite at least one chunkId. Use the integer index shown in parentheses next to each evidence block, e.g. "chunkIds": [3]. Do NOT copy UUIDs; the backend maps indices to chunk IDs.
+- The "slot" field is REQUIRED in every claim — even when only one slot is being filled. Never omit it.
 - Slot values must reflect what the cited chunks directly state. You may rephrase for conciseness (e.g. extract a number or name from prose) but must not infer, generalize, or add context that is not explicitly present in the cited chunk text.
 - Do NOT invent facts, conclusions, or "standard practice" generalizations that are not supported by the cited chunks for that slot/key.
 - Do NOT cite a chunk unless it actually discusses the entity (mapping key) or fact you are claiming. For mapping attribution: the chunk's page URL/title is the primary signal — a chunk whose URL contains the entity name is authoritative even if retrieved_by lists other slots. The retrieved_by list is retrieval metadata, not attribution ground truth. When a chunk was retrieved_by many queries, treat it as a broad match and rely on the page URL/title + snippet content to decide which key it supports.
 Scalar: one value, no key. List: one claim per distinct NEW item only—never one comma-separated claim bundling many entities; emit separate list claims per entity. Never re-emit a value already in Current slot state — this applies to all slot types: if a list item, mapping key→value, or scalar value is already present in Current slot state, do NOT emit a claim for it again. Emitting duplicates wastes budget and is not allowed.
-List target_item_count is a minimum, not a cap: if the list already has at least that many items and this step's chunks name another distinct entity not in state, still emit a list claim for it. Do not skip new list items just because count >= target.
+IMPORTANT — target_item_count is a MINIMUM, not a cap: always emit a list claim for any distinct new entity found in the chunks, even if the list already meets or exceeds the target. Never skip a new item just because count >= target.
 Cross-slot discovery (REQUIRED): if a chunk in this step names an entity that belongs to a list slot but is NOT yet in that slot's current state, you MUST emit a list claim for it in addition to any mapping/scalar claim. Skipping this causes the mapping claim to be silently dropped as "key not in dependency state". Use one canonical spelling per name (trim; normalize spaces around parentheses).
 List proper-noun filtering: when a chunk line names a proper-noun entity followed by a generic category label (e.g. "АГАТА, семена картофи"), emit only the proper-noun entity (АГАТА); never emit the generic category label as a separate list item.
 Mapping: the "key" field is REQUIRED for every mapping claim — omitting it causes the claim to be silently dropped. The key must exactly match (same spelling) an entity already listed in the dependency slot's current state. Do not invent keys not in the state. Do not embed the key name inside "value"; put it in "key".
@@ -103,7 +104,7 @@ Output JSON only:
 }
 
 Rules:
-- "answer": all slots that matter are filled / at target, or retrieval has clearly stagnated. Backend runs the final-answer step; do not write answer text here.
+- "answer": all slots that matter are filled / at or beyond their minimum target, or retrieval has clearly stagnated. Backend runs the final-answer step; do not write answer text here.
 - "retrieve": more queries are needed per the query guidance. Always include subqueries when choosing retrieve.${expandCorpusRule}
 - "clarify": only when the question itself is ambiguous, not when evidence is missing.
 

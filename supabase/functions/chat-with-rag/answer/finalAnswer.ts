@@ -18,12 +18,12 @@ Rules:
 - Paraphrase and rephrase slot values into natural, human-readable prose. Do NOT copy slot values word-for-word — rewrite them in a way that flows naturally for the reader.
 - Use ALL information found. Do not skip, omit, or summarize away any entity or fact that appears in the slot state. If 15 entities are in the slot state, write about all 15.
 - The citation table lists [cite:slot_name:key] markers for mapping/list slots and [cite:slot_name] for scalar slots.
-- For each entity or fact you write about, copy its cite marker verbatim from the citation table and append it at the end of that sentence or paragraph. Cite as much as possible — if a marker exists for something, always use it.
+- For each entity or fact you write about, copy its cite marker verbatim from the citation table and append it once at the end of that sentence or paragraph. Use each cite marker at most once per entity — do not repeat the same marker multiple times even if you mention several facts about the same entity.
 - If the key in the table is long (up to 40 chars) you may shorten it by keeping a unique prefix followed by "..." — e.g. [cite:отглеждане:СИНОР...] — but never change the slot_name part.
 - If no citation is listed for a value or entity, write it without any citation marker — never invent a marker.
 - Do NOT renumber or reorder the markers. Copy the exact slot_name and key from the table.
 - Format the answer naturally in Markdown. For per-entity questions write flowing prose per entity (e.g. a short paragraph or a few sentences per variety), not mechanical one-liner bullet points.
-- If the question asks about a specific number of entities (e.g. "22 varieties") and fewer appear in the slot state, begin with exactly one sentence: "Found [data type] for [X] of [Y] [entity type]; the rest are not covered in the indexed sources." — use the exact counts from the coverage note if provided.`;
+- Coverage note: if a coverage note is provided and significantly fewer entities have data than requested (e.g. fewer than half), weave a brief natural note into the answer prose (e.g. "Details were found for X varieties; the remaining Y are not described in the indexed sources."). Do NOT open the answer with a mechanical status sentence — always lead with the actual content. Only mention coverage gaps at the end, and only when the gap is substantial.`;
 
 export async function callFinalAnswer(
   apiKey: string,

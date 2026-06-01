@@ -546,7 +546,11 @@ export function buildQueryGuidance(
         );
       }
       if (slot.type === 'list') {
-        lines.push('  targeted(list)=facets (4–5). Do not repeat broad with filler tokens; use materially different facets.');
+        lines.push(
+          mode === 'broad_and_targeted'
+            ? '  Emit exactly 1 BROAD query + 4–5 TARGETED facet queries. Facets are narrow sub-angles of the slot topic (e.g. for a list of products: brand-specific, category-specific, use-case-specific phrases). Each facet must be materially different from the broad query and from each other.'
+            : '  targeted(list)=4–5 facet queries. Each facet is a narrow sub-angle of the slot topic. Do not repeat broad with filler tokens; use materially different facets.',
+        );
       }
       if (slot.type !== 'mapping' && fill.parentSatisfied && fill.parentPreview.length > 0) {
         lines.push(

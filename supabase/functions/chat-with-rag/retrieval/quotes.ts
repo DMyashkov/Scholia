@@ -23,15 +23,6 @@ export async function createExtractQuote(
   const { chunkId, chunkContent, pageId, page, domain, stepId, ownerId, mappingKey, citedSnippet } = params;
   if (!chunkContent.trim()) return null;
 
-  if (mappingKey) {
-    const keyNorm = normalizeForQuoteMatch(mappingKey);
-    const contentNorm = normalizeForQuoteMatch(chunkContent);
-    const titleNorm = normalizeForQuoteMatch(page.title ?? '');
-    const pathNorm = normalizeForQuoteMatch(page.path ?? '');
-    if (!contentNorm.includes(keyNorm) && !titleNorm.includes(keyNorm) && !pathNorm.includes(keyNorm)) {
-      return null;
-    }
-  }
 
   let snippet = chunkContent;
   if (citedSnippet) {

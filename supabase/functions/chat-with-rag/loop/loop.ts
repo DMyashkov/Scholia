@@ -93,12 +93,13 @@ export async function callExtract(
     .map((s) => {
       const targetStr = s.target_item_count != null && (s.type === 'list' || s.type === 'mapping') ? ` target=${s.target_item_count}` : '';
       const perKeyStr = s.type === 'mapping' && s.items_per_key != null ? ` items_per_key=${s.items_per_key}` : '';
-      return `- ${s.name} (${s.type})${targetStr}${perKeyStr}${s.description ? `: ${s.description}` : ''}`;
+      return `- slot="${s.name}" (${s.type})${targetStr}${perKeyStr}${s.description ? `: ${s.description}` : ''}`;
     })
     .join('\n');
 
-  const finishedBlock = finishedQueryingSlotNames.length > 0
-    ? `${finishedQueryingSlotNames.join(', ')}. Skip extraction for these.`
+  const allFinishedNames = [...fullyDoneSlotNames, ...finishedQueryingSlotNames];
+  const finishedBlock = allFinishedNames.length > 0
+    ? `${allFinishedNames.join(', ')}. No more targeted retrieval needed, but still emit claims if the evidence clearly names new values for them.`
     : 'none';
 
   const langLine = corpusLanguage ? `${formatCorpusLanguageLine(corpusLanguage)}\n` : '';
@@ -171,8 +172,6 @@ export async function callRoute(
       .map((p, i) => `${i + 1}. ${p.url}\n   title: ${p.title}\n   snippet: ${(p.snippet || '').slice(0, 200)}${(p.snippet?.length ?? 0) > 200 ? '...' : ''}`)
       .join('\n');
     dynamicBlock = `\n\nCandidate suggested pages (expand_corpus only if clearly relevant and evidence genuinely lacks info):\n${candidateList}\n\nIf expand_corpus, set suggested_page_index (1–${topSuggestedPages.length}) or omit for first. Prefer retrieve when more retrieval could fill slots.`;
-  } else if (suggestExpandWhenNoEvidence) {
-    dynamicBlock = '\nDynamic sources available: use next_action "expand_corpus" when evidence is genuinely missing.';
   }
 
   let broadBlock = '';
@@ -211,7 +210,7 @@ Output JSON: next_action, why; add subqueries if retrieve; suggested_page_index 
     body: JSON.stringify({
       model: OPENAI_CHAT_MODEL,
       messages: [
-        { role: 'system', content: buildRouteSystemPrompt(suggestExpandWhenNoEvidence || (topSuggestedPages != null && topSuggestedPages.length > 0)) },
+        { role: 'system', content: buildRouteSystemPrompt(topSuggestedPages != null && topSuggestedPages.length > 0) },
         { role: 'user', content: userContent },
       ],
       response_format: { type: 'json_object' },
@@ -372,14 +371,37 @@ export async function insertClaims(
       const inAllowed = keyDedup != null && allowed?.has(keyDedup);
       const inBatch = keyDedup != null && batchParent?.has(keyDedup);
       if (allowed?.size && keyDedup != null && !inAllowed && !inBatch) {
-        droppedClaims.push({
-          slot: claim.slot,
-          ...(key != null ? { key } : {}),
-          ...(typeof claim.value === 'string' ? { value: claim.value } : {}),
-          ...(claim.chunkIds?.length ? { chunkIds: claim.chunkIds } : {}),
-          reason: 'Mapping key not in dependency slot state.',
-        });
-        return;
+        // Auto-add the missing key to the dependency slot rather than dropping the claim.
+        const parentSlotId = slot.depends_on_slot_id!;
+        const { data: existingParentList } = await supabase
+          .from('slot_items')
+          .select('id')
+          .eq('slot_id', parentSlotId)
+          .is('key', null)
+          .eq('value_json', key)
+          .limit(1);
+        if (!existingParentList?.length) {
+          const { data: insertedParent } = await supabase
+            .from('slot_items')
+            .insert({ slot_id: parentSlotId, owner_id: ownerId, key: null, value_json: key, confidence: claim.confidence ?? 1, complete: false })
+            .select('id')
+            .single();
+          if (insertedParent?.id) inserted.push(insertedParent.id);
+        }
+        // Update the in-memory allowed set so subsequent claims in this batch also see the new key.
+        let allowedSet = allowedKeysByMappingSlotId?.get(slotId);
+        if (!allowedSet) {
+          allowedSet = new Set();
+          allowedKeysByMappingSlotId?.set(slotId, allowedSet);
+        }
+        allowedSet.add(keyDedup);
+        // Also track in batchParentKeysBySlotId for depend_on_slot_id consumers.
+        let batchSet = batchParentKeysBySlotId.get(parentSlotId);
+        if (!batchSet) {
+          batchSet = new Set();
+          batchParentKeysBySlotId.set(parentSlotId, batchSet);
+        }
+        batchSet.add(keyDedup);
       }
     }
 
@@ -453,9 +475,40 @@ export async function insertClaims(
     }
   };
 
+  // Precompute type-based fallbacks for claims that arrive without a slot field.
+  // A claim with a key → must be mapping; without a key → must be list.
+  // Only use the fallback when there is exactly one slot of that type.
+  const mappingSlotNames = slots.filter((s) => s.type === 'mapping').map((s) => {
+    for (const [name, id] of slotIdByName) if (id === s.id) return name;
+    return null;
+  }).filter((n): n is string => n != null);
+  const listSlotNames = slots.filter((s) => s.type === 'list').map((s) => {
+    for (const [name, id] of slotIdByName) if (id === s.id) return name;
+    return null;
+  }).filter((n): n is string => n != null);
+  const singleMappingFallback = mappingSlotNames.length === 1 ? mappingSlotNames[0] : null;
+  const singleListFallback = listSlotNames.length === 1 ? listSlotNames[0] : null;
+
   for (const claim of ordered) {
+    // If slot field is missing, infer from claim type: key present → mapping, key absent → list.
+    if (!claim.slot) {
+      if (claim.key != null && singleMappingFallback) {
+        claim.slot = singleMappingFallback;
+      } else if (claim.key == null && singleListFallback) {
+        claim.slot = singleListFallback;
+      }
+    }
     const slotId = slotIdByName.get(claim.slot);
-    if (!slotId) continue;
+    if (!slotId) {
+      droppedClaims.push({
+        slot: claim.slot ?? '(missing)',
+        ...(claim.key != null ? { key: claim.key } : {}),
+        ...(typeof claim.value === 'string' ? { value: claim.value } : {}),
+        ...(claim.chunkIds?.length ? { chunkIds: claim.chunkIds } : {}),
+        reason: 'Slot name missing or not found in plan.',
+      });
+      continue;
+    }
     const slot = slotById.get(slotId);
     if (!slot) continue;
 

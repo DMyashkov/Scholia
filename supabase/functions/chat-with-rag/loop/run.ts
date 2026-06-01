@@ -438,7 +438,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
     let quoteRefTable: string | undefined;
     let validQuoteIds = new Set<string>();
-    const citeKeyToQuoteId = new Map<string, string>();
+    const citeKeyToQuoteIds = new Map<string, string[]>();
 
     if (slotItemIds.length > 0) {
       const { data: evidRows } = await supabase
@@ -447,13 +447,14 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         .in('slot_item_id', slotItemIds);
       const evidList = (evidRows ?? []) as { slot_item_id: string; quote_id: string }[];
 
-      const quoteIdBySlotItemId = new Map<string, string>();
+      // Collect ALL quote IDs per slot_item (not just the first).
+      const quoteIdsBySlotItemId = new Map<string, string[]>();
       for (const ev of evidList) {
-        if (!quoteIdBySlotItemId.has(ev.slot_item_id)) {
-          quoteIdBySlotItemId.set(ev.slot_item_id, ev.quote_id);
-        }
+        let arr = quoteIdsBySlotItemId.get(ev.slot_item_id);
+        if (!arr) { arr = []; quoteIdsBySlotItemId.set(ev.slot_item_id, arr); }
+        if (!arr.includes(ev.quote_id)) arr.push(ev.quote_id);
       }
-      validQuoteIds = new Set(quoteIdBySlotItemId.values());
+      validQuoteIds = new Set(evidList.map((e) => e.quote_id));
 
       const CITE_KEY_MAX = 40;
       const truncateCiteKey = (s: string): string =>
@@ -469,24 +470,30 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         if (items.length === 0) continue;
         if (slot.type === 'mapping') {
           refLines.push(`Slot "${slot.name}":`);
+          const seenKeys = new Set<string>();
           for (const item of items) {
             if (!item.key) continue;
-            const row = slotItemRows.find((r) => r.slot_id === slot.id && r.key === item.key);
-            const qId = row ? quoteIdBySlotItemId.get(row.id) : undefined;
-            const tag = makeCiteTag(slot.name, String(item.key));
-            if (qId) {
-              citeKeyToQuoteId.set(`${slot.name}:${truncateCiteKey(String(item.key))}`, qId);
-              refLines.push(`  ${item.key} → ${tag}`);
+            const keyStr = String(item.key);
+            if (seenKeys.has(keyStr)) continue;
+            seenKeys.add(keyStr);
+            // Collect all quotes across every slot_item for this key.
+            const allRowsForKey = slotItemRows.filter((r) => r.slot_id === slot.id && r.key === keyStr);
+            const allQIds = allRowsForKey.flatMap((r) => quoteIdsBySlotItemId.get(r.id) ?? []);
+            const uniqueQIds = [...new Set(allQIds)];
+            const tag = makeCiteTag(slot.name, keyStr);
+            if (uniqueQIds.length > 0) {
+              citeKeyToQuoteIds.set(`${slot.name}:${truncateCiteKey(keyStr)}`, uniqueQIds);
+              refLines.push(`  ${keyStr} → ${tag}`);
             } else {
-              refLines.push(`  ${item.key} → (no citation)`);
+              refLines.push(`  ${keyStr} → (no citation)`);
             }
           }
         } else if (slot.type === 'scalar') {
           const row = slotItemRows.find((r) => r.slot_id === slot.id);
-          const qId = row ? quoteIdBySlotItemId.get(row.id) : undefined;
-          if (qId) {
+          const qIds = row ? (quoteIdsBySlotItemId.get(row.id) ?? []) : [];
+          if (qIds.length > 0) {
             const tag = `[cite:${slot.name}]`;
-            citeKeyToQuoteId.set(slot.name, qId);
+            citeKeyToQuoteIds.set(slot.name, qIds);
             refLines.push(`Slot "${slot.name}": ${slotValueStr(items[0]?.value)} → ${tag}`);
           }
         }
@@ -497,26 +504,29 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     const result = await callFinalAnswer(openaiKey, userMsg, currentSlotStateJson, quoteRefTable, fillNote);
     if (result.debug) thoughtProcess.finalAnswerDebug = result.debug;
 
-    let finalAnswerText = result.final_answer;
-    finalAnswerText = finalAnswerText.replace(/\[cite:([^\]]+)\]/g, (_match, inner: string) => {
-      if (citeKeyToQuoteId.has(inner)) {
-        return `[[quote:${citeKeyToQuoteId.get(inner)}]]`;
-      }
+    const resolveInner = (inner: string): string => {
+      const tryKey = (k: string): string | null => {
+        const ids = citeKeyToQuoteIds.get(k);
+        return ids?.length ? ids.map((id) => `[[quote:${id}]]`).join('') : null;
+      };
+      const direct = tryKey(inner);
+      if (direct) return direct;
       const colonIdx = inner.indexOf(':');
       if (colonIdx < 0) return '';
       const slotPart = inner.slice(0, colonIdx);
       const keyPart = inner.slice(colonIdx + 1).replace(/\.{2,}$/, '');
-      const exactKey = `${slotPart}:${keyPart}`;
-      if (citeKeyToQuoteId.has(exactKey)) {
-        return `[[quote:${citeKeyToQuoteId.get(exactKey)}]]`;
-      }
-      for (const [storedKey, qId] of citeKeyToQuoteId) {
+      const exact = tryKey(`${slotPart}:${keyPart}`);
+      if (exact) return exact;
+      for (const [storedKey] of citeKeyToQuoteIds) {
         if (storedKey.startsWith(`${slotPart}:`) && storedKey.slice(slotPart.length + 1).startsWith(keyPart)) {
-          return `[[quote:${qId}]]`;
+          return tryKey(storedKey) ?? '';
         }
       }
       return '';
-    });
+    };
+
+    let finalAnswerText = result.final_answer;
+    finalAnswerText = finalAnswerText.replace(/\[cite:([^\]]+)\]/g, (_match, inner: string) => resolveInner(inner));
 
     return {
       finalAnswer: finalAnswerText,
@@ -885,7 +895,14 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         ...((s.type === 'list' || s.type === 'mapping') && target > 0 ? { target_item_count: target } : {}),
       };
     });
-    const finishedQueryingSlotNamesForExtract = slots.filter((s) => s.finished_querying).map((s) => s.name);
+    // Split finished slots: list slots already at/above target → fully suppress extraction;
+    // all others → allow opportunistic claims only.
+    const finishedAtTargetSlotNames = slots
+      .filter((s) => s.finished_querying && s.type === 'list' && (s.target_item_count ?? 0) > 0 && (s.current_item_count ?? 0) >= (s.target_item_count ?? 0))
+      .map((s) => s.name);
+    const finishedQueryingSlotNamesForExtract = slots
+      .filter((s) => s.finished_querying && !finishedAtTargetSlotNames.includes(s.name))
+      .map((s) => s.name);
     const extractResult = await callExtract(
       openaiKey,
       slotRowsForExtract,
@@ -893,7 +910,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       currentSlotStateJson,
       userMsg,
       inferCorpusLanguage(buildCorpusContextBlock({ pages, sourceById, leadChunks: leadList })),
-      finishedQueryingSlotNamesForExtract,
+      [...finishedAtTargetSlotNames, ...finishedQueryingSlotNamesForExtract],
     );
     const extractMs = Date.now() - extractStart;
     if (extractResult.extractionGaps?.length) {

@@ -6,6 +6,15 @@ import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import { supabase } from './db';
 import { fetchTargetPageLead } from './targetLead';
 
+/** Returns true for chunks that are indexing noise — CSS blobs, nav fragments, etc. */
+function isNoiseChunk(content: string): boolean {
+  const t = content.trim();
+  const cssBraceRatio = (t.match(/[{}]/g)?.length ?? 0) / Math.max(t.length, 1);
+  if (cssBraceRatio > 0.03) return true;
+  if (/^\s*\.[\w-]+[\s,{]/.test(t)) return true;
+  return false;
+}
+
 
 const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
 const CHUNK_MAX_CHARS = 600;
@@ -134,6 +143,7 @@ async function buildChunkSpecsFromPages(
     const prefix = buildPagePrefix(page.title ?? undefined, page.url ?? undefined);
     const pageChunks = await textSplitter.splitText(text);
     for (const content of pageChunks) {
+      if (isNoiseChunk(content)) continue;
       chunkSpecs.push({
         page_id: page.id,
         content,
@@ -158,7 +168,7 @@ async function buildChunkSpecsFromSinglePage(
   if (!text) return [];
   const prefix = buildPagePrefix(title, url);
   const pageChunks = await textSplitter.splitText(text);
-  return pageChunks.map((c) => ({
+  return pageChunks.filter((c) => !isNoiseChunk(c)).map((c) => ({
     page_id: pageId,
     content: c,
     ...(prefix ? { embed_text: prefix + c } : {}),

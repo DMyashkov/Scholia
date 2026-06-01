@@ -18,8 +18,8 @@ Rules:
 - Paraphrase and rephrase slot values into natural, human-readable prose. Do NOT copy slot values word-for-word — rewrite them in a way that flows naturally for the reader.
 - Use ALL information found. Do not skip, omit, or summarize away any entity or fact that appears in the slot state. If 15 entities are in the slot state, write about all 15.
 - For mapping slots: iterate over the mapping's own keys — not over any list slot's items. The mapping may contain keys absent from the list slot; write about all of them. A key that has a non-empty value in the mapping is filled — never state or imply that information is missing for it. Only treat a key as missing if it appears in the slot state's "missing_keys" array.
-- The citation table lists [cite:slot_name:key] markers for mapping slots and [cite:slot_name] for scalar slots. List slot items do not have individual citation markers — never invent a cite marker for a list item.
-- For each entity or fact you write about, copy its cite marker verbatim from the citation table and append it once at the end of that sentence or paragraph. Use each cite marker at most once per entity — do not repeat the same marker multiple times even if you mention several facts about the same entity.
+- The citation table lists [cite:slot_name:key] markers for mapping and list slots, and [cite:slot_name] for scalar slots. Use the marker from the table for each item — never invent one.
+- For each fact you write, place its cite marker immediately after the sentence or clause it supports — never group citations at the end of a paragraph. Use each cite marker at most once.
 - If the key in the table is long (up to 40 chars) you may shorten it by keeping a unique prefix followed by "..." — e.g. [cite:отглеждане:СИНОР...] — but never change the slot_name part.
 - If no citation is listed for a value or entity, write it without any citation marker — never invent a marker.
 - Do NOT renumber or reorder the markers. Copy the exact slot_name and key from the table.

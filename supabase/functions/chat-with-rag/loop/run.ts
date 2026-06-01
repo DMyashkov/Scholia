@@ -473,11 +473,12 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       }
       validQuoteIds = new Set(evidList.map((e) => e.quote_id));
 
-      const CITE_KEY_MAX = 40;
-      const truncateCiteKey = (s: string): string =>
-        s.length <= CITE_KEY_MAX ? s : s.slice(0, CITE_KEY_MAX);
-      const makeCiteTag = (slotName: string, key: string): string =>
-        `[cite:${slotName}:${truncateCiteKey(key)}]`;
+      const CITE_KEY_MAX_MAPPING = 40;
+      const CITE_KEY_MAX_LIST = 100;
+      const truncateCiteKey = (s: string, max = CITE_KEY_MAX_MAPPING): string =>
+        s.length <= max ? s : s.slice(0, max);
+      const makeCiteTag = (slotName: string, key: string, max = CITE_KEY_MAX_MAPPING): string =>
+        `[cite:${slotName}:${truncateCiteKey(key, max)}]`;
 
       const refLines: string[] = [];
       const slotValueStr = (v: unknown): string =>
@@ -503,6 +504,25 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
               refLines.push(`  ${keyStr} → ${tag}`);
             } else {
               refLines.push(`  ${keyStr} → (no citation)`);
+            }
+          }
+        } else if (slot.type === 'list') {
+          refLines.push(`Slot "${slot.name}":`);
+          let labelIndex = 0;
+          const toLabel = (n: number): string => {
+            let s = '';
+            do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+            return s;
+          };
+          for (const item of items) {
+            const valStr = slotValueStr(item.value);
+            const row = slotItemRows.find((r) => r.slot_id === slot.id && slotValueStr(r.value_json) === valStr);
+            const qIds = row ? (quoteIdsBySlotItemId.get(row.id) ?? []) : [];
+            if (qIds.length > 0) {
+              const citeKey = valStr.length > 20 ? toLabel(labelIndex++) : valStr;
+              const tag = `[cite:${slot.name}:${citeKey}]`;
+              citeKeyToQuoteIds.set(`${slot.name}:${citeKey}`, qIds);
+              refLines.push(`  ${valStr.length > 20 ? `${citeKey}: ${valStr}` : valStr} → ${tag}`);
             }
           }
         } else if (slot.type === 'scalar') {
@@ -544,6 +564,15 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
     let finalAnswerText = result.final_answer;
     finalAnswerText = finalAnswerText.replace(/\[cite:([^\]]+)\]/g, (_match, inner: string) => resolveInner(inner));
+    // Collapse consecutive duplicate [[quote:ID]] markers (e.g. [[quote:5]][[quote:5]] → [[quote:5]])
+    finalAnswerText = finalAnswerText.replace(/(\[\[quote:[^\]]+\]\])\s*(?:\[\[quote:[^\]]+\]\]\s*)*/g, (match) => {
+      const seen = new Set<string>();
+      const unique: string[] = [];
+      for (const m of match.matchAll(/\[\[quote:[^\]]+\]\]/g)) {
+        if (!seen.has(m[0])) { seen.add(m[0]); unique.push(m[0]); }
+      }
+      return unique.join('');
+    });
 
     return {
       finalAnswer: finalAnswerText,
@@ -681,7 +710,10 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
         if (seen.has(seenKey(sid, q.query))) continue;
         const slot = slots.find((s) => s.id === sid);
         const fill = fillBySlotId.get(sid);
-        const strategy = inferSubqueryStrategy(slot, fill, q.query);
+        const strategy: 'broad' | 'targeted' | null =
+          (q as { strategy?: string }).strategy === 'broad' ? 'broad'
+          : (q as { strategy?: string }).strategy === 'targeted' ? 'targeted'
+          : inferSubqueryStrategy(slot, fill, q.query);
         await supabase.from('reasoning_subqueries').insert({
           reasoning_step_id: currentStepId,
           slot_id: sid,
@@ -970,7 +1002,10 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     for (const claim of extractResult.claims) {
       for (let ci = 0; ci < claim.chunkIds.length; ci++) {
         const chunkId = claim.chunkIds[ci];
-        if (!chunkId || stepQuoteByChunkId.has(chunkId)) continue;
+        if (!chunkId) continue;
+        const citedSnippet = ci === 0 ? claim.cited_snippet : undefined;
+        const mapKey = citedSnippet ? `${chunkId}\0${citedSnippet}` : chunkId;
+        if (stepQuoteByChunkId.has(mapKey)) continue;
         const chunkContent = evidenceChunksById.get(chunkId)?.snippet ?? '';
         const pageId = chunkPageIdMap.get(chunkId);
         const page = pageId ? pageById.get(pageId) : undefined;
@@ -988,9 +1023,9 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
           stepId: currentStepId,
           ownerId,
           mappingKey,
-          citedSnippet: ci === 0 ? claim.cited_snippet : undefined,
+          citedSnippet,
         });
-        if (qId) stepQuoteByChunkId.set(chunkId, qId);
+        if (qId) stepQuoteByChunkId.set(mapKey, qId);
       }
     }
     const quoteCreateMs = Date.now() - quoteCreateStart;

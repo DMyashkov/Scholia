@@ -410,8 +410,11 @@ export async function insertClaims(
     const batchKey = `${slotId}\0${key ?? ''}\0${dedupKey}`;
     const batchHit = batchDedup.get(batchKey);
     if (batchHit) {
-      for (const chunkId of claim.chunkIds) {
-        const quoteId = chunkIdToQuoteId?.get(chunkId);
+      for (let ci = 0; ci < claim.chunkIds.length; ci++) {
+        const chunkId = claim.chunkIds[ci];
+        const snippet = ci === 0 ? claim.cited_snippet : undefined;
+        const quoteId = (snippet && chunkIdToQuoteId?.get(`${chunkId}\0${snippet}`))
+          || chunkIdToQuoteId?.get(chunkId);
         if (!quoteId) continue;
         await supabase.from('claim_evidence').upsert(
           { slot_item_id: batchHit, quote_id: quoteId, owner_id: ownerId },
@@ -466,8 +469,11 @@ export async function insertClaims(
       }
     }
 
-    for (const chunkId of claim.chunkIds) {
-      const quoteId = chunkIdToQuoteId?.get(chunkId);
+    for (let ci = 0; ci < claim.chunkIds.length; ci++) {
+      const chunkId = claim.chunkIds[ci];
+      const snippet = ci === 0 ? claim.cited_snippet : undefined;
+      const quoteId = (snippet && chunkIdToQuoteId?.get(`${chunkId}\0${snippet}`))
+        || chunkIdToQuoteId?.get(chunkId);
       if (!quoteId) continue;
       await supabase.from('claim_evidence').upsert(
         { slot_item_id: slotItemId, quote_id: quoteId, owner_id: ownerId },

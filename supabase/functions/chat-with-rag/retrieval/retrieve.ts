@@ -12,6 +12,17 @@ export interface RetrieveResult {
   provenanceByChunkId: Map<string, EvidenceChunkProvenance[]>;
 }
 
+/** Returns true for chunks that are indexing noise — CSS blobs, nav fragments, etc. */
+function isNoiseChunk(content: string): boolean {
+  const t = content.trim();
+  // CSS selector blobs: high density of { } and . or # without prose words
+  const cssBraceRatio = (t.match(/[{}]/g)?.length ?? 0) / Math.max(t.length, 1);
+  if (cssBraceRatio > 0.03) return true;
+  // Starts with a CSS selector pattern
+  if (/^\s*\.[\w-]+[\s,{]/.test(t)) return true;
+  return false;
+}
+
 function distanceOf(c: ChunkRow): number {
   return (c as { distance?: number }).distance ?? 1;
 }
@@ -42,7 +53,8 @@ export async function doRetrieve(
       match_page_ids: pageIds,
       match_count: fetchCount,
     });
-    const rawList = (matchedChunks || []) as ChunkRow[];
+    const rawList = ((matchedChunks || []) as ChunkRow[])
+      .filter((c) => !isNoiseChunk(c.content));
     const list = excluded && excluded.size > 0
       ? rawList.filter((c) => !excluded.has(c.id)).slice(0, perQuery)
       : rawList;

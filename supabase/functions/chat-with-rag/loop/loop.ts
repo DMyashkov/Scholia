@@ -86,6 +86,7 @@ export async function callExtract(
   userMessage: string,
   corpusLanguage?: CorpusLanguage,
   finishedQueryingSlotNames: string[] = [],
+  fullyDoneSlotNames: string[] = [],
 ): Promise<ExtractResult> {
   const trimmedChunks = trimEvidenceChunksForPrompt(evidenceChunks);
   const quoteBlock = formatEvidenceForPrompt(trimmedChunks);

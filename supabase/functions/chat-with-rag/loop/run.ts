@@ -405,7 +405,24 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
 
   const produceFinalAnswer = async (): Promise<{ finalAnswer: string; validQuoteIds: Set<string> }> => {
     const currentSlotState = await getCurrentSlotItemsState();
-    const currentSlotStateJson = Object.keys(currentSlotState).length > 0 ? JSON.stringify(currentSlotState, null, 2) : '{}';
+
+    // Annotate each mapping slot with which parent keys have no data yet,
+    // so the final-answer LLM reads an explicit fact instead of inferring gaps from structure.
+    const annotatedSlotState = JSON.parse(JSON.stringify(currentSlotState)) as typeof currentSlotState;
+    for (const slot of slots) {
+      if (slot.type === 'mapping' && slot.depends_on_slot_id) {
+        const parentSlot = slotsById.get(slot.depends_on_slot_id);
+        if (parentSlot) {
+          const parentItems = currentSlotState[parentSlot.name]?.items ?? [];
+          const mappingItems = currentSlotState[slot.name]?.items ?? [];
+          const filledKeys = new Set(mappingItems.map((i) => i.key).filter(Boolean));
+          const missingKeys = parentItems.map((i) => String(i.value)).filter((k) => !filledKeys.has(k));
+          const entry = annotatedSlotState[slot.name];
+          if (entry) (entry as Record<string, unknown>).missing_keys = missingKeys;
+        }
+      }
+    }
+    const currentSlotStateJson = Object.keys(annotatedSlotState).length > 0 ? JSON.stringify(annotatedSlotState, null, 2) : '{}';
 
     const fillNoteLines: string[] = [];
     for (const slot of slots) {
@@ -910,7 +927,8 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
       currentSlotStateJson,
       userMsg,
       inferCorpusLanguage(buildCorpusContextBlock({ pages, sourceById, leadChunks: leadList })),
-      [...finishedAtTargetSlotNames, ...finishedQueryingSlotNamesForExtract],
+      finishedQueryingSlotNamesForExtract,
+      finishedAtTargetSlotNames,
     );
     const extractMs = Date.now() - extractStart;
     if (extractResult.extractionGaps?.length) {
@@ -1081,7 +1099,7 @@ export async function runRag(req: Request, emit: Emit, log: Log): Promise<void> 
     })();
     const allSlotsFinished = slots.every((s) => s.finished_querying);
     const topSuggestedPages: SuggestedPage[] | null =
-      dynamicMode && sourceIds.length > 0 && !allSlotsFinished
+      dynamicMode && sourceIds.length > 0
         ? await getTopSuggestedPages(supabase, openaiKey, sourceIds, userMsg, retrieveSubqueries.map((s) => s.query), suggestedPageCandidates)
         : null;
     log('route-call', { iteration, topSuggestedCount: topSuggestedPages?.length ?? 0, allSlotsFinished });

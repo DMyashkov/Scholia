@@ -1,15 +1,16 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
-worker/node_modules
-cli/node_modules
-cli/dist
-/.pnp
+node_modules/
+.pnp
 .pnp.js
 
-# cli session cache (stored in ~/.scholia-cli but added for safety)
-.scholia-cli/
+# build outputs
+dist/
+worker/dist/
+
+# supabase local tooling state
+supabase/.temp/
 
 # testing
 /coverage
@@ -24,18 +25,25 @@ cli/dist
 # misc
 .DS_Store
 *.pem
+Untitled
 
 # debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # local env files
 .env
-.env*.local
-.env.local
+.env.*
+!.env.example
+!worker/.env.example
 worker/.env
 worker/.env.local
+
+# editor / AI local settings
+.claude/
 
 # vercel
 .vercel
@@ -46,4 +54,3 @@ next-env.d.ts
 
 # md files
 *.md
-
